@@ -61,7 +61,10 @@
 //! of the Hi-Fi Cable) to remove it, without a window, then has Windows scan
 //! for hardware changes, which takes the removed output out of Windows'
 //! lists without a restart (issue #86). The scan needs administrator rights
-//! too, so both run in this one elevated step: one UAC prompt.
+//! too, so both run in this one elevated step: one UAC prompt. The Hi-Fi
+//! Cable's setup, run as ASIO Bridge's setup runs it, leaves the Hi-Fi
+//! Cable's own entry in Windows' installed apps: taken out here once the
+//! driver has gone (issue #86).
 //!
 //! A GUI-subsystem program, so that no console window flashes up when the
 //! core or the uninstaller starts it (issue #86: SW_HIDE alone does not
@@ -334,7 +337,60 @@ fn remove_cable(setup: &std::path::Path, hifi: bool) -> (u8, Value) {
     let started = std::time::Instant::now();
     let rescanned = driver::rescan_devices(true);
     tracing::info!("{name}: scan for hardware changes {rescanned} in {} ms", started.elapsed().as_millis());
-    (exit::OK, json!({ "ok": true, "command": "remove-cable", "setup_exit": setup_exit, "rescanned": rescanned }))
+    let entry_removed = hifi && remove_hifi_entry();
+    (
+        exit::OK,
+        json!({
+            "ok": true,
+            "command": "remove-cable",
+            "setup_exit": setup_exit,
+            "rescanned": rescanned,
+            "entry_removed": entry_removed,
+        }),
+    )
+}
+
+/// The Hi-Fi Cable's own entry in Windows' installed apps (the core's
+/// HIFI_KEY, the uninstaller's HiFiUninstKey)
+const HIFI_UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\VB:VBHIFI {87459874-1236-4469}";
+/// How long the Hi-Fi Cable's driver file may take to go after its setup
+const HIFI_DRIVER_GONE_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The Hi-Fi Cable's driver file is in place (as the core's check)
+fn hifi_driver_installed() -> bool {
+    let dir = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| r"C:\Windows".into());
+    std::fs::read_dir(dir.join(r"System32\drivers")).is_ok_and(|list| {
+        list.flatten().any(|f| {
+            let n = f.file_name().to_string_lossy().to_lowercase();
+            n.starts_with("vbaudio_hfvaio") && n.ends_with(".sys")
+        })
+    })
+}
+
+/// Takes the Hi-Fi Cable's entry out of Windows' installed apps once its
+/// driver has gone: the setup leaves it when run without a window, and the
+/// entry then only opens that setup again (issue #86). Not while the driver
+/// is still there (Windows restarts first), and never ASIO Bridge's entry:
+/// that program stays installed. Whether an entry was removed.
+fn remove_hifi_entry() -> bool {
+    let started = std::time::Instant::now();
+    while hifi_driver_installed() {
+        if started.elapsed() >= HIFI_DRIVER_GONE_WAIT {
+            tracing::info!("Hi-Fi Cable: its driver is still there, its entry stays");
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    match win_sys::autostart::hklm_delete_key(HIFI_UNINSTALL_KEY) {
+        Ok(removed) => {
+            tracing::info!("Hi-Fi Cable: entry in the installed apps removed {removed}");
+            removed
+        }
+        Err(e) => {
+            tracing::warn!("Hi-Fi Cable: entry in the installed apps not removed: HRESULT 0x{:08x}", e.code().0 as u32);
+            false
+        }
+    }
 }
 
 /// "XX:XX:XX:XX:XX:XX" (or with dashes) in display order

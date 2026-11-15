@@ -259,6 +259,19 @@ pub fn hklm_string(subkey: &str, value_name: &str, view_32: bool) -> Option<Stri
     Some(utf16_string(&data))
 }
 
+/// Deletes a key without subkeys under HKEY_LOCAL_MACHINE, in the 64-bit
+/// registry view (administrator rights); Ok(false) if it did not exist
+pub fn hklm_delete_key(subkey: &str) -> windows::core::Result<bool> {
+    use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, KEY_WOW64_64KEY, RegDeleteKeyExW};
+    // SAFETY: a predefined key and a NUL-terminated subkey name.
+    let err = unsafe { RegDeleteKeyExW(HKEY_LOCAL_MACHINE, &HSTRING::from(subkey), KEY_WOW64_64KEY.0, None) };
+    if err == ERROR_FILE_NOT_FOUND {
+        return Ok(false);
+    }
+    check(err)?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

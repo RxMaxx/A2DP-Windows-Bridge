@@ -58,6 +58,11 @@ const RESTART_COALESCE: std::time::Duration = std::time::Duration::from_millis(2
 /// the stream is established, so the level often comes just after it
 const BATTERY_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
 
+/// How long after a cable came its set-up is done again at each look at
+/// Windows' outputs: its setup may make it the default output only after it
+/// is listed
+const CABLES_SETTLE: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// Whether a battery report shows the low-battery balloon: once when the
 /// level is below `low` (the setting; also the first report of a
 /// connection), again only after it was back [`BATTERY_REARM_MARGIN`]
@@ -141,6 +146,9 @@ pub struct CoreState {
     /// The headset microphone's cable as Windows' default input while its
     /// device is connected ([`default_input_want`])
     default_input: DefaultInput,
+    /// When a cable last came and which were there before it
+    /// ([`CoreState::watch_cables`], for [`CABLES_SETTLE`])
+    cables_came: Mutex<Option<(Instant, profiles::CableSet)>>,
     tray: Box<dyn Fn(TrayView) + Send + Sync>,
     quit: Box<dyn Fn() + Send + Sync>,
     balloon: Box<dyn Fn(BalloonRequest) + Send + Sync>,
@@ -1806,6 +1814,7 @@ impl CoreState {
             quiet_connect: AtomicBool::new(false),
             restarting: AtomicBool::new(false),
             default_input: new_default_input(),
+            cables_came: Mutex::new(None),
             tray,
             quit,
             balloon,
@@ -2290,11 +2299,14 @@ impl CoreState {
 
     /// The virtual cables taken into use (issue #86): once one came after it
     /// was missing, the profiles set up by the rules alone are set up again
-    /// with what Windows has now, the Hi-Fi Cable for the sound (less delay)
-    /// and VB-CABLE for the microphone ([`profiles::reassign_cables`]; what
-    /// the user chose stays); and a microphone on without an output gets
-    /// one whenever a cable it can use is there
-    /// ([`profiles::fill_mic_outputs`]).
+    /// with what Windows has now, as the first-run setup would: both cables,
+    /// the Hi-Fi Cable for the sound (less delay) and VB-CABLE for the
+    /// microphone; one, the microphone ([`profiles::reassign_cables`]; what
+    /// the user chose stays), and again at each look for [`CABLES_SETTLE`]
+    /// after (a cable's setup makes it Windows' default output, which
+    /// changes what the rules give, a moment after it is listed); and a
+    /// microphone on without an output gets one whenever a cable it can use
+    /// is there ([`profiles::fill_mic_outputs`]).
     pub fn watch_cables(&self, devices: &[audio_capture::DeviceInfo]) {
         // One look at a time: two would both save the profiles
         static WATCHING: Mutex<()> = Mutex::new(());
@@ -2309,9 +2321,24 @@ impl CoreState {
         let mut list = profiles::load(&self.config_dir());
         let (_, snap) = self.snapshot();
         let default_output = default_output_for_cables(devices, &snap.stream, &list);
-        let set_up = if came { profiles::reassign_cables(&mut list, was, &now, default_output) } else { 0 };
+        // What was there before the cable came, while it settles
+        let since = {
+            let mut settling = self.cables_came.lock().unwrap_or_else(|e| e.into_inner());
+            if came {
+                *settling = Some((Instant::now(), was));
+            }
+            *settling = settling.filter(|(at, _)| at.elapsed() < CABLES_SETTLE);
+            settling.map(|(_, was)| was)
+        };
+        // Windows' first real output, the sound beside a cable that is the default
+        let real =
+            devices.iter().find(|d| !d.is_virtual).map(|d| profiles::Cable { id: d.id.clone(), name: d.name.clone() });
+        let set_up = match since {
+            Some(was) => profiles::reassign_cables(&mut list, was, &now, default_output, real.as_ref()),
+            None => 0,
+        };
         let filled = profiles::fill_mic_outputs(&mut list, &now, default_output);
-        if came || filled > 0 {
+        if came || set_up + filled > 0 {
             tracing::info!(
                 "cables: VB-CABLE {}, Hi-Fi Cable {}; {set_up} profile(s) set up again, {filled} microphone(s) given one",
                 if vb_missing { "missing" } else { "there" },
@@ -4689,6 +4716,47 @@ mod tests {
             ("{vb}", "CABLE Input (VB-Audio Virtual Cable)")
         );
         assert!(!state.service.settings().awaiting_vb_cable);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_cable_installed_after_the_setup_takes_the_microphone() {
+        // issue #86: set up with a monitor's HDMI alone; VB-CABLE installed
+        // later became the sound, with no microphone
+        let dir = std::env::temp_dir().join(format!("bluecaster-state-cable-later-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let options = bluecaster_core::ServiceOptions {
+            config_dir: dir.clone(),
+            hci_tcp: None,
+            capture: bt_host::HciCapture::new(),
+            afh: None,
+            usb: Default::default(),
+        };
+        let state =
+            CoreState::new(Arc::new(Service::new(options, tx)), Box::new(|_| {}), Box::new(|| {}), Box::new(|_| {}));
+        let hdmi = |default| render_device("{hdmi}", "LG TV (NVIDIA High Definition Audio)", default);
+        let vb = |default| render_device("{vb}", "CABLE Input (VB-Audio Virtual Cable)", default);
+        state.watch_cables(&[hdmi(true)]);
+        let added = CoreProfile {
+            name: "Buds".into(),
+            device_address: "C0:11:22:33:44:55".into(),
+            headset_mic: "auto".into(),
+            ..CoreProfile::default()
+        };
+        profiles::save(&dir, &[added]).unwrap();
+        let set_up = || {
+            let p = profiles::load(&dir).remove(0);
+            (p.capture_mode, p.audio_device_id, p.mic_device_id)
+        };
+        // Listed, not yet the default output: the microphone, the sound as it was
+        state.watch_cables(&[hdmi(true), vb(false)]);
+        assert_eq!(set_up(), ("loopback".into(), String::new(), "{vb}".into()));
+        // Its setup made it the default a moment later: System Loopback
+        // would record the microphone, so the sound is the HDMI output
+        state.watch_cables(&[hdmi(false), vb(true)]);
+        assert_eq!(set_up(), ("output".into(), "{hdmi}".into(), "{vb}".into()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

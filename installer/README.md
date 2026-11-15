@@ -170,7 +170,9 @@ earlier versions first, and the app takes their settings over at its first start
     - Hi-Fi Cable (installed when `%WINDIR%\System32\drivers\vbaudio_hfvaio*.sys` exists): its own
       setup (`VB:VBHIFI` entry, else `C:\Program Files\VB\CABLEHiFi\VBCABLE_Setup_x64.exe`, else
       the copy in ASIO Bridge's folder) with `-h -u -H`, the arguments ASIO Bridge's setup removes
-      it with. Removed = the driver file has gone. ASIO Bridge itself and its Apps entry stay.
+      it with. Removed = the driver file has gone. That setup leaves the Hi-Fi Cable's own Apps
+      entry (`VB:VBHIFI`), which then only opens the setup again: the helper deletes it once the
+      driver file has gone. ASIO Bridge itself and its Apps entry stay.
 
     When one is still there afterwards, the uninstaller says so (close the apps using it, remove it
     in Settings > Apps, restart). After a removal it offers to restart Windows, as VB-Audio's setup
