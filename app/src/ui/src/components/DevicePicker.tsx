@@ -103,10 +103,17 @@ async function classicProfile(
   if (own) return own.name;
   const profileName = freeName(app, defaultProfileName(saved, address, false, t("codec.auto")));
   // Captured by System Loopback, as every new device (issue #86), unless
-  // the setup gives it a cable; its microphone on Auto where it gives one
+  // the setup gives it a cable or an output; its microphone on Auto where
+  // it gives one
   const sound = audio?.sound;
   const mic = audio?.mic;
-  const capture = sound ? { capture_mode: "virtual", audio_device_id: sound.id, audio_device_name: sound.name } : {};
+  const capture = sound
+    ? {
+        capture_mode: sound.is_virtual ? "virtual" : "output",
+        audio_device_id: sound.id,
+        audio_device_name: sound.name,
+      }
+    : {};
   const headset = mic ? { headset_mic: "auto", mic_device_id: mic.id, mic_device_name: mic.name } : {};
   const profile = normalizeProfile({
     ...newProfile(),

@@ -838,6 +838,25 @@ describe("setup device step", () => {
       mic_device_name: "CABLE Input (VB-Audio Virtual Cable)",
     });
   });
+
+  it("VB-Cable as Windows' default output: the sound from the speakers as an Output Device, VB-Cable the microphone (issue #86)", async () => {
+    const { calls, core, mock: m } = start("#/setup");
+    m.defaultOutput = "{0.0.0.00000000}.{cable}";
+    await screen.findByRole("heading", { level: 1, name: "Setup Wizard" });
+    for (let i = 0; i < 2; i++) {
+      const next = screen.getByRole("button", { name: "Next" });
+      await waitFor(() => expect(next).not.toBeDisabled());
+      fireEvent.click(next);
+    }
+    await connectNew(calls, "Galaxy Buds2 Pro");
+    expect(core.state.snap!.profiles.find((p) => p.name === "Galaxy Buds2 Pro | Auto")).toMatchObject({
+      capture_mode: "output",
+      audio_device_name: "Speakers (Realtek(R) Audio)",
+      auto_switch_device: true,
+      headset_mic: "auto",
+      mic_device_name: "CABLE Input (VB-Audio Virtual Cable)",
+    });
+  });
 });
 
 describe("setup adapter step", () => {
