@@ -819,7 +819,8 @@ impl CableSet {
         }
     }
 
-    /// The sound's cable: the Hi-Fi Cable, else VB-CABLE
+    /// The cable the sound was given when it went to one: the Hi-Fi Cable,
+    /// else VB-CABLE
     fn sound(&self) -> Option<CableKind> {
         [CableKind::Hifi, CableKind::Vb].into_iter().find(|&k| self.has(k))
     }
@@ -914,15 +915,54 @@ pub fn fill_mic_outputs(list: &mut [Profile], cables: &Cables, default_output_id
     changed
 }
 
-/// Sets the cables up again once one came (issue #86: VB-CABLE installed
-/// after the Hi-Fi Cable left the sound on VB-CABLE and the microphone on
-/// the Hi-Fi Cable): the sound on the Hi-Fi Cable, else VB-CABLE, the
-/// microphone on VB-CABLE, else the Hi-Fi Cable. Only what these rules gave
-/// with the cables there before (`was`) moves: such a source, System
-/// Loopback (every device starts there) with such a microphone, a
-/// microphone they gave, none, or one that loops into the source. Anything
-/// else is the user's choice and stays. How many profiles changed.
-pub fn reassign_cables(list: &mut [Profile], was: CableSet, now: &Cables, default_output_id: &str) -> usize {
+/// The sound the rules give with the cables there
+enum Sound<'a> {
+    Loopback,
+    /// A real output, captured as an Output Device
+    Output(&'a Cable),
+    /// A cable, captured as a virtual device
+    Virtual(&'a Cable),
+}
+
+impl Cables {
+    /// The sound as the first-run setup gives it (the UI's setupAudio; issue
+    /// #86). Both cables: the Hi-Fi Cable. One: System Loopback, the cable
+    /// being the microphone's; when that cable is Windows' default output
+    /// (System Loopback would record what the microphone plays),
+    /// `real_output` instead, or the cable itself where there is none.
+    fn sound_for<'a>(&'a self, default_output_id: &str, real_output: Option<&'a Cable>) -> Option<Sound<'a>> {
+        let one = match (&self.vb, &self.hifi) {
+            (Some(_), Some(hifi)) => return Some(Sound::Virtual(hifi)),
+            (None, None) => return None,
+            (Some(c), None) | (None, Some(c)) => c,
+        };
+        Some(if one.id != default_output_id {
+            Sound::Loopback
+        } else if let Some(real) = real_output {
+            Sound::Output(real)
+        } else {
+            Sound::Virtual(one)
+        })
+    }
+}
+
+/// Sets the cables up again once one came, as the first-run setup would
+/// with them (issue #86: a cable installed later became the sound, with no
+/// microphone): both cables, the sound on the Hi-Fi Cable and the microphone
+/// on VB-CABLE; one, the microphone on it and the sound left to System
+/// Loopback ([`Cables::sound_for`]; `real_output`: Windows' first output
+/// that is no virtual device). Only what these rules gave with the cables
+/// there before (`was`) moves: such a source, System Loopback (every device
+/// starts there) with such a microphone, a microphone they gave, none, or
+/// one that loops into the source. Anything else is the user's choice and
+/// stays. How many profiles changed.
+pub fn reassign_cables(
+    list: &mut [Profile],
+    was: CableSet,
+    now: &Cables,
+    default_output_id: &str,
+    real_output: Option<&Cable>,
+) -> usize {
     let mut changed = 0;
     for p in list.iter_mut() {
         let before = p.clone();
@@ -939,19 +979,42 @@ pub fn reassign_cables(list: &mut [Profile], was: CableSet, now: &Cables, defaul
         let mic_kind = now.kind(&p.mic_device_id, &p.mic_device_name);
         let mic_auto =
             p.mic_device_id.is_empty() || loops(p) || (mic_kind.is_some() && mic_kind == was.mic(source_kind));
+        let no_mic = p.mic_device_id.is_empty() && HeadsetMic::parse(&p.headset_mic) != HeadsetMic::Off;
         let sound_auto = match p.capture_mode.as_str() {
             "loopback" => mic_auto,
-            "virtual" => source_kind.is_some() && source_kind == was.sound(),
+            // Also the first cable as an earlier version set it up: the
+            // sound on it, no microphone
+            "virtual" => {
+                source_kind.is_some() && (source_kind == was.sound() || (was == CableSet::default() && no_mic))
+            }
+            // The real output given beside the one cable, the default then
+            "output" => {
+                was.vb != was.hifi
+                    && mic_kind.is_some()
+                    && mic_kind == was.mic(None)
+                    && real_output.is_some_and(|r| r.id == p.audio_device_id)
+            }
             _ => false,
         };
-        if sound_auto
-            && let Some(c) = now.set().sound().and_then(|k| now.get(k))
-            && (p.capture_mode != "virtual" || p.audio_device_id != c.id)
-        {
-            p.capture_mode = "virtual".into();
-            p.audio_device_id = c.id.clone();
-            p.audio_device_name = c.name.clone();
-            p.auto_switch_device = true;
+        match now.sound_for(default_output_id, real_output).filter(|_| sound_auto) {
+            Some(Sound::Loopback) if p.capture_mode != "loopback" => {
+                p.capture_mode = "loopback".into();
+                p.audio_device_id.clear();
+                p.audio_device_name.clear();
+            }
+            Some(Sound::Output(c)) if p.capture_mode != "output" || p.audio_device_id != c.id => {
+                p.capture_mode = "output".into();
+                p.audio_device_id = c.id.clone();
+                p.audio_device_name = c.name.clone();
+                p.auto_switch_device = true;
+            }
+            Some(Sound::Virtual(c)) if p.capture_mode != "virtual" || p.audio_device_id != c.id => {
+                p.capture_mode = "virtual".into();
+                p.audio_device_id = c.id.clone();
+                p.audio_device_name = c.name.clone();
+                p.auto_switch_device = true;
+            }
+            _ => {}
         }
         // A microphone the new source loops into moves too
         if (mic_auto || loops(p))
@@ -1075,7 +1138,7 @@ mod tests {
             cabled("{voicemeeter}", ""),       // a source chosen by hand stays
             cabled("{hifi}", "{voicemeeter}"), // a microphone chosen by hand stays
         ];
-        assert_eq!(reassign_cables(&mut list, was, &cables(true, true), "{vb}"), 3);
+        assert_eq!(reassign_cables(&mut list, was, &cables(true, true), "{vb}", None), 3);
         assert_eq!(
             setup(&list),
             [("{hifi}", "{vb}"), ("{hifi}", "{vb}"), ("{voicemeeter}", "{vb}"), ("{hifi}", "{voicemeeter}")]
@@ -1083,7 +1146,7 @@ mod tests {
         assert_eq!((list[1].audio_device_name.as_str(), list[1].mic_device_name.as_str()), (HIFI, VB));
         assert!(list[1].auto_switch_device);
         // A second time changes nothing
-        assert_eq!(reassign_cables(&mut list, cables(true, true).set(), &cables(true, true), "{vb}"), 0);
+        assert_eq!(reassign_cables(&mut list, cables(true, true).set(), &cables(true, true), "{vb}", None), 0);
     }
 
     #[test]
@@ -1098,7 +1161,7 @@ mod tests {
             cabled("", "{voicemeeter}"),
             Profile { capture_mode: "app".into(), ..cabled("", "{vb}") },
         ];
-        assert_eq!(reassign_cables(&mut list, was, &cables(true, true), ""), 3);
+        assert_eq!(reassign_cables(&mut list, was, &cables(true, true), "", None), 3);
         assert_eq!(
             setup(&list),
             [("{hifi}", "{vb}"), ("{hifi}", "{vb}"), ("{hifi}", "{vb}"), ("", "{voicemeeter}"), ("", "{vb}")]
@@ -1112,26 +1175,65 @@ mod tests {
         // the rules give, so the user's; the microphone moves off it
         let was = CableSet { vb: false, hifi: true };
         let mut list = vec![cabled("{vb}", "{hifi}"), cabled("{vb}", "")];
-        reassign_cables(&mut list, was, &cables(true, true), "");
+        reassign_cables(&mut list, was, &cables(true, true), "", None);
         assert_eq!(setup(&list), [("{vb}", "{hifi}"), ("{vb}", "{hifi}")]);
     }
 
     #[test]
-    fn one_cable_alone_takes_the_sound() {
-        let mut list = vec![cabled("", ""), Profile { capture_mode: "app".into(), ..cabled("", "") }];
-        // The app's microphone takes VB-CABLE: the source is no cable
-        assert_eq!(reassign_cables(&mut list, CableSet::default(), &cables(true, false), ""), 2);
-        assert_eq!(setup(&list), [("{vb}", ""), ("", "{vb}")]);
+    fn one_cable_alone_takes_the_microphone() {
+        // issue #86: set up with a monitor's HDMI alone, VB-CABLE installed
+        // later became the sound, with no microphone
+        let real = hdmi();
+        let fresh = || vec![cabled("", ""), Profile { capture_mode: "app".into(), ..cabled("", "") }];
+        // Not the default output: the sound stays Windows default
+        let mut list = fresh();
+        assert_eq!(reassign_cables(&mut list, CableSet::default(), &cables(true, false), "{hdmi}", Some(&real)), 2);
+        assert_eq!(setup(&list), [("", "{vb}"), ("", "{vb}")]);
+        // Its setup made it the default output: the real output is the sound
+        let mut list = fresh();
+        reassign_cables(&mut list, CableSet::default(), &cables(true, false), "{vb}", Some(&real));
+        assert_eq!(setup(&list), [("{hdmi}", "{vb}"), ("", "{vb}")]);
+        assert_eq!((list[0].capture_mode.as_str(), list[0].auto_switch_device), ("output", true));
+        assert_eq!(list[0].audio_device_name, real.name);
+        // A second time changes nothing
+        assert_eq!(reassign_cables(&mut list, cables(true, false).set(), &cables(true, false), "{vb}", Some(&real)), 0);
+        // No real output: the cable is the sound, without a microphone
         let mut list = vec![cabled("", "")];
-        reassign_cables(&mut list, CableSet::default(), &cables(false, true), "");
+        reassign_cables(&mut list, CableSet::default(), &cables(false, true), "{hifi}", None);
         assert_eq!(setup(&list), [("{hifi}", "")]);
+        assert_eq!(list[0].capture_mode, "virtual");
+    }
+
+    fn hdmi() -> Cable {
+        Cable { id: "{hdmi}".into(), name: "LG TV (NVIDIA High Definition Audio)".into() }
+    }
+
+    #[test]
+    fn the_first_cable_as_an_earlier_version_set_it_up_is_set_up_again() {
+        // The sound on the cable and no microphone; the cable removed and
+        // installed again. A microphone turned Off: the user's, it stays
+        let mut list = vec![cabled("{vb}", ""), Profile { headset_mic: "off".into(), ..cabled("{vb}", "") }];
+        assert_eq!(reassign_cables(&mut list, CableSet::default(), &cables(true, false), "{vb}", Some(&hdmi())), 1);
+        assert_eq!(setup(&list), [("{hdmi}", "{vb}"), ("{vb}", "")]);
+    }
+
+    #[test]
+    fn the_second_cable_takes_the_sound_from_the_real_output_the_rules_gave() {
+        let output =
+            |id: &str| Profile { capture_mode: "output".into(), audio_device_id: id.into(), ..cabled("", "{vb}") };
+        // Another output than the rules give: chosen by hand, it stays
+        let mut list = vec![output("{hdmi}"), output("{speakers}")];
+        let was = CableSet { vb: true, hifi: false };
+        assert_eq!(reassign_cables(&mut list, was, &cables(true, true), "", Some(&hdmi())), 1);
+        assert_eq!(setup(&list), [("{hifi}", "{vb}"), ("{speakers}", "{vb}")]);
+        assert_eq!(list[0].capture_mode, "virtual");
     }
 
     #[test]
     fn a_cable_installed_again_under_another_id_is_followed() {
         let now = Cables { vb: Some(Cable { id: "{vb2}".into(), name: VB.into() }), ..cables(false, true) };
         let mut list = vec![cabled("{hifi}", "{vb}")];
-        assert_eq!(reassign_cables(&mut list, CableSet { vb: false, hifi: true }, &now, ""), 1);
+        assert_eq!(reassign_cables(&mut list, CableSet { vb: false, hifi: true }, &now, "", None), 1);
         assert_eq!(setup(&list), [("{hifi}", "{vb2}")]);
     }
 
