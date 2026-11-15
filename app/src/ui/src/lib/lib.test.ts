@@ -595,8 +595,14 @@ describe("the first-run setup's sound and microphone (issue #86)", () => {
     expect(names([speakers, hifi])).toEqual({ sound: null, mic: hifi.name });
     expect(names([{ ...hdmi, is_default: true }, vb])).toEqual({ sound: null, mic: vb.name });
   });
-  it("one cable that is Windows' default output: the sound, no microphone (it would loop)", () => {
-    expect(names([{ ...speakers, is_default: false }, { ...vb, is_default: true }])).toEqual({ sound: vb.name, mic: null });
+  it("one cable that is Windows' default output: the sound from a real output, the cable for the microphone", () => {
+    // The #86 report: VB-Cable the default, a monitor's HDMI, no sound card
+    const list = [device("CABLE In 16ch (VB-Audio Virtual Cable)"), { ...vb, is_default: true }, hdmi];
+    expect(names(list)).toEqual({ sound: hdmi.name, mic: vb.name });
+    expect(names([{ ...speakers, is_default: false }, { ...hifi, is_default: true }])).toEqual({ sound: speakers.name, mic: hifi.name });
+  });
+  it("one cable that is Windows' default output and no real one: the sound, no microphone (it would loop)", () => {
+    expect(names([{ ...vb, is_default: true }])).toEqual({ sound: vb.name, mic: null });
   });
   it("no cable: System Loopback, no microphone (a sound card cannot be recorded)", () => {
     expect(names([speakers, hdmi])).toEqual({ sound: null, mic: null });

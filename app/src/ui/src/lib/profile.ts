@@ -390,9 +390,12 @@ export function ownDefaultOutput(
  * What the first-run setup gives a new device (issue #86): neither left
  * empty where a cable allows. Both cables: the Hi-Fi Cable for the sound,
  * VB-Cable for the microphone. One: the microphone, and the sound System
- * Loopback of Windows' default output, unless the cable is that default
- * (the microphone would play into what is captured). `null`: System
- * Loopback / no microphone.
+ * Loopback of Windows' default output. When the cable is that default
+ * (System Loopback would record what the microphone plays), the sound is
+ * a real output instead (a monitor's HDMI, made the default while
+ * connected), or the cable itself with no microphone where there is none.
+ * `sound`: a cable captured as a virtual device, a real output as an
+ * Output Device; `null`: System Loopback / no microphone.
  */
 export interface SetupAudio {
   sound: AudioDevice | null;
@@ -405,7 +408,9 @@ export function setupAudio(devices: readonly AudioDevice[]): SetupAudio {
   if (hifi && vb) return { sound: hifi, mic: vb };
   const cable = hifi ?? vb;
   if (!cable) return { sound: null, mic: null };
-  return cable.is_default ? { sound: cable, mic: null } : { sound: null, mic: cable };
+  if (!cable.is_default) return { sound: null, mic: cable };
+  const real = devices.find((d) => !d.is_virtual);
+  return real ? { sound: real, mic: cable } : { sound: cable, mic: null };
 }
 
 /** A 16-channel cable ("CABLE In 16ch"): no use as a source or a
