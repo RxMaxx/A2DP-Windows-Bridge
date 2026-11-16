@@ -170,7 +170,8 @@ export function InputSource(props: {
     // record as "CABLE Output"): only the first keeps that name, the others
     // add their own (the 16-channel one is after, so the standard cable keeps it)
     const label = (d: AudioDevice) => {
-      if (!d.capture_name) return d.name;
+      // A sound card by its own name: its recording side is another input
+      if (!d.capture_name || !d.is_virtual) return d.name;
       const first = list.find((x) => x.capture_name === d.capture_name);
       return first === d
         ? d.capture_name

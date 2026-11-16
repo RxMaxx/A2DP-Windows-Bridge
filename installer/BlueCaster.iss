@@ -605,10 +605,13 @@ const
   RootMediaKey = 'SYSTEM\CurrentControlSet\Enum\ROOT\MEDIA';
   ServicesKey = 'SYSTEM\CurrentControlSet\Services\';
   { Remove without a window: VB-CABLE's setup as community packages run it
-    (BlueCaster installs it with -i -h); the Hi-Fi Cable's with the arguments
-    ASIO Bridge's own setup passes it to remove it }
+    (BlueCaster installs it with -i -h); the Hi-Fi Cable's own setup with the
+    arguments ASIO Bridge's setup passes it to remove it; ASIO Bridge's
+    setup itself (the package: both go, with their entries in Windows'
+    installed apps, issue #86) with its own }
   VbCableRemoveParams = '-u -h';
   HiFiRemoveParams = '-h -u -H';
+  HiFiPackageRemoveParams = '-r -h -u';
 
 var
   UpdateMode, PassiveMode, KeepV1, CoreWasRunning, RunWasSet, HadDesktopIcon, DeleteData, RestoreChosen, RestoreUnrecorded: Boolean;
@@ -1396,9 +1399,9 @@ begin
     end;
 end;
 
-{ The Hi-Fi Cable's setup: its own registration's, else the copy in
-  VB\CABLEHiFi, else the one in ASIO Bridge's folder; '' when its device is
-  not installed or no setup is found }
+{ The Hi-Fi Cable's setup: that of the package it came in (ASIO Bridge's
+  registration), else its own registration's, else the copy in
+  VB\CABLEHiFi; '' when its device is not installed or no setup is found }
 function HiFiRemover: String;
 var
   Path: String;
@@ -1406,13 +1409,12 @@ begin
   Result := '';
   if not HiFiDeviceInstalled then
     Exit;
-  if RegQueryStringValue(HKLM64, HiFiUninstKey, 'UninstallString', Path) and FileExists(UnquotedPath(Path)) then
+  if RegQueryStringValue(HKLM32, AsioBridgeUninstKey, 'UninstallString', Path) and FileExists(UnquotedPath(Path)) then
+    Result := UnquotedPath(Path)
+  else if RegQueryStringValue(HKLM64, HiFiUninstKey, 'UninstallString', Path) and FileExists(UnquotedPath(Path)) then
     Result := UnquotedPath(Path)
   else if FileExists(ExpandConstant('{commonpf64}\VB\CABLEHiFi\VBCABLE_Setup_x64.exe')) then
-    Result := ExpandConstant('{commonpf64}\VB\CABLEHiFi\VBCABLE_Setup_x64.exe')
-  else if RegQueryStringValue(HKLM32, AsioBridgeUninstKey, 'UninstallString', Path) and
-          FileExists(ExtractFilePath(UnquotedPath(Path)) + 'VBCABLE_Setup_x64.exe') then
-    Result := ExtractFilePath(UnquotedPath(Path)) + 'VBCABLE_Setup_x64.exe';
+    Result := ExpandConstant('{commonpf64}\VB\CABLEHiFi\VBCABLE_Setup_x64.exe');
 end;
 
 { Adds a choice of the uninstall page below Top, from Left and Width wide:
@@ -1681,7 +1683,12 @@ procedure RemoveCables;
 begin
   if VbCableSetup <> '' then
     RemoveCable('VB-CABLE', VbCableSetup, VbCableRemoveParams, False);
-  if HiFiSetup <> '' then
+  if HiFiSetup = '' then
+    Exit;
+  { As the helper's remove_args }
+  if Pos('hificable', Lowercase(ExtractFileName(HiFiSetup))) = 1 then
+    RemoveCable('Hi-Fi Cable', HiFiSetup, HiFiPackageRemoveParams, True)
+  else
     RemoveCable('Hi-Fi Cable', HiFiSetup, HiFiRemoveParams, True);
 end;
 

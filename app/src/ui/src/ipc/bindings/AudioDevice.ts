@@ -16,6 +16,10 @@ short_name?: string | null,
  */
 adapter_name?: string | null, is_default: boolean, is_virtual: boolean, 
 /**
+ * A monitor's or TV's audio (HDMI, DisplayPort)
+ */
+is_display: boolean, 
+/**
  * Windows' shared-mode mix format: what capturing it delivers without
  * resampling (None: not known)
  */
