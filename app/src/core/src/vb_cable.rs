@@ -146,8 +146,8 @@ fn run(setup: &Path) -> Result<(), ErrorInfo> {
 /// VB-Audio's uninstall entries, as the BlueCaster uninstaller reads them
 /// (installer/BlueCaster.iss: RemoveCables). VB-CABLE's setup registers
 /// itself in the 64-bit view. The Hi-Fi Cable comes on its own (its key) or
-/// with ASIO Bridge (32-bit view; the Hi-Fi Cable's setup is in its folder,
-/// or in VB\CABLEHiFi)
+/// with ASIO Bridge (32-bit view: the package's setup, which removes both;
+/// the Hi-Fi Cable's own setup is in its folder, or in VB\CABLEHiFi)
 const VB_CABLE_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\VB:VBCABLE {87459874-1236-4469}";
 const HIFI_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\VB:VBHIFI {87459874-1236-4469}";
 const ASIO_BRIDGE_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\VB:ASIOBridge {17359A74-1236-5467}";
@@ -186,6 +186,12 @@ fn hifi_remover() -> Option<PathBuf> {
     if !hifi_driver_installed() {
         return None;
     }
+    // The package it came in: a full removal, as from Windows' installed
+    // apps (issue #86)
+    let bridge = uninstall_entry(ASIO_BRIDGE_KEY, true);
+    if bridge.is_some() {
+        return bridge;
+    }
     if let Some(p) = uninstall_entry(HIFI_KEY, false) {
         return Some(p);
     }
@@ -194,12 +200,7 @@ fn hifi_remover() -> Option<PathBuf> {
         .map(PathBuf::from)
         .unwrap_or_else(|| r"C:\Program Files".into());
     let copy = pf.join(r"VB\CABLEHiFi").join(SETUP);
-    if copy.is_file() {
-        return Some(copy);
-    }
-    let bridge = uninstall_entry(ASIO_BRIDGE_KEY, true)?;
-    let setup = bridge.parent()?.join(SETUP);
-    setup.is_file().then_some(setup)
+    copy.is_file().then_some(copy)
 }
 
 fn listed(hifi: bool) -> bool {

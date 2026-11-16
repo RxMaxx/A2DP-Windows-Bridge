@@ -43,6 +43,8 @@ pub struct DeviceInfo {
     /// Looks like a virtual device (VB-Cable, VoiceMeeter, ...): v1's
     /// heuristic, used to suggest devices for virtual device mode
     pub is_virtual: bool,
+    /// A monitor's or TV's audio (HDMI, DisplayPort)
+    pub is_display: bool,
     /// The capture endpoint paired with a virtual device ("CABLE Output"
     /// for a cable's "CABLE Input"), by name: where apps record what is
     /// rendered to it. None for other devices
@@ -70,6 +72,7 @@ pub fn render_devices() -> Result<Vec<DeviceInfo>, CaptureError> {
         out.push(DeviceInfo {
             is_default: default_id.as_deref() == Some(id.as_str()),
             is_virtual: is_virtual_device(&name, &hints),
+            is_display: hints.form_factor == Some(DISPLAY_FORM_FACTOR),
             id,
             name,
             short_name,
@@ -98,7 +101,13 @@ pub fn render_devices() -> Result<Vec<DeviceInfo>, CaptureError> {
                 d.name,
                 d.id,
                 if d.is_default { " (default)" } else { "" },
-                if d.is_virtual { " (virtual)" } else { "" },
+                if d.is_virtual {
+                    " (virtual)"
+                } else if d.is_display {
+                    " (display)"
+                } else {
+                    ""
+                },
                 d.capture_name.as_deref().map(|c| format!(" (records as \"{c}\")")).unwrap_or_default()
             );
         }
@@ -263,6 +272,9 @@ pub fn mix_format(device_id: Option<&str>) -> Option<MixFormat> {
 fn valid_bits(valid: u16, container: u16) -> u16 {
     if valid > 0 && valid <= container { valid } else { container }
 }
+
+/// EndpointFormFactor::DigitalAudioDisplayDevice
+const DISPLAY_FORM_FACTOR: u32 = 9;
 
 /// v1 AudioDeviceEnumerator::is_virtual_device: name patterns first, then
 /// the endpoint's form factor and container ID

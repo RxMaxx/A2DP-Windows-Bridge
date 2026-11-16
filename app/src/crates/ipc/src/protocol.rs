@@ -1977,6 +1977,9 @@ pub struct AudioDevice {
     pub adapter_name: Option<String>,
     pub is_default: bool,
     pub is_virtual: bool,
+    /// A monitor's or TV's audio (HDMI, DisplayPort)
+    #[serde(default)]
+    pub is_display: bool,
     /// Windows' shared-mode mix format: what capturing it delivers without
     /// resampling (None: not known)
     #[serde(default)]

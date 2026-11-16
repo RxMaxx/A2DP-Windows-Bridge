@@ -775,7 +775,7 @@ describe("setup device step", () => {
     expect(core.state.snap!.settings).toMatchObject({ start_with_windows: true, start_minimized: true });
   });
 
-  it("without VB-Cable a new device captures System Loopback, and the step says why it is wanted (issue #86)", async () => {
+  it("without VB-Cable a new device captures the monitor's audio, its microphone off on the sound card, and the step says why a cable is wanted (issue #86)", async () => {
     const { calls, core, mock: m } = start("#/setup");
     m.noVirtual = true;
     await screen.findByRole("heading", { level: 1, name: "Setup Wizard" });
@@ -786,11 +786,13 @@ describe("setup device step", () => {
     }
     expect(await screen.findByText(t("cables.recommended"))).toBeInTheDocument();
     await connectNew(calls, "Galaxy Buds2 Pro");
-    expect(core.state.snap!.profiles.find((p) => p.name === "Galaxy Buds2 Pro | Auto")).toMatchObject({
-      capture_mode: "loopback",
-      audio_device_id: "",
-      mic_device_id: "",
+    const made = core.state.snap!.profiles.find((p) => p.name === "Galaxy Buds2 Pro | Auto")!;
+    expect(made).toMatchObject({
+      capture_mode: "output",
+      audio_device_name: "M28U (NVIDIA High Definition Audio)",
+      headset_mic: "off",
     });
+    expect(made.mic_device_name).toMatch(/^Speakers/);
   });
 
   it("scans until a device is added, then lists it no more; VB-Cable takes its microphone (issue #86)", async () => {
@@ -810,9 +812,10 @@ describe("setup device step", () => {
     const scans = calls.filter((c) => c.method === "device.scan").length;
     await new Promise((r) => setTimeout(r, 50));
     expect(calls.filter((c) => c.method === "device.scan").length).toBe(scans);
-    // One cable: the microphone; the sound System Loopback of the speakers
+    // One cable: the microphone; the sound from the monitor's audio
     expect(core.state.snap!.profiles.find((p) => p.name === "Galaxy Buds2 Pro | Auto")).toMatchObject({
-      capture_mode: "loopback",
+      capture_mode: "output",
+      audio_device_name: "M28U (NVIDIA High Definition Audio)",
       headset_mic: "auto",
       mic_device_name: "CABLE Input (VB-Audio Virtual Cable)",
     });
@@ -839,7 +842,7 @@ describe("setup device step", () => {
     });
   });
 
-  it("VB-Cable as Windows' default output: the sound from the speakers as an Output Device, VB-Cable the microphone (issue #86)", async () => {
+  it("VB-Cable as Windows' default output: the sound from the monitor's audio all the same, VB-Cable the microphone (issue #86)", async () => {
     const { calls, core, mock: m } = start("#/setup");
     m.defaultOutput = "{0.0.0.00000000}.{cable}";
     await screen.findByRole("heading", { level: 1, name: "Setup Wizard" });
@@ -851,7 +854,7 @@ describe("setup device step", () => {
     await connectNew(calls, "Galaxy Buds2 Pro");
     expect(core.state.snap!.profiles.find((p) => p.name === "Galaxy Buds2 Pro | Auto")).toMatchObject({
       capture_mode: "output",
-      audio_device_name: "Speakers (Realtek(R) Audio)",
+      audio_device_name: "M28U (NVIDIA High Definition Audio)",
       auto_switch_device: true,
       headset_mic: "auto",
       mic_device_name: "CABLE Input (VB-Audio Virtual Cable)",
