@@ -4425,7 +4425,7 @@ mod tests {
         assert_eq!(codec_stop_text("en", &stop("opus05", ipc::CodecStopKind::Refused)), "Opus (PipeWire) was refused");
         assert_eq!(codec_stop_text("ja", &stop("ldac", ipc::CodecStopKind::Unsupported)), "LDAC 非対応");
         // Every language has all four
-        for lang in ["ja", "de", "fr", "es", "ko", "zh-CN", "zh-TW"] {
+        for lang in ["ja", "de", "fr", "es", "ko", "zh-CN", "zh-TW", "uk", "ru"] {
             for key in [
                 "status.codec_stop_unsupported",
                 "status.codec_stop_settings_unsupported",

@@ -101,7 +101,7 @@ Up to 2.0.x the app was A2DP Windows Bridge (A2DPWB). BlueCaster 3.0.0 has a new
 Inno Setup AppId (`{C7A109ED-…}`), a new folder and a new Apps entry; the setup uninstalls the
 earlier versions first, and the app takes their settings over at its first start.
 
-- Installs for the current user (no administrator rights), in 8 languages, into
+- Installs for the current user (no administrator rights), in 10 languages, into
   `%LOCALAPPDATA%\BlueCaster`, with the WebView2 bootstrapper embedded (it runs only
   where WebView2 is missing). Every run writes a log, `%TEMP%\Setup Log <date> #<n>.txt`.
 - A new installation asks for the language (preselected from the one chosen for 2.0.x, else from

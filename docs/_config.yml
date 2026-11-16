@@ -46,6 +46,10 @@ languages:
     name: Français
   - code: es
     name: Español
+  - code: uk
+    name: Українська
+  - code: ru
+    name: Русский
 
 defaults:
   - scope:
@@ -80,6 +84,14 @@ defaults:
       path: "es"
     values:
       lang: es
+  - scope:
+      path: "uk"
+    values:
+      lang: uk
+  - scope:
+      path: "ru"
+    values:
+      lang: ru
 
 exclude:
   - Gemfile

@@ -155,6 +155,6 @@ BlueCaster omite por completo la pila Bluetooth de Windows. Se comunica directam
 - **Controles de los auriculares (AVRCP)**: control deslizante de volumen sincronizado con los auriculares y con el volumen de Windows; sus botones de reproducir/pausar, siguiente y anterior controlan la reproducción en el PC (consulte [Uso](usage#headphone-buttons))
 - **Ajustes por dispositivo**: un códec (con sus propios ajustes) y un origen de salida para cada dispositivo de audio, uno junto a otro en Inicio y que se pueden conectar desde la bandeja
 - **Actualizaciones**: la versión instalada se actualiza sola cuando se desconecta el dispositivo de audio (consulte [Uso](usage#updates))
-- **Localización**: inglés, japonés, chino simplificado / tradicional, coreano, alemán, francés y español
+- **Localización**: inglés, japonés, chino simplificado / tradicional, coreano, alemán, francés, español, ucraniano y ruso
 - **Firmware de Realtek**: descarga guiada del firmware para adaptadores Realtek
 - **Diagnóstico**: flujo de conexión, registro, captura HCI, información de diagnóstico para informes de errores, prueba con receptor par frente a un PC con Linux (consulte [Uso](usage#receiver))
