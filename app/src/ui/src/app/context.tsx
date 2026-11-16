@@ -59,10 +59,14 @@ export function useApp(): AppContext {
 
 /** The text of an error from a request */
 /** Runs `read` whenever Windows' audio devices change (a cable installed by
- *  its own setup, a device plugged in or out); not at first */
+ *  its own setup, a device plugged in or out), and whenever a profile's
+ *  source or microphone output does (the core gave it a cable that came:
+ *  the list read before does not have it, issue #86); not at first */
 export function onAudioDevicesChanged(read: () => void) {
   const { core } = useApp();
-  createEffect(on(() => core.state.snap?.audio_endpoints, read, { defer: true }));
+  const chosen = () =>
+    (core.state.snap?.profiles ?? []).map((p) => `${p.audio_device_id}|${p.mic_device_id}`).join("\n");
+  createEffect(on(() => `${core.state.snap?.audio_endpoints}\n${chosen()}`, read, { defer: true }));
 }
 
 export function errorText(e: unknown): string {

@@ -419,11 +419,6 @@ fn to_ipc_settings(s: &CoreSettings) -> Settings {
     }
 }
 
-/// VB-Cable's playback device among Windows' outputs (not the Hi-Fi Cable)
-fn vb_cable(devices: &[audio_capture::DeviceInfo]) -> Option<&audio_capture::DeviceInfo> {
-    devices.iter().find(|d| profiles::is_vb_cable(&d.name, d.is_virtual))
-}
-
 /// The Hi-Fi Cable's playback device ("Hi-Fi Cable Input"): the headset
 /// microphone's cable (issue #86)
 fn hifi_cable(devices: &[audio_capture::DeviceInfo]) -> Option<&audio_capture::DeviceInfo> {
@@ -1515,6 +1510,28 @@ fn cables(devices: &[audio_capture::DeviceInfo]) -> profiles::Cables {
     profiles::Cables { vb: default_cable(devices).map(cable), hifi: hifi_cable(devices).map(cable) }
 }
 
+/// The real output the sound is captured from beside the one cable, which
+/// is the microphone's (issue #86): a monitor's or TV's audio (nothing
+/// plays aloud beside the headphones on most; of several, the one that is
+/// Windows' default output), else Windows' default output, else the first,
+/// virtual devices aside. As the UI's realOutput.
+fn real_output(devices: &[audio_capture::DeviceInfo]) -> Option<&audio_capture::DeviceInfo> {
+    let real = || devices.iter().filter(|d| !d.is_virtual);
+    real()
+        .find(|d| d.is_display && d.is_default)
+        .or_else(|| real().find(|d| d.is_display))
+        .or_else(|| real().find(|d| d.is_default))
+        .or_else(|| real().next())
+}
+
+/// The sound card [`profiles::Bare`] plays the microphone into: an output
+/// that is neither a display's nor virtual, Windows' default output before
+/// the first
+fn sound_card(devices: &[audio_capture::DeviceInfo]) -> Option<&audio_capture::DeviceInfo> {
+    let cards = || devices.iter().filter(|d| !d.is_virtual && !d.is_display);
+    cards().find(|d| d.is_default).or_else(|| cards().next())
+}
+
 /// Windows' default output as the cables' rules take it for System
 /// Loopback: none while it is the Output Source the stream made the default
 /// for its own device (issue #86: one device's Output Source took cables
@@ -1535,11 +1552,11 @@ fn default_output_for_cables<'a>(
     if switched { "" } else { default }
 }
 
-/// VB-CABLE's playback side ("CABLE Input"), the 2-channel one before the
-/// 16-channel one (as the UI's vbCable)
+/// VB-CABLE's playback side ("CABLE Input"): the 2-channel one, never the
+/// 16-channel one (as the UI's setupAudio; issue #86: Windows lists the
+/// 16-channel one first for a moment, and the microphone stayed on it)
 fn default_cable(devices: &[audio_capture::DeviceInfo]) -> Option<&audio_capture::DeviceInfo> {
-    let cables: Vec<_> = devices.iter().filter(|d| profiles::is_vb_cable(&d.name, d.is_virtual)).collect();
-    cables.iter().find(|d| !d.name.to_lowercase().contains("16ch")).or(cables.first()).copied()
+    devices.iter().find(|d| profiles::is_vb_cable(&d.name, d.is_virtual) && !d.name.to_lowercase().contains("16ch"))
 }
 
 /// Windows' default input for the stream and the profiles: the
@@ -2301,12 +2318,17 @@ impl CoreState {
     /// was missing, the profiles set up by the rules alone are set up again
     /// with what Windows has now, as the first-run setup would: both cables,
     /// the Hi-Fi Cable for the sound (less delay) and VB-CABLE for the
-    /// microphone; one, the microphone ([`profiles::reassign_cables`]; what
-    /// the user chose stays), and again at each look for [`CABLES_SETTLE`]
-    /// after (a cable's setup makes it Windows' default output, which
-    /// changes what the rules give, a moment after it is listed); and a
-    /// microphone on without an output gets one whenever a cable it can use
-    /// is there ([`profiles::fill_mic_outputs`]).
+    /// microphone; one, the microphone, the sound on a real output
+    /// ([`real_output`], [`profiles::reassign_cables`]; what the user chose
+    /// stays), and again at each look for [`CABLES_SETTLE`] after (Windows
+    /// lists a cable's outputs one after the other). Windows' default
+    /// output decides nothing here. At every look, a microphone on without
+    /// an output gets one when a cable it can use is there
+    /// ([`profiles::fill_mic_outputs`]), System Loopback of the cable
+    /// the microphone plays into moves to the sound the rules give
+    /// ([`profiles::unloop_sounds`]), and a source or microphone on a cable
+    /// that is gone is chosen again ([`profiles::drop_cables`]); the names
+    /// saved follow Windows' ([`profiles::refresh_names`]).
     pub fn watch_cables(&self, devices: &[audio_capture::DeviceInfo]) {
         // One look at a time: two would both save the profiles
         static WATCHING: Mutex<()> = Mutex::new(());
@@ -2315,11 +2337,17 @@ impl CoreState {
         let now = cables(devices);
         // Missing at the last look; both there before the first one
         let was = profiles::CableSet { vb: !s.awaiting_vb_cable, hifi: !s.awaiting_hifi_cable };
-        let (vb_missing, hifi_missing) = (vb_cable(devices).is_none(), now.hifi.is_none());
+        let (vb_missing, hifi_missing) = (now.vb.is_none(), now.hifi.is_none());
         let came = (!vb_missing && !was.vb) || (!hifi_missing && !was.hifi);
         let flags_changed = (vb_missing, hifi_missing) != (s.awaiting_vb_cable, s.awaiting_hifi_cable);
         let mut list = profiles::load(&self.config_dir());
         let (_, snap) = self.snapshot();
+        // The profile streaming now, as it was
+        let streamed = match snap.stream.state {
+            StreamState::Streaming => snap.stream.profile.as_ref().and_then(|n| list.iter().find(|p| &p.name == n)),
+            _ => None,
+        }
+        .cloned();
         let default_output = default_output_for_cables(devices, &snap.stream, &list);
         // What was there before the cable came, while it settles
         let since = {
@@ -2330,14 +2358,29 @@ impl CoreState {
             *settling = settling.filter(|(at, _)| at.elapsed() < CABLES_SETTLE);
             settling.map(|(_, was)| was)
         };
-        // Windows' first real output, the sound beside a cable that is the default
-        let real =
-            devices.iter().find(|d| !d.is_virtual).map(|d| profiles::Cable { id: d.id.clone(), name: d.name.clone() });
-        let set_up = match since {
-            Some(was) => profiles::reassign_cables(&mut list, was, &now, default_output, real.as_ref()),
-            None => 0,
+        let real = real_output(devices).map(|d| profiles::Cable { id: d.id.clone(), name: d.name.clone() });
+        // Not while Windows lists no output at all: nothing is known then
+        let as_cable = |d: &audio_capture::DeviceInfo| profiles::Cable { id: d.id.clone(), name: d.name.clone() };
+        let outputs: Vec<profiles::Cable> = devices.iter().map(as_cable).collect();
+        let displays: Vec<profiles::Cable> =
+            devices.iter().filter(|d| d.is_display && !d.is_virtual).map(as_cable).collect();
+        let pair = real_output(devices).filter(|d| d.is_display).zip(sound_card(devices));
+        let pair = pair.map(|(sound, mic)| (as_cable(sound), as_cable(mic)));
+        let bare = pair.as_ref().map(|(sound, mic)| profiles::Bare { sound, mic });
+        let dropped = match devices.is_empty() {
+            true => 0,
+            false => profiles::drop_cables(&mut list, &now, default_output, real.as_ref(), bare, &outputs, &displays),
         };
+        let set_up = dropped
+            + match since {
+                Some(was) => {
+                    profiles::reassign_cables(&mut list, was, &now, default_output, real.as_ref(), bare, &displays)
+                }
+                None => 0,
+            }
+            + profiles::unloop_sounds(&mut list, &now, default_output, real.as_ref());
         let filled = profiles::fill_mic_outputs(&mut list, &now, default_output);
+        let renamed = profiles::refresh_names(&mut list, &outputs);
         if came || set_up + filled > 0 {
             tracing::info!(
                 "cables: VB-CABLE {}, Hi-Fi Cable {}; {set_up} profile(s) set up again, {filled} microphone(s) given one",
@@ -2345,10 +2388,33 @@ impl CoreState {
                 if hifi_missing { "missing" } else { "there" },
             );
         }
-        if set_up + filled > 0 {
+        if set_up + filled + renamed > 0 {
             let active = Some(s.last_profile.clone()).filter(|n| list.iter().any(|p| &p.name == n));
             if let Err(e) = self.save_profiles(&list, active) {
                 tracing::warn!("cables: profiles not saved: {}", e.code);
+            }
+            // The stream follows its profile (issue #86: it went on
+            // capturing the cable its microphone had just been given): the
+            // source first, the session refuses a microphone that loops
+            if let Some(was) = streamed
+                && let Some(p) = list.iter().find(|p| p.name == was.name)
+            {
+                let settings = self.service.settings();
+                if p.source() != was.source() {
+                    let moved = self.service.change_source(settings.source_in_force(p.source()));
+                    tracing::info!("cables: the stream's source follows its profile: {moved}");
+                }
+                if (p.mic_device_id.as_str(), p.headset_mic.as_str())
+                    != (was.mic_device_id.as_str(), was.headset_mic.as_str())
+                {
+                    let mode = headset_mic_in_force(p);
+                    let kept = self.service.set_headset_mic(
+                        mode,
+                        mode.is_on().then(|| p.mic_device_id.clone()),
+                        p.voice_codec_in_force(settings.auto_codec),
+                    );
+                    tracing::info!("cables: the stream's microphone follows its profile: {kept}");
+                }
             }
         }
         if flags_changed {
@@ -3568,6 +3634,7 @@ impl CoreState {
                                 adapter_name: d.adapter_name,
                                 is_default: d.is_default,
                                 is_virtual: d.is_virtual,
+                                is_display: d.is_display,
                                 capture_name: d.capture_name,
                                 capture_rate: d.capture_rate,
                             }
@@ -3915,6 +3982,7 @@ mod tests {
             adapter_name: None,
             is_default: false,
             is_virtual: virt,
+            is_display: false,
             capture_name: None,
             capture_rate: None,
         };
@@ -3925,7 +3993,7 @@ mod tests {
             dev("cable", "CABLE Input (VB-Audio Virtual Cable)", true),
         ];
         assert_eq!(default_cable(&list).map(|d| d.id.as_str()), Some("cable"));
-        assert_eq!(default_cable(&list[..3]).map(|d| d.id.as_str()), Some("c16"));
+        assert!(default_cable(&list[..3]).is_none());
         assert!(default_cable(&list[..1]).is_none());
     }
 
@@ -4665,6 +4733,7 @@ mod tests {
             adapter_name: None,
             is_default,
             is_virtual: name.contains("VB-Audio"),
+            is_display: name.contains("NVIDIA"),
             capture_name: None,
             capture_rate: None,
         }
@@ -4750,14 +4819,223 @@ mod tests {
             let p = profiles::load(&dir).remove(0);
             (p.capture_mode, p.audio_device_id, p.mic_device_id)
         };
-        // Listed, not yet the default output: the microphone, the sound as it was
+        // The microphone, the sound from the HDMI output: before and after
+        // the cable's setup makes it Windows' default output
         state.watch_cables(&[hdmi(true), vb(false)]);
-        assert_eq!(set_up(), ("loopback".into(), String::new(), "{vb}".into()));
-        // Its setup made it the default a moment later: System Loopback
-        // would record the microphone, so the sound is the HDMI output
+        assert_eq!(set_up(), ("output".into(), "{hdmi}".into(), "{vb}".into()));
         state.watch_cables(&[hdmi(false), vb(true)]);
         assert_eq!(set_up(), ("output".into(), "{hdmi}".into(), "{vb}".into()));
+        // Windows lists nothing for a moment: nothing is known
+        state.watch_cables(&[]);
+        assert_eq!(set_up(), ("output".into(), "{hdmi}".into(), "{vb}".into()));
+        // The cable uninstalled: as before it came, nothing left unchosen
+        state.watch_cables(&[hdmi(true)]);
+        assert_eq!(set_up(), ("loopback".into(), String::new(), String::new()));
+        // And installed again
+        state.watch_cables(&[hdmi(true), vb(false)]);
+        assert_eq!(set_up(), ("output".into(), "{hdmi}".into(), "{vb}".into()));
+        // Uninstalled where there is a sound card too: the microphone into
+        // it, Off (Auto would open for the card's own microphone)
+        let speakers = render_device("{spk}", "Speakers (Realtek(R) Audio)", true);
+        state.watch_cables(&[speakers.clone(), hdmi(false)]);
+        assert_eq!(set_up(), ("output".into(), "{hdmi}".into(), "{spk}".into()));
+        assert_eq!(profiles::load(&dir)[0].headset_mic, "off");
+        // A cable again: the microphone on it, on Auto
+        state.watch_cables(&[speakers, hdmi(false), vb(false)]);
+        assert_eq!(set_up(), ("output".into(), "{hdmi}".into(), "{vb}".into()));
+        assert_eq!(profiles::load(&dir)[0].headset_mic, "auto");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// What a new device gets with `devices` (the UI's setupAudio): the
+    /// capture mode, the source, the microphone output and its mode
+    fn fresh_setup(devices: &[audio_capture::DeviceInfo]) -> (String, String, String, String) {
+        let c = cables(devices);
+        let real = real_output(devices).map(|d| d.id.clone());
+        let auto = "auto".to_string();
+        match (c.vb, c.hifi) {
+            (Some(vb), Some(hifi)) => ("virtual".into(), hifi.id, vb.id, auto),
+            (Some(c), None) | (None, Some(c)) => match real {
+                Some(r) => ("output".into(), r, c.id, auto),
+                None => ("virtual".into(), c.id, String::new(), auto),
+            },
+            (None, None) => match real_output(devices).filter(|d| d.is_display).zip(sound_card(devices)) {
+                Some((sound, mic)) => ("output".into(), sound.id.clone(), mic.id.clone(), "off".into()),
+                None => ("loopback".into(), String::new(), String::new(), auto),
+            },
+        }
+    }
+
+    #[test]
+    fn every_cable_coming_or_going_ends_as_a_new_device_would_start() {
+        // issue #86: each set of outputs, each cable installed or removed,
+        // whichever output is Windows' default after it. The table is
+        // printed (--nocapture)
+        let real_sets: [(&str, &[(&str, &str)]); 5] = [
+            ("no output", &[]),
+            ("sound card", &[("{spk}", "Speakers (Realtek(R) Audio)")]),
+            ("HDMI", &[("{tv}", "LG TV (NVIDIA High Definition Audio)")]),
+            (
+                "sound card + HDMI",
+                &[("{spk}", "Speakers (Realtek(R) Audio)"), ("{tv}", "LG TV (NVIDIA High Definition Audio)")],
+            ),
+            (
+                "sound card + 2 HDMI",
+                &[
+                    ("{spk}", "Speakers (Realtek(R) Audio)"),
+                    ("{tv}", "LG TV (NVIDIA High Definition Audio)"),
+                    ("{mon}", "M28U (NVIDIA High Definition Audio)"),
+                ],
+            ),
+        ];
+        let vb = ("{vb}", "CABLE Input (VB-Audio Virtual Cable)");
+        let c16 = ("{c16}", "CABLE In 16ch (VB-Audio Virtual Cable)");
+        let hifi = ("{hifi}", "Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)");
+        // (VB-CABLE, Hi-Fi Cable) before and after
+        let steps: [((bool, bool), (bool, bool)); 8] = [
+            ((false, false), (true, false)),
+            ((false, false), (false, true)),
+            ((true, false), (true, true)),
+            ((false, true), (true, true)),
+            ((true, true), (true, false)),
+            ((true, true), (false, true)),
+            ((true, false), (false, false)),
+            ((false, true), (false, false)),
+        ];
+        let list = |real: &[(&str, &str)], (with_vb, with_hifi): (bool, bool), default: &str| {
+            let mut all: Vec<(&str, &str)> = real.to_vec();
+            if with_vb {
+                all.extend([c16, vb]);
+            }
+            if with_hifi {
+                all.push(hifi);
+            }
+            all.iter().map(|(id, name)| render_device(id, name, *id == default)).collect::<Vec<_>>()
+        };
+        let cables_named = |(v, h): (bool, bool)| match (v, h) {
+            (true, true) => "VB + Hi-Fi",
+            (true, false) => "VB",
+            (false, true) => "Hi-Fi",
+            (false, false) => "none",
+        };
+        let mut failed = Vec::new();
+        let mut n = 0;
+        println!("| outputs | cables before | cables after | default after | sound | microphone | mode | as new |");
+        println!("|---|---|---|---|---|---|---|---|");
+        for (real_name, real) in real_sets {
+            for (from, to) in steps {
+                // Windows' default output before: each output there
+                let ids = |set: (bool, bool)| list(real, set, "").iter().map(|d| d.id.clone()).collect::<Vec<_>>();
+                for default_before in ids(from).iter().map(String::as_str).chain([""]) {
+                    for default_after in ids(to).iter().map(String::as_str).chain([""]) {
+                        // The default moves only to a cable that came, or
+                        // off one that went
+                        let came_or_same = default_after == default_before
+                            || (!ids(from).iter().any(|i| i == default_after) && !default_after.is_empty())
+                            || !ids(to).iter().any(|i| i == default_before);
+                        if !came_or_same || default_before == "{c16}" || default_after == "{c16}" {
+                            continue;
+                        }
+                        n += 1;
+                        let dir = std::env::temp_dir().join(format!("bluecaster-matrix-{}-{n}", std::process::id()));
+                        let _ = std::fs::remove_dir_all(&dir);
+                        std::fs::create_dir_all(&dir).unwrap();
+                        let (tx, _rx) = std::sync::mpsc::channel();
+                        let options = bluecaster_core::ServiceOptions {
+                            config_dir: dir.clone(),
+                            hci_tcp: None,
+                            capture: bt_host::HciCapture::new(),
+                            afh: None,
+                            usb: Default::default(),
+                        };
+                        let state = CoreState::new(
+                            Arc::new(Service::new(options, tx)),
+                            Box::new(|_| {}),
+                            Box::new(|| {}),
+                            Box::new(|_| {}),
+                        );
+                        let before = list(real, from, default_before);
+                        let after = list(real, to, default_after);
+                        let name = |id: &str| {
+                            before.iter().chain(&after).find(|d| d.id == id).map_or(String::new(), |d| d.name.clone())
+                        };
+                        let (mode, source, mic, headset) = fresh_setup(&before);
+                        let p = CoreProfile {
+                            name: "Buds".into(),
+                            device_address: "C0:11:22:33:44:55".into(),
+                            capture_mode: mode,
+                            audio_device_name: name(&source),
+                            audio_device_id: source,
+                            mic_device_name: name(&mic),
+                            mic_device_id: mic,
+                            headset_mic: headset,
+                            auto_switch_device: true,
+                            ..CoreProfile::default()
+                        };
+                        profiles::save(&dir, std::slice::from_ref(&p)).unwrap();
+                        let read = || {
+                            let p = profiles::load(&dir).remove(0);
+                            let source = if p.capture_mode == "loopback" { String::new() } else { p.audio_device_id };
+                            (p.capture_mode, source, p.mic_device_id, p.headset_mic)
+                        };
+                        // Nothing moves while nothing came or went
+                        state.watch_cables(&before);
+                        let settled = read();
+                        state.watch_cables(&after);
+                        let got = read();
+                        let want = fresh_setup(&after);
+                        // The display it had (Windows' default then) stays:
+                        // any display is the rules' choice
+                        let display = |s: &(String, String, String, String)| {
+                            let mut s = s.clone();
+                            if s.1 == "{mon}" {
+                                s.1 = "{tv}".into();
+                            }
+                            s
+                        };
+                        // No output at all: nothing is looked at (Windows
+                        // may only not have listed them yet)
+                        let same =
+                            after.is_empty() || (display(&got) == display(&want) && settled == fresh_setup(&before));
+                        let short = |id: &str| if id.is_empty() { "-".to_string() } else { id.to_string() };
+                        println!(
+                            "| {real_name} | {} | {} | {} | {} {} | {} | {} | {} |",
+                            cables_named(from),
+                            cables_named(to),
+                            short(default_after),
+                            got.0,
+                            short(&got.1),
+                            short(&got.2),
+                            got.3,
+                            if same { "yes" } else { "NO" },
+                        );
+                        if !same {
+                            failed.push(format!(
+                                "{real_name}: {} -> {}, default {default_before:?} -> {default_after:?}: {got:?}, a new device {want:?} (before: {settled:?})",
+                                cables_named(from),
+                                cables_named(to)
+                            ));
+                        }
+                        let _ = std::fs::remove_dir_all(&dir);
+                    }
+                }
+            }
+        }
+        println!("{n} cases, {} differ", failed.len());
+        assert!(failed.is_empty(), "{}", failed.join("\n"));
+    }
+
+    #[test]
+    fn the_real_output_is_a_display_the_default_one_of_several() {
+        let tv = |default| render_device("{tv}", "LG TV (NVIDIA High Definition Audio)", default);
+        let monitor = |default| render_device("{mon}", "M28U (NVIDIA High Definition Audio)", default);
+        let speakers = |default| render_device("{spk}", "Speakers (Realtek(R) Audio)", default);
+        let vb = render_device("{vb}", "CABLE Input (VB-Audio Virtual Cable)", false);
+        let id = |d: &[audio_capture::DeviceInfo]| real_output(d).map(|d| d.id.clone());
+        assert_eq!(id(&[speakers(true), tv(false), monitor(false), vb.clone()]).as_deref(), Some("{tv}"));
+        assert_eq!(id(&[speakers(false), tv(false), monitor(true), vb.clone()]).as_deref(), Some("{mon}"));
+        assert_eq!(id(&[speakers(true), vb.clone()]).as_deref(), Some("{spk}"));
+        assert_eq!(id(&[vb]), None);
     }
 
     #[test]

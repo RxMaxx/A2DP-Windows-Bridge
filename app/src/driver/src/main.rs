@@ -62,9 +62,11 @@
 //! for hardware changes, which takes the removed output out of Windows'
 //! lists without a restart (issue #86). The scan needs administrator rights
 //! too, so both run in this one elevated step: one UAC prompt. The Hi-Fi
-//! Cable's setup, run as ASIO Bridge's setup runs it, leaves the Hi-Fi
-//! Cable's own entry in Windows' installed apps: taken out here once the
-//! driver has gone (issue #86).
+//! Cable goes with the setup of the package it came in when that is there
+//! (ASIO Bridge goes too, as from Windows' installed apps); its own setup,
+//! run as that package runs it, leaves the Hi-Fi Cable's own entry in
+//! Windows' installed apps: taken out here once the driver has gone (issue
+//! #86).
 //!
 //! A GUI-subsystem program, so that no console window flashes up when the
 //! core or the uninstaller starts it (issue #86: SW_HIDE alone does not
@@ -298,10 +300,25 @@ fn run(command: &Command) -> (u8, Value) {
 }
 
 /// VB-Audio's setup arguments that remove a cable without a window:
-/// VB-CABLE's as community packages run it, the Hi-Fi Cable's as ASIO
-/// Bridge's setup passes them
-fn remove_args(hifi: bool) -> &'static [&'static str] {
-    if hifi { &["-h", "-u", "-H"] } else { &["-u", "-h"] }
+/// VB-CABLE's as community packages run it. The Hi-Fi Cable's with the
+/// setup of the package it came in (ASIO Bridge's UninstallString), which
+/// takes out the driver, ASIO Bridge and their entries in Windows'
+/// installed apps (issue #86); with the cable's own setup, as that package
+/// passes them.
+fn remove_args(setup: &std::path::Path, hifi: bool) -> &'static [&'static str] {
+    if !hifi {
+        &["-u", "-h"]
+    } else if hifi_package_setup(setup) {
+        &["-r", "-h", "-u"]
+    } else {
+        &["-h", "-u", "-H"]
+    }
+}
+
+/// "HiFiCableAsioBridgeSetup.exe": the package's setup, not the cable's own
+/// ("VBCABLE_Setup_x64.exe")
+fn hifi_package_setup(setup: &std::path::Path) -> bool {
+    setup.file_name().is_some_and(|n| n.to_string_lossy().to_lowercase().starts_with("hificable"))
 }
 
 /// Runs VB-Audio's setup to remove the cable and waits for it, then scans
@@ -319,7 +336,7 @@ fn remove_cable(setup: &std::path::Path, hifi: bool) -> (u8, Value) {
         /// No console window for the setup
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let mut command = std::process::Command::new(setup);
-        command.args(remove_args(hifi)).creation_flags(CREATE_NO_WINDOW);
+        command.args(remove_args(setup, hifi)).creation_flags(CREATE_NO_WINDOW);
         // In its own folder, as the uninstaller starts it
         if let Some(dir) = setup.parent().filter(|d| !d.as_os_str().is_empty()) {
             command.current_dir(dir);
@@ -1129,8 +1146,11 @@ mod tests {
         );
         assert!(args(&["remove-cable"]).is_err());
         assert!(args(&["list", "--hifi"]).is_err());
-        assert_eq!(remove_args(false), ["-u", "-h"]);
-        assert_eq!(remove_args(true), ["-h", "-u", "-H"]);
+        let own = std::path::Path::new(r"C:\Program Files\VB\CABLEHiFi\VBCABLE_Setup_x64.exe");
+        let package = std::path::Path::new(r"C:\Program Files (x86)\VB\ASIOBridge\HiFiCableAsioBridgeSetup.exe");
+        assert_eq!(remove_args(own, false), ["-u", "-h"]);
+        assert_eq!(remove_args(own, true), ["-h", "-u", "-H"]);
+        assert_eq!(remove_args(package, true), ["-r", "-h", "-u"]);
     }
 
     #[test]
