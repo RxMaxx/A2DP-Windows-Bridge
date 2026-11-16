@@ -296,7 +296,11 @@ sequenceDiagram
 - Elige el códec: Automático toma el códec de mayor calidad de sonido que ofrece el
   remoto; un códec solicitado que el remoto no ofrece se sustituye por el mismo códec
   que tomaría Automático (siempre para un perfil, desde el issue #86; en la
-  línea de comandos solo con `--fallback`), y en caso contrario es un error
+  línea de comandos solo con `--fallback`), y en caso contrario es un error. Un códec
+  elegido en su tarjeta cuando el remoto no lo ofrecía (el `codec_forced`
+  del perfil) se pide igualmente sin alternativa (`RemoteCaps::forcing`),
+  y un códec cuya tarjeta ofrece más de lo que anuncia el remoto
+  (`unlisted_options`) se configura a partir de `RemoteCaps::unlisted`
 - Transmite cada perfil A2DP como Automático, con los ajustes predeterminados de Automático, mientras
   el ajuste `auto_codec` está activado (Códecs > Seleccionar automáticamente el códec compatible de mayor
   calidad, un único ajuste para todos los dispositivos desde el esquema 5); el códec
@@ -563,4 +567,4 @@ desinstalador y `licenses\` (`licenses\README.txt`, `licenses\bluecaster\LICENSE
   un adaptador USB dedicado para BlueCaster
 - El firmware de algunos adaptadores Bluetooth limita la tasa de bits alcanzable
 - Por lo general, los adaptadores USB Bluetooth 5.0+ funcionan bien con LDAC
-- Prioridad de la selección automática de códec (por calidad de sonido, issue #86): LHDC V5 > LDAC > aptX Adaptive > Opus > aptX HD > aptX > aptX LL > AAC > SBC XQ > SBC (FastStream y Opus 05 solo si se eligen); un códec elegido que el dispositivo no ofrece pasa al primero del orden del dispositivo que este ofrezca
+- Prioridad de la selección automática de códec (por calidad de sonido, issue #86): LHDC V5 > LDAC > aptX Adaptive > Opus > aptX HD > aptX > aptX LL > AAC > SBC XQ > SBC (FastStream y Opus 05 solo si se eligen); un códec elegido que el dispositivo ya no ofrece pasa al primero del orden del dispositivo que este ofrezca; uno elegido en su tarjeta cuando el dispositivo no lo ofrecía se pide igualmente (`codec_forced`, sin alternativa)

@@ -296,7 +296,11 @@ sequenceDiagram
 - Choisit le codec : Auto prend le codec de meilleure qualité sonore que propose l'appareil
   distant ; un codec demandé que l'appareil distant ne propose pas est remplacé par le
   codec que prendrait Auto (toujours pour un profil, depuis l'issue #86 ; en ligne de
-  commande seulement avec `--fallback`), et provoque une erreur sinon
+  commande seulement avec `--fallback`), et provoque une erreur sinon. Un codec
+  choisi sur sa carte alors que l'appareil distant ne le proposait pas (le `codec_forced`
+  du profil) est demandé quand même, sans repli (`RemoteCaps::forcing`), et un codec
+  dont la carte propose plus que ce qu'annonce l'appareil distant
+  (`unlisted_options`) est configuré à partir de `RemoteCaps::unlisted`
 - Diffuse chaque profil A2DP en Auto, avec les réglages par défaut d'Auto, tant que
   le réglage `auto_codec` est activé (Codecs > Sélectionner automatiquement le codec pris en charge
   de meilleure qualité, un seul réglage pour tous les appareils depuis le schéma 5) ; le codec
@@ -504,7 +508,7 @@ paquet (pas une horloge), SSRC = mode de latence du récepteur (0x000000A3 HQ,
 656 octets (12 ms), les paquets LL 348 octets (10 ms). Auto le choisit avant
 l'aptX classique, Opus et AAC (l'ordre de l'issue #86), après LHDC V5 et LDAC.
 
-## Paramètres et fichiers
+## Paramètres et fichiers {#settings-and-files}
 
 Tout est conservé dans le dossier des paramètres, `%APPDATA%\BlueCaster` (ou le
 dossier indiqué par la variable d'environnement `BLUECASTER_CONFIG_DIR`) ; les fichiers
@@ -521,7 +525,7 @@ ci-dessous) :
 | `devices\device_codecs.json` | Ce que chaque appareil classique a proposé lors de sa dernière connexion (et si des écouteurs OPPO se sont vu demander le Hi-Res) |
 | `pairing\link_keys.txt` | Clés de liaison : les casques associés avec la v1 ou la 2.0.x se reconnectent sans nouvelle association |
 | `pairing\le_audio_bonds.tlv`, `pairing\le_audio_csip.txt` | LE Audio : les liaisons LE (avec les valeurs CCC persistantes du serveur GATT) et les ensembles coordonnés |
-| `pairing\windows_le_keys.txt`, `pairing\replaced_windows_keys.json` | Clés LE reprises de Windows, jusqu'à ce qu'une pile avec LE les ajoute ; les clés de Windows que **Restaurer le pilote d'origine** a remplacées |
+| `pairing\windows_le_keys.txt`, `pairing\replaced_windows_keys.json` | Clés LE reprises de Windows, jusqu'à ce qu'une pile les ajoute ; les clés de Windows que **Restaurer le pilote d'origine** a remplacées |
 | `adapters\adapter_caps.json` | Ce qu'une pile a appris de chaque adaptateur (prise en charge de LE Audio, adresse, version HCI, nom que lui donne Windows) |
 | `adapters\driver\<instance id>.json` | Le pilote précédent de chaque adaptateur auquel WinUSB a été attribué |
 | `firmware\` | Fichiers de firmware (`*.bin`, `*.hcd`, `ibt-*` ; ceux d'Intel aussi dans `firmware\intel\`, selon l'organisation de linux-firmware) ; les fichiers que les versions précédentes gardaient en vrac dans le dossier des paramètres y sont déplacés |
@@ -563,4 +567,4 @@ programme de désinstallation et `licenses\` (`licenses\README.txt`, `licenses\b
   un adaptateur USB dédié pour BlueCaster
 - Le firmware de certains adaptateurs Bluetooth limite le débit atteignable
 - Les adaptateurs Bluetooth USB 5.0+ fonctionnent généralement bien pour LDAC
-- Priorité du choix automatique du codec (par qualité sonore, issue #86) : LHDC V5 > LDAC > aptX Adaptive > Opus > aptX HD > aptX > aptX LL > AAC > SBC XQ > SBC (FastStream et Opus 05 uniquement s'ils sont choisis) ; un codec choisi que l'appareil ne propose pas se replie sur le premier, dans l'ordre de l'appareil, qu'il propose
+- Priorité du choix automatique du codec (par qualité sonore, issue #86) : LHDC V5 > LDAC > aptX Adaptive > Opus > aptX HD > aptX > aptX LL > AAC > SBC XQ > SBC (FastStream et Opus 05 uniquement s'ils sont choisis) ; un codec choisi que l'appareil ne propose plus se replie sur le premier, dans l'ordre de l'appareil, qu'il propose ; un codec choisi sur sa carte alors que l'appareil ne le proposait pas est demandé quand même (`codec_forced`, sans repli)

@@ -276,7 +276,10 @@ sequenceDiagram
   下的 aptX LL，以及 aptX Adaptive（R1 與 R2 接收端；僅在支援 48 kHz 立體聲時可用）
 - 選擇轉碼器：「自動」會選用遠端提供的音質最高的轉碼器；若要求的轉碼器不在
   遠端提供的清單中，會改用「自動」會選擇的同一個轉碼器（設定檔自 issue #86 起
-  一律如此；命令列只在加上 `--fallback` 時），否則視為錯誤
+  一律如此；命令列只在加上 `--fallback` 時），否則視為錯誤。在遠端未提供時
+  於其卡片上選擇的轉碼器（設定檔的 `codec_forced`）仍會照樣要求，不改用其他
+  轉碼器（`RemoteCaps::forcing`）；卡片提供的選項多於遠端所列出的轉碼器
+  （`unlisted_options`）則以 `RemoteCaps::unlisted` 設定
 - `auto_codec` 設定開啟時（**編解碼器 > 自動選擇支援的音質最高的編解碼器**，
   自 schema 5 起是適用於所有裝置的單一設定），每個 A2DP 設定檔都以「自動」
   及其預設設定串流；為裝置選擇的轉碼器會保留在其設定檔中，供關閉時使用
@@ -509,4 +512,4 @@ BlueCaster 自己的 12 位元組 RTP 標頭（BTstack 不另加）：酬載類�
   BlueCaster 使用專用的 USB 介面卡
 - 部分藍牙介面卡的韌體會限制可達到的位元率
 - USB 藍牙 5.0 以上的介面卡通常很適合 LDAC
-- 自動轉碼器選擇的優先順序（依音質，issue #86）：LHDC V5 > LDAC > aptX Adaptive > Opus > aptX HD > aptX > aptX LL > AAC > SBC XQ > SBC（FastStream 與 Opus 05 僅在明確選擇時使用）；所選轉碼器不受裝置支援時，改用裝置順序中第一個受支援的轉碼器
+- 自動轉碼器選擇的優先順序（依音質，issue #86）：LHDC V5 > LDAC > aptX Adaptive > Opus > aptX HD > aptX > aptX LL > AAC > SBC XQ > SBC（FastStream 與 Opus 05 僅在明確選擇時使用）；裝置已不再提供所選轉碼器時，改用裝置順序中第一個它提供的轉碼器；在裝置未提供時於卡片上選擇的轉碼器仍會照樣要求（`codec_forced`，不改用其他轉碼器）

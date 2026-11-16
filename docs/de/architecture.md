@@ -296,7 +296,11 @@ sequenceDiagram
 - Wählt den Codec: Automatisch nimmt den Codec mit der höchsten Klangqualität, den die
   Gegenseite anbietet; ein angeforderter Codec, den die Gegenseite nicht anbietet, wird durch
   denselben Codec ersetzt, den Automatisch nehmen würde (bei einem Profil immer, seit Issue #86; die
-  Kommandozeile nur mit `--fallback`), und ist andernfalls ein Fehler
+  Kommandozeile nur mit `--fallback`), und ist andernfalls ein Fehler. Ein Codec,
+  der auf seiner Karte gewählt wurde, als die Gegenseite ihn nicht anbot (`codec_forced`
+  des Profils), wird trotzdem ohne Ausweichen angefordert (`RemoteCaps::forcing`),
+  und ein Codec, dessen Karte mehr anbietet, als die Gegenseite aufführt
+  (`unlisted_options`), wird aus `RemoteCaps::unlisted` konfiguriert
 - Streamt jedes A2DP-Profil wie Automatisch, mit den Standardeinstellungen der Automatik, solange
   die Einstellung `auto_codec` eingeschaltet ist (Codecs > Automatisch den unterstützten Codec mit der
   höchsten Qualität wählen, seit Schema 5 eine Einstellung für alle Geräte); der für das Gerät
@@ -504,7 +508,7 @@ SSRC = Latenzmodus der Senke (0x000000A3 HQ, 0x000000A1 LL). Die Nutzdaten werde
 (10 ms) groß. Automatisch wählt es vor klassischem aptX, Opus und AAC (die Reihenfolge aus Issue #86),
 nach LHDC V5 und LDAC.
 
-## Einstellungen und Dateien
+## Einstellungen und Dateien {#settings-and-files}
 
 Alles wird im Einstellungsordner aufbewahrt, `%APPDATA%\BlueCaster` (oder dem
 Ordner, den die Umgebungsvariable `BLUECASTER_CONFIG_DIR` angibt); die Dateien, die
@@ -563,4 +567,4 @@ Deinstallationsprogramm und `licenses\` (`licenses\README.txt`, `licenses\blueca
   einen eigenen USB-Adapter für BlueCaster
 - Die Firmware mancher Bluetooth-Adapter begrenzt die erreichbare Bitrate
 - USB-Adapter mit Bluetooth 5.0+ funktionieren mit LDAC im Allgemeinen gut
-- Priorität der automatischen Codec-Auswahl (nach Klangqualität, Issue #86): LHDC V5 > LDAC > aptX Adaptive > Opus > aptX HD > aptX > aptX LL > AAC > SBC XQ > SBC (FastStream und Opus 05 nur, wenn gewählt); ein gewählter Codec, den das Gerät nicht anbietet, weicht auf den ersten Codec in der Reihenfolge des Geräts aus, den es anbietet
+- Priorität der automatischen Codec-Auswahl (nach Klangqualität, Issue #86): LHDC V5 > LDAC > aptX Adaptive > Opus > aptX HD > aptX > aptX LL > AAC > SBC XQ > SBC (FastStream und Opus 05 nur, wenn gewählt); ein gewählter Codec, den das Gerät nicht mehr anbietet, weicht auf den ersten Codec in der Reihenfolge des Geräts aus, den es anbietet; einer, der auf seiner Karte gewählt wurde, als das Gerät ihn nicht anbot, wird trotzdem angefordert (`codec_forced`, kein Ausweichen)

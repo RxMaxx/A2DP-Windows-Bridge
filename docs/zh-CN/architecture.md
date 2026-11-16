@@ -223,7 +223,7 @@ sequenceDiagram
 ### 编解码器选择（`codec::caps`）
 
 - 解析远端的能力：标准的 SBC 和 AAC 元素以及厂商编解码器，包括两种厂商 ID 下的 aptX LL 以及 aptX Adaptive（R1 和 R2 接收端；仅在支持 48 kHz 立体声时可用）
-- 选择编解码器：“自动”会选择远端提供的音质最高的编解码器；如果请求的编解码器远端不提供，则改用“自动”会选择的同一编解码器（对配置文件始终如此，自 issue #86 起；命令行仅在使用 `--fallback` 时），否则视为错误
+- 选择编解码器：“自动”会选择远端提供的音质最高的编解码器；如果请求的编解码器远端不提供，则改用“自动”会选择的同一编解码器（对配置文件始终如此，自 issue #86 起；命令行仅在使用 `--fallback` 时），否则视为错误。在远端未提供时于其卡片上选择的编解码器（配置文件的 `codec_forced`）仍会照样请求，不会回退（`RemoteCaps::forcing`）；卡片提供的选项多于远端列出内容的编解码器（`unlisted_options`）则按 `RemoteCaps::unlisted` 配置
 - 当 `auto_codec` 设置开启时（**编解码器 > 自动选择支持的音质最高的编解码器**，自 schema 5 起是适用于所有设备的一项设置），每个 A2DP 配置文件都以“自动”及其默认设置串流；为设备选择的编解码器保留在其配置文件中，供关闭时使用
 - 遵循用户拖动卡片排列的设备编解码器顺序（配置文件的 `codec_order`；`codec::AutoOrder`，为空时表示音质从高到低），用于“自动”的选择以及所选编解码器的回退（自动选择开启时也是如此）。FastStream 和 Opus 05 从不会被“自动”选中，也不会作为回退。（2.0.2 的 beta 版本为所有设备使用同一个顺序，即 settings.json 的 `auto_order`，现在已被忽略。）
 - 选择 aptX 系列的采样率（从远端通告的采样率中选择 44.1 / 48 kHz；由 WASAPI 对捕获的音频重采样）；aptX Adaptive 使用 48 kHz，当选择 96 kHz、音质为高且接收端为 R2 并列出 96 kHz 时使用 96 kHz。设为“自动”的采样率（自动选择时也是如此）会请求 48 kHz，没有 48 kHz 时由各编解码器的选择逻辑采用接收端列出的最佳采样率（issue #86：既不是它列出的最高采样率，也不是 Windows 的混音采样率）
@@ -341,7 +341,7 @@ AAC 和 SBC 使用 A2DP 规范中定义的标准 A2DP 编解码器 ID。
 | `devices\device_codecs.json` | 每台经典设备上次连接时提供的内容（以及是否已向 OPPO 耳塞请求过 Hi-Res） |
 | `pairing\link_keys.txt` | 链接密钥：与 v1 或 2.0.x 配对过的耳机无需重新配对即可再次连接 |
 | `pairing\le_audio_bonds.tlv`、`pairing\le_audio_csip.txt` | LE Audio：LE 绑定信息（含 GATT 服务器持久保存的 CCC 值）以及协调集 |
-| `pairing\windows_le_keys.txt`、`pairing\replaced_windows_keys.json` | 从 Windows 接管的 LE 密钥（直到启用 LE 的协议栈将其加入）；**恢复原始驱动程序** 替换掉的 Windows 密钥 |
+| `pairing\windows_le_keys.txt`、`pairing\replaced_windows_keys.json` | 从 Windows 接管的 LE 密钥（直到某个协议栈将其加入）；**恢复原始驱动程序** 替换掉的 Windows 密钥 |
 | `adapters\adapter_caps.json` | 堆栈对每个适配器所了解的信息（是否支持 LE Audio、地址、HCI 版本、Windows 中的名称） |
 | `adapters\driver\<instance id>.json` | 每个被分配了 WinUSB 的适配器之前的驱动程序 |
 | `firmware\` | 固件文件（`*.bin`、`*.hcd`、`ibt-*`；Intel 的固件也位于 `firmware\intel\`，与 linux-firmware 的布局相同）；早期版本散放在设置文件夹中的文件会被移到这里 |
@@ -371,4 +371,4 @@ AAC 和 SBC 使用 A2DP 规范中定义的标准 A2DP 编解码器 ID。
 - **建议使用第二个适配器**：内置 Bluetooth 留给 Windows 使用，专用 USB 适配器用于 BlueCaster
 - 某些 Bluetooth 适配器的固件会限制可达到的比特率
 - USB Bluetooth 5.0+ 适配器通常能很好地支持 LDAC
-- 自动选择编解码器的优先级（按音质，issue #86）：LHDC V5 > LDAC > aptX Adaptive > Opus > aptX HD > aptX > aptX LL > AAC > SBC XQ > SBC（FastStream 和 Opus 05 仅在明确选择时使用）；所选编解码器设备不提供时，回退到该设备顺序中它提供的第一个编解码器
+- 自动选择编解码器的优先级（按音质，issue #86）：LHDC V5 > LDAC > aptX Adaptive > Opus > aptX HD > aptX > aptX LL > AAC > SBC XQ > SBC（FastStream 和 Opus 05 仅在明确选择时使用）；所选编解码器设备不再提供时，回退到该设备顺序中它提供的第一个编解码器；在设备未提供时于其卡片上选择的编解码器仍会照样请求（`codec_forced`，不回退）

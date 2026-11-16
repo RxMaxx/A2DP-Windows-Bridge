@@ -222,7 +222,7 @@ sequenceDiagram
 ### コーデックの選択（`codec::caps`） {#codec-choice-codeccaps}
 
 - リモートの能力を解析する: 標準の SBC と AAC の要素、ベンダーコーデック。aptX LL は両方の Vendor ID、aptX Adaptive は R1 と R2 のシンク（48 kHz ステレオでのみ使える）
-- コーデックを選ぶ: 自動では、リモートが提示するうちで最も音質の高いコーデックを選ぶ。リモートが提示しないコーデックを求めた場合は、自動が選ぶのと同じコーデックに置き換え（プロファイルでは issue #86 以降は常に、コマンドラインでは `--fallback` のときだけ）、それ以外はエラーにする
+- コーデックを選ぶ: 自動では、リモートが提示するうちで最も音質の高いコーデックを選ぶ。リモートが提示しないコーデックを求めた場合は、自動が選ぶのと同じコーデックに置き換え（プロファイルでは issue #86 以降は常に、コマンドラインでは `--fallback` のときだけ）、それ以外はエラーにする。リモートが提示していないのにカードで選んだコーデック（プロファイルの `codec_forced`）は、フォールバックなしでそのまま求め（`RemoteCaps::forcing`）、リモートが通知する以上の選択肢をカードに出しているコーデック（`unlisted_options`）は `RemoteCaps::unlisted` から設定する
 - `auto_codec` の設定がオンの間（**コーデック > 対応するコーデックのうち最も音質の高いものを自動で選ぶ**。schema 5 以降はすべてのデバイスで 1 つの設定）、すべての A2DP プロファイルを自動の既定の設定で、自動として配信する。デバイスに選んだコーデックは、オフのときのためにプロファイルに残る
 - ユーザーがカードをドラッグして決めたデバイスのコーデックの順番（プロファイルの `codec_order`。`codec::AutoOrder`。空なら音質の高い順）に従って、自動の選択と、選んだコーデックのフォールバックを決める（自動選択の間も）。FastStream と Opus 05 は、自動の選択にもフォールバックにもならない（2.0.2 のベータでは、すべてのデバイスに共通の 1 つの順番が settings.json の `auto_order` にあったが、今は無視する）
 - aptX 系のサンプルレートを選ぶ（リモートが通知するレートから 44.1 / 48 kHz。キャプチャのリサンプリングは WASAPI が行う）。aptX Adaptive は 48 kHz。96 kHz を選び、音質が高音質で、シンクが R2 で 96 kHz を通知していれば 96 kHz。自動のレート（自動選択でも）は 48 kHz を求め、それがなければ各コーデックの選択がシンクの通知する中で最良のものを選ぶ（issue #86: シンクが通知する最高のレートでも、Windows のミックスのレートでもない）
@@ -340,7 +340,7 @@ AAC と SBC は、A2DP の仕様で定義された標準のコーデック ID �
 | `devices\device_codecs.json` | クラシックの各デバイスが前回の接続で提示した内容（と、OPPO のイヤホンに Hi-Res を求めたかどうか） |
 | `pairing\link_keys.txt` | リンクキー。v1 や 2.0.x でペアリングしたヘッドホンは、ペアリングし直さずに再接続する |
 | `pairing\le_audio_bonds.tlv`、`pairing\le_audio_csip.txt` | LE Audio: LE のボンディング情報（GATT サーバーが保持する CCC の値を含む）とコーディネートセット |
-| `pairing\windows_le_keys.txt`、`pairing\replaced_windows_keys.json` | Windows から引き継いだ LE のキー（LE を使うスタックが取り込むまで）と、**元のドライバに戻す** で置き換えた Windows のキー |
+| `pairing\windows_le_keys.txt`、`pairing\replaced_windows_keys.json` | Windows から引き継いだ LE のキー（スタックが取り込むまで）と、**元のドライバに戻す** で置き換えた Windows のキー |
 | `adapters\adapter_caps.json` | スタックが各アダプターについて知ったこと（LE Audio への対応、アドレス、HCI のバージョン、Windows でのアダプターの名前） |
 | `adapters\driver\<instance id>.json` | WinUSB を割り当てた各アダプターの、元のドライバー |
 | `firmware\` | ファームウェアのファイル（`*.bin`、`*.hcd`、`ibt-*`。Intel のものは linux-firmware と同じ配置で `firmware\intel\` にも）。以前のバージョンが設定フォルダーに直接置いていたファイルはここに移す |
@@ -370,4 +370,4 @@ AAC と SBC は、A2DP の仕様で定義された標準のコーデック ID �
 - **2 つ目のアダプターを推奨**: Windows には内蔵の Bluetooth を残し、BlueCaster には専用の USB アダプターを使う
 - 一部の Bluetooth アダプターは、ファームウェアが出せるビットレートを制限する
 - USB Bluetooth 5.0 以上のアダプターは、一般に LDAC でよく動く
-- 自動のコーデック選択の優先順位（音質順、issue #86）: LHDC V5 > LDAC > aptX Adaptive > Opus > aptX HD > aptX > aptX LL > AAC > SBC XQ > SBC（FastStream と Opus 05 は選んだときだけ）。デバイスが提示しないコーデックを選んでいる場合は、デバイスの順番で、デバイスが提示する最初のコーデックにフォールバックする
+- 自動のコーデック選択の優先順位（音質順、issue #86）: LHDC V5 > LDAC > aptX Adaptive > Opus > aptX HD > aptX > aptX LL > AAC > SBC XQ > SBC（FastStream と Opus 05 は選んだときだけ）。選んだコーデックをデバイスがもう提示しない場合は、デバイスの順番で、デバイスが提示する最初のコーデックにフォールバックする。デバイスが提示していないのにカードで選んだコーデックは、そのまま求める（`codec_forced`、フォールバックなし）
