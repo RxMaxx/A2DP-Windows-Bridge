@@ -289,7 +289,10 @@ sequenceDiagram
 - 코덱을 선택합니다. 자동은 원격 장치가 제공하는 코덱 중 음질이 가장 높은 코덱을
   선택합니다. 원격 장치가 제공하지 않는 코덱을 요청하면 자동이 선택할 코덱과 같은
   코덱으로 대체되고(프로필에서는 issue #86 이후 항상, 명령줄에서는 `--fallback`을
-  지정했을 때만), 그렇지 않으면 오류가 됩니다
+  지정했을 때만), 그렇지 않으면 오류가 됩니다. 원격 장치가 제공하지 않을 때 카드에서
+  선택한 코덱(프로필의 `codec_forced`)은 대체 없이 그대로 요청하며(`RemoteCaps::forcing`),
+  카드가 원격 장치가 알리는 것보다 많은 옵션을 제공하는 코덱(`unlisted_options`)은
+  `RemoteCaps::unlisted`로 구성합니다
 - `auto_codec` 설정(**코덱 > 지원하는 코덱 중 음질이 가장 높은 코덱 자동 선택**,
   schema 5부터 모든 장치에 공통인 설정 하나)이 켜져 있는 동안에는 모든 A2DP 프로필을
   자동의 기본 설정으로 자동 스트리밍합니다. 장치에 선택한 코덱은 꺼졌을 때를 위해
@@ -480,7 +483,7 @@ PipeWire와 마찬가지로) RTP 헤더 **없이** 전송되므로, L2CAP MTU �
 LL 패킷은 348바이트(10 ms)입니다. 자동은 이를 기본 aptX, Opus, AAC보다 우선하여
 선택하며(issue #86의 순서), LHDC V5와 LDAC보다는 뒤입니다.
 
-## 설정과 파일
+## 설정과 파일 {#settings-and-files}
 
 모든 데이터는 설정 폴더 `%APPDATA%\BlueCaster`(또는 `BLUECASTER_CONFIG_DIR` 환경
 변수로 지정한 폴더)에 저장되며, v1과 2.0.x에도 있던 파일은 그 형식을 유지합니다
@@ -537,4 +540,4 @@ LL 패킷은 348바이트(10 ms)입니다. 자동은 이를 기본 aptX, Opus, A
   BlueCaster에는 전용 USB 어댑터 사용
 - 일부 Bluetooth 어댑터는 펌웨어 때문에 달성 가능한 비트레이트가 제한됨
 - USB Bluetooth 5.0 이상 어댑터는 일반적으로 LDAC에서 잘 작동함
-- 자동 코덱 선택 우선순위(음질 순, issue #86): LHDC V5 > LDAC > aptX Adaptive > Opus > aptX HD > aptX > aptX LL > AAC > SBC XQ > SBC (FastStream, Opus 05는 직접 선택한 경우에만). 장치가 제공하지 않는 코덱을 선택하면, 장치의 순서에서 장치가 제공하는 첫 코덱으로 대체됨
+- 자동 코덱 선택 우선순위(음질 순, issue #86): LHDC V5 > LDAC > aptX Adaptive > Opus > aptX HD > aptX > aptX LL > AAC > SBC XQ > SBC (FastStream, Opus 05는 직접 선택한 경우에만). 선택한 코덱을 장치가 더 이상 제공하지 않으면, 장치의 순서에서 장치가 제공하는 첫 코덱으로 대체됨. 장치가 제공하지 않을 때 카드에서 선택한 코덱은 그대로 요청함(`codec_forced`, 대체 없음)

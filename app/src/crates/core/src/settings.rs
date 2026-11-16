@@ -22,7 +22,7 @@ fn v1_schema() -> u32 {
     1
 }
 /// The languages of app/lang
-pub const LANGUAGES: [&str; 8] = ["en", "ja", "de", "fr", "es", "ko", "zh-CN", "zh-TW"];
+pub const LANGUAGES: [&str; 10] = ["en", "ja", "de", "fr", "es", "ko", "zh-CN", "zh-TW", "uk", "ru"];
 
 /// One of LANGUAGES for a BCP 47 name ("ja-JP", "zh-Hant-HK", "pt-BR"):
 /// None when the app has no strings for it
@@ -565,6 +565,8 @@ mod tests {
         assert_eq!(app_language_for("zh-TW"), Some("zh-TW"));
         assert_eq!(app_language_for("zh-HK"), Some("zh-TW"));
         assert_eq!(app_language_for("zh-Hant-TW"), Some("zh-TW"));
+        assert_eq!(app_language_for("uk-UA"), Some("uk"));
+        assert_eq!(app_language_for("ru-RU"), Some("ru"));
         assert_eq!(app_language_for("pt-BR"), None);
         assert_eq!(app_language_for(""), None);
         let tags = |t: &[&str]| t.iter().map(|s| s.to_string()).collect::<Vec<_>>();

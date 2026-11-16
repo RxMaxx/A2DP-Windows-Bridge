@@ -153,6 +153,6 @@ BlueCaster bypasses the Windows Bluetooth stack entirely. It communicates direct
 - **Headphone controls (AVRCP)**: Volume slider synced with the headphones and the Windows volume; their play/pause, next and previous buttons control playback on the PC (see [Usage](usage#headphone-buttons))
 - **Per-device settings**: a codec (with its own settings) and an output source for each audio device, side by side on Home and connectable from the tray
 - **Updates**: The installed version updates itself after the audio device disconnects (see [Usage](usage#updates))
-- **Localization**: English, Japanese, Simplified / Traditional Chinese, Korean, German, French and Spanish
+- **Localization**: English, Japanese, Simplified / Traditional Chinese, Korean, German, French, Spanish, Ukrainian and Russian
 - **Realtek firmware**: Guided firmware download for Realtek adapters
 - **Diagnostics**: connection flow, log, HCI capture, diagnostics for bug reports, peer receiver test against a Linux PC (see [Usage](usage#receiver))

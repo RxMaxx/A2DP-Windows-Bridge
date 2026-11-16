@@ -57,7 +57,7 @@ See the [Setup guide](https://seiyafunaokajp.github.io/BlueCaster/setup) and the
 - **Diagnostics**: link quality, AFH (avoids your Wi-Fi channels), connection flow, log, HCI capture
 - **Command line**: `bluecaster-core.exe --cli` ([CLI Mode](https://seiyafunaokajp.github.io/BlueCaster/usage#cli-mode))
 - **Updates**: daily check, updates itself
-- **8 languages**: English, Japanese, Chinese (Simplified / Traditional), Korean, German, French, Spanish
+- **10 languages**: English, Japanese, Chinese (Simplified / Traditional), Korean, German, French, Spanish, Ukrainian, Russian
 - **Headset microphone**: the headphones' microphone as a Windows microphone through a virtual audio cable such as VB-CABLE; classic devices play at call quality meanwhile, LE Audio keeps its quality ([details](https://seiyafunaokajp.github.io/BlueCaster/usage#codecs))
 - **Works with** third-party apps such as earbud control apps: [Works With](https://seiyafunaokajp.github.io/BlueCaster/works-with) (not supported by this project)
 
