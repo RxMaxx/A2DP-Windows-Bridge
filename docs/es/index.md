@@ -8,10 +8,10 @@ has_toc: false
 
 # BlueCaster
 
-Transmisión de audio Bluetooth A2DP para Windows con compatibilidad completa de códecs.
+Transmisor de audio Bluetooth avanzado para Windows, compatible con todos los códecs.
 {: .fs-6 .fw-300 }
 
-Convierte un adaptador Bluetooth corriente -- un adaptador USB económico o, en muchos portátiles, el integrado -- de los códecs básicos que le da Windows en un transmisor Hi-Fi: **LHDC V5, LDAC y aptX Adaptive** hasta 96 kHz (LHDC V5 hasta 192 kHz), además de **aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC y FastStream**, y LE Audio (LC3, experimental, solo en modo de desarrollador). BlueCaster configura el adaptador por sí mismo y lo devuelve a Windows con un clic ([cómo funciona](architecture)).
+BlueCaster convierte su adaptador Bluetooth -- un adaptador USB económico o el que traen integrado muchos portátiles -- en un transmisor Hi-Fi. Windows solo admite códecs básicos; BlueCaster transmite **LHDC V5, LDAC y aptX Adaptive** hasta 96 kHz (LHDC V5 hasta 192 kHz), además de **aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC y FastStream**, y LE Audio (LC3, experimental, solo en modo de desarrollador). Configura el adaptador automáticamente, y un clic lo devuelve a Windows ([cómo funciona](architecture)).
 
 ![BlueCaster's Codecs screen, streaming LDAC 990 kbps / 48 kHz to Sony WH-1000XM4](../images/app_sample.png)
 
@@ -57,28 +57,28 @@ Convierte un adaptador Bluetooth corriente -- un adaptador USB económico o, en 
 | Opus 05 (Opus propio de PipeWire) | ❌ | ❌ | ✅ PipeWire 0.3.57+ (`opus_05`, solo hacia dispositivos PipeWire) | ✅ (si se elige expresamente, solo en el modo de desarrollador) |
 | LC3 (LE Audio, BAP unicast) | ❌ | ✅ en PC cuyo hardware y controlador Bluetooth admiten LE Audio | ✅ PipeWire BAP `lc3` (LE Audio de BlueZ) | 🧪 experimental, solo en modo de desarrollador (la entrada LE Audio de un dispositivo; baja latencia GMAP con auriculares gaming; adaptador Bluetooth 5.2 con ISO, [Uso](usage#le-audio)) |
 
-✅ compatible · 🧪 experimental · ❌ no compatible. Todas las columnas corresponden al lado emisor (PC → auriculares). «Integrado» es el audio Bluetooth propio del sistema operativo, sin BlueCaster; la columna de Ubuntu es el conjunto de códecs de PipeWire en Ubuntu 26.04 (`libspa-0.2-bluetooth`).
+✅ compatible · 🧪 experimental · ❌ no compatible. Todas las columnas muestran el lado que envía (PC → auriculares). «Integrado» es el audio Bluetooth propio del sistema operativo, sin BlueCaster; la columna de Ubuntu muestra los códecs de PipeWire en Ubuntu 26.04 (`libspa-0.2-bluetooth`).
 
 {: .warning }
 **aptX HD y aptX Low Latency** siguen las implementaciones de Android / PipeWire y superan las pruebas de ida y vuelta de codificación/decodificación, pero aún no se han verificado con auriculares reales. Los valores de latencia de esta tabla son cifras típicas, no medidas con BlueCaster.
 
 {: .warning }
-**Acerca de LHDC V5.** Usa un port en C del codificador LHDC V5 que Google añadió a Android 17 (AOSP, Apache-2.0); se verificó que el port produce exactamente los mismos bits que el codificador en Rust de AOSP, y la señalización A2DP sigue `a2dp_vendor_lhdcv5` de Android. Un usuario lo verificó con auriculares LHDC V5 reales a 1000 kbps / 192 kHz con la v1.1.1-beta.1 ([#50](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/50)); la v2 usa el mismo codificador. Solo se admite LHDC V5 con pérdida: LHDC V2/V3 (auriculares más antiguos) y el modo sin pérdida «LHDC-RAW» no tienen codificador de código abierto. En modo Automático, LHDC V5 tiene la máxima prioridad, por encima de LDAC.
+**Acerca de LHDC V5.** BlueCaster usa un port en C del codificador LHDC V5 que Google añadió a Android 17 (AOSP, Apache-2.0). El port produce exactamente los mismos bits que el codificador en Rust de AOSP, y la señalización A2DP sigue `a2dp_vendor_lhdcv5` de Android. Un usuario confirmó LHDC V5 con auriculares LHDC V5 reales a 1000 kbps / 192 kHz en la v1.1.1-beta.1 ([#50](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/50)); la v2 usa el mismo codificador. Solo se admite LHDC V5 con pérdida: LHDC V2/V3 (auriculares más antiguos) y el modo sin pérdida «LHDC-RAW» no tienen codificador de código abierto. En modo Automático, LHDC V5 va primero, por delante de LDAC.
 
 {: .warning }
-**Opus** es el códec de fabricante Opus A2DP de Android (Android 13+, ID de fabricante 0x000000E0 Google): 48 kHz, tramas de 20 ms, 256 kbps estéreo tal como lo solicita Android (Estándar 192, Móvil 128 kbps), codificado con libopus 1.6.1. Supera la prueba de extremo a extremo contra un receptor virtual, pero aún no se ha verificado con auriculares Opus reales. En modo Automático tiene menos prioridad que aptX Adaptive y más que aptX HD.
+**Opus** es el códec de fabricante Opus A2DP de Android (Android 13+, ID de fabricante 0x000000E0 Google): 48 kHz, tramas de 20 ms, 256 kbps estéreo tal como lo solicita Android (Estándar 192, Móvil 128 kbps), codificado con libopus 1.6.1. Supera la prueba de extremo a extremo con un receptor virtual, pero aún no se ha verificado con auriculares Opus reales. En modo Automático va detrás de aptX Adaptive y delante de aptX HD.
 
 {: .warning }
-**Opus 05** es el códec de fabricante Opus A2DP propio de PipeWire (ID de fabricante 0x000005F1, códec 0x1005; `opus_05` de PipeWire), que solo implementa PipeWire, así que el receptor tiene que ser un PC con PipeWire como receptor A2DP. BlueCaster envía solo la dirección de música estéreo (sin 5.1 / 7.1 ni canal de retorno): 48 kHz, tramas de 10 ms (20 ms si el receptor solo admite esas), el mismo codificador libopus y las mismas tasas de bits que Opus, limitadas al máximo del receptor. El modo Automático nunca lo elige; elíjalo en **Códecs** o con `-c opus05`. Supera la prueba de extremo a extremo contra un receptor virtual que ofrece las capacidades de PipeWire, pero no se ha probado con un receptor PipeWire real. PipeWire como receptor A2DP decodifica Opus 05 desde la 0.3.57 y el Opus de Android (`opus_g`) desde la 1.2.0: Ubuntu 24.04 LTS incluye PipeWire 1.0.5 (solo Opus 05), Ubuntu 25.10 (1.4.7) y 26.04 LTS (1.6.2) incluyen ambos; ninguno está aún verificado con BlueCaster.
+**Opus 05** es el códec de fabricante Opus A2DP propio de PipeWire (ID de fabricante 0x000005F1, códec 0x1005; `opus_05` de PipeWire), que solo implementa PipeWire, así que el receptor tiene que ser un PC con PipeWire como receptor A2DP. BlueCaster solo envía música estéreo (sin 5.1 / 7.1 ni canal de retorno): 48 kHz, tramas de 10 ms (20 ms si el receptor solo admite esas), el mismo codificador libopus y las mismas tasas de bits que Opus, limitadas al máximo del receptor. El modo Automático nunca lo elige; elíjalo en **Códecs** o con `-c opus05`. Supera la prueba de extremo a extremo con un receptor virtual que ofrece las capacidades de PipeWire, pero no se ha probado con un receptor PipeWire real. Como receptor A2DP, PipeWire decodifica Opus 05 desde la 0.3.57 y el Opus de Android (`opus_g`) desde la 1.2.0. Ubuntu 24.04 LTS incluye PipeWire 1.0.5 (solo Opus 05); Ubuntu 25.10 (1.4.7) y 26.04 LTS (1.6.2) incluyen ambos. Ninguno de los dos códecs se ha probado aún con BlueCaster.
 
 {: .warning }
-**SBC XQ** se verificó con unos Sony WH-1000XM4 (canal dual, bitpool 43 a 48 kHz, 552 kbps). Los receptores que rechazan la configuración se reconectan con SBC normal. **FastStream** supera la prueba de extremo a extremo contra un receptor virtual, pero no se ha probado con auriculares FastStream reales. Solo la dirección de música; Automático nunca lo elige.
+**SBC XQ** se verificó con unos Sony WH-1000XM4 (canal dual, bitpool 43 a 48 kHz, 552 kbps). Si un receptor rechaza esa configuración, BlueCaster se reconecta con SBC normal. **FastStream** supera la prueba de extremo a extremo con un receptor virtual, pero no se ha probado con auriculares FastStream reales. Solo transmite música, y el modo Automático nunca lo elige.
 
 {: .note }
 **¿Solo necesita aptX clásico?** Windows 10 ya admite aptX clásico en su pila Bluetooth integrada (no aptX HD, aptX LL ni aptX Adaptive), así que BlueCaster no es necesario para ese códec. BlueCaster es útil sobre todo para LHDC V5, LDAC, aptX Adaptive, aptX HD y aptX Low Latency.
 
 {: .note }
-**Acerca de aptX Adaptive.** Se codifica con el codificador en Rust puro, con licencia MIT, de [AKS-Logic/aptx-adaptive-linux](https://github.com/AKS-Logic/aptx-adaptive-linux), cuyas tablas reconstruyeron sus autores a partir de binarios de Qualcomm distribuidos y de capturas por aire. 48 kHz estéreo (las solicitudes de 44.1 kHz se capturan a 48 kHz), 24 bits: Alta 427 kbps o Baja latencia 265 kbps (receptores R2: 270), ABR en Alta. 96 kHz (Alta, 646 kbps) se usa cuando lo elige en su configuración, si los auriculares son un receptor R2 que anuncia 96 kHz, y nunca en Baja latencia; Automático transmite a 48 kHz. El modo Automático lo elige después de LHDC V5 y LDAC; también puede elegirlo en **Códecs** o con `-c aptxad`. Un usuario lo confirmó con unos EarFun Air Pro 4+ a 48 kHz en 2.0.2-beta.6, tan estable como el aptX clásico, y desde entonces también 96 kHz con auriculares reales ([#86](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/86)); el proyecto original informa de que funciona en Linux con Bose QuietComfort Ultra (1.ª generación) y B&W Px7 S2e. Consulte [Familia aptX y aptX Adaptive](usage#aptx-compatibility).
+**Acerca de aptX Adaptive.** BlueCaster lo codifica con el codificador en Rust puro y con licencia MIT de [AKS-Logic/aptx-adaptive-linux](https://github.com/AKS-Logic/aptx-adaptive-linux); sus autores reconstruyeron las tablas del codificador a partir de binarios publicados de Qualcomm y de capturas por aire. 48 kHz estéreo (las solicitudes de 44.1 kHz se capturan a 48 kHz), 24 bits: Alta 427 kbps o Baja latencia 265 kbps (receptores R2: 270), ABR en Alta. 96 kHz (Alta, 646 kbps) se usa cuando lo elige en los ajustes del códec y los auriculares son un receptor R2 que anuncia 96 kHz; Baja latencia nunca lo usa, y Automático transmite a 48 kHz. Automático coloca aptX Adaptive detrás de LHDC V5 y LDAC; también puede elegirlo en **Códecs** o con `-c aptxad`. Un usuario lo confirmó con unos EarFun Air Pro 4+ a 48 kHz en 2.0.2-beta.6 (tan estable como el aptX clásico), y después confirmó también 96 kHz con auriculares reales ([#86](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/86)); el proyecto original indica que funciona en Linux con Bose QuietComfort Ultra (1.ª generación) y B&W Px7 S2e. Consulte [Familia aptX y aptX Adaptive](usage#aptx-compatibility).
 
 ## Compatibilidad de plataformas {#platform-support}
 
@@ -91,19 +91,19 @@ Convierte un adaptador Bluetooth corriente -- un adaptador USB económico o, en 
 | Adaptador virtual `tools/emu/emu_vhci.py` | ❌ | ❌ | ✅ |
 | [Receptor de medición](usage#receiver) `tools/linux_sink` | ❌ | ❌ | ✅ |
 
-BlueCaster solo funciona en Windows (Windows 10 22H2 o Windows 11), con compilaciones para x64 y ARM64. Las herramientas de Linux necesitan Python 3.11 o posterior (verificado en Ubuntu 26.04); `setup.sh` está pensado para Ubuntu / Debian; en otras distribuciones hay que instalar los paquetes a mano.
+BlueCaster solo funciona en Windows (Windows 10 22H2 o Windows 11), con compilaciones para x64 y ARM64. Las herramientas de Linux necesitan Python 3.11 o posterior (verificado en Ubuntu 26.04). `setup.sh` está pensado para Ubuntu / Debian; en otras distribuciones, instale los paquetes a mano.
 
 ## Hardware verificado {#verified-hardware}
 
-Probado con Sony WH-1000XM4 y WH-1000XM6, EarFun Air Pro 4+, Grado GW100x y otros, con los adaptadores TP-Link UB500, RTL8761B genérico, el RTL8852BE integrado de un portátil, ASUS BT400 y CSR8510. La lista completa con códecs, versiones y los informes en que se basa: **[Hardware verificado](hardware)**.
+Probado con Sony WH-1000XM4 y WH-1000XM6, EarFun Air Pro 4+, Grado GW100x y otros, con los adaptadores TP-Link UB500, RTL8761B genérico, el RTL8852BE integrado de un portátil, ASUS BT400 y CSR8510. En **[Hardware verificado](hardware)** encontrará la lista completa, con códecs, versiones y los informes en que se basa cada entrada.
 
 ## Cortes y problemas de conexión
 
-En qué resultaron consistir los informes de cortes y de conexión, las comprobaciones que hacer antes de informar y cómo leer Calidad del enlace: **[Cortes y problemas de conexión](wireless)**.
+**[Cortes y problemas de conexión](wireless)** explica qué resultaron ser los cortes y problemas de conexión informados hasta ahora, qué comprobar antes de informar y cómo leer Calidad del enlace.
 
 ## Funciona con
 
-Aplicaciones de terceros que funcionan junto con BlueCaster, como apps de control de auriculares, según lo informado en los issues (no las crea ni las soporta BlueCaster): **[Funciona con](works-with)**.
+**[Funciona con](works-with)** recoge aplicaciones de terceros que, según los usuarios, funcionan con BlueCaster, como las apps de control de auriculares. BlueCaster no las crea ni les da soporte.
 
 ## Modos de captura de audio
 
@@ -115,9 +115,9 @@ BlueCaster captura el audio mediante WASAPI y ofrece tres modos:
 | **Dispositivo virtual** | Captura desde un dispositivo de audio virtual elegido por el usuario (p. ej., VB-CABLE, VoiceMeeter) | Enviar aplicaciones concretas a Bluetooth y mantener el resto del audio en los altavoces |
 | **Aplicación** | Captura solo lo que reproduce una aplicación, después de su propio procesamiento (Windows 11 / Windows 10 2004+) | Enviar una aplicación, o la salida de una aplicación de efectos para todo el sistema (ecualizador, mejora de sonido) |
 
-En el modo **Dispositivo virtual**, BlueCaster puede cambiar el dispositivo de reproducción predeterminado de Windows al dispositivo virtual seleccionado (**Usar como salida predeterminada de Windows mientras hay conexión**) y luego captura su salida de loopback. Las aplicaciones que reproducen en el dispositivo virtual se transmiten por Bluetooth. Al detener la transmisión, se restaura el dispositivo predeterminado anterior.
+En el modo **Dispositivo virtual**, BlueCaster puede cambiar el dispositivo de reproducción predeterminado de Windows al dispositivo virtual seleccionado (**Usar como salida predeterminada de Windows mientras hay conexión**) y luego captura su salida de loopback. Todo lo que una aplicación reproduzca en el dispositivo virtual se transmite por Bluetooth. Al detener la transmisión, se restaura el dispositivo predeterminado anterior.
 
-El origen **Dispositivo predeterminado** no le quita el audio al dispositivo de reproducción predeterminado: se oye allí y también por Bluetooth. Si no se puede abrir el dispositivo virtual seleccionado, la conexión envía en su lugar el audio del sistema y lo indica. Consulte [Modos de captura](usage#capture-modes).
+El origen **Dispositivo predeterminado** no le quita el audio al dispositivo de reproducción predeterminado: el sonido se oye allí y también por Bluetooth. Si no se puede abrir el dispositivo virtual seleccionado, BlueCaster envía en su lugar el audio del sistema y se lo indica. Consulte [Modos de captura](usage#capture-modes).
 
 ## Cómo funciona
 
@@ -139,7 +139,7 @@ flowchart TD
     usb -.-> hp["Auriculares"]
 ```
 
-BlueCaster omite por completo la pila Bluetooth de Windows. Se comunica directamente con un adaptador Bluetooth USB a través de WinUSB y usa [BTstack](https://github.com/bluekitchen/btstack) para implementar toda la pila de protocolos Bluetooth en modo de usuario. Un pequeño programa residente (`bluecaster-core.exe`, con el icono de la bandeja) transmite el audio; la ventana solo muestra su estado, por lo que cerrarla no detiene el audio (consulte [Arquitectura](architecture)).
+BlueCaster prescinde por completo de la pila Bluetooth de Windows. Se comunica directamente con un adaptador Bluetooth USB a través de WinUSB y usa [BTstack](https://github.com/bluekitchen/btstack) para implementar toda la pila de protocolos Bluetooth en modo de usuario. Un pequeño programa en segundo plano (`bluecaster-core.exe`, con el icono de la bandeja) transmite el audio. La ventana solo muestra su estado, así que cerrarla no detiene el audio (consulte [Arquitectura](architecture)).
 
 ## Funciones
 
@@ -150,11 +150,11 @@ BlueCaster omite por completo la pila Bluetooth de Windows. Se comunica directam
 - **WinUSB desde la aplicación**: asigna el controlador WinUSB al adaptador y restaura el controlador original, sin necesidad de Zadig (consulte [Configuración](setup#winusb)); los auriculares que Windows emparejó a través del adaptador se conectan sin volver a emparejarlos
 - **Configuración inicial**: adaptador, controlador y firmware, auriculares, una primera conexión, configuración general
 - **ABR**: tasa de bits adaptativa para conexiones inestables (LDAC, LHDC V5 y aptX Adaptive; bitpool adaptativo para SBC y SBC XQ)
-- **Reconexión automática**: vuelve a conectar si se pierde el enlace (3 intentos; 10 cuando el adaptador tiene que volver a arrancar) y cuando el PC sale de la suspensión; **Reconectar automáticamente** en **Dispositivos de audio** la desactiva
+- **Reconexión automática**: vuelve a conectar si se pierde el enlace (3 intentos; 10 cuando el adaptador tiene que volver a arrancar) y cuando el PC sale de la suspensión; puede desactivarla con **Reconectar automáticamente** en **Dispositivos de audio**
 - **Calidad del enlace y AFH**: muestra lo que se envía, el RSSI y los canales en uso; indica al adaptador qué canales Wi-Fi debe evitar (consulte [Uso](usage#link-quality))
 - **Controles de los auriculares (AVRCP)**: control deslizante de volumen sincronizado con los auriculares y con el volumen de Windows; sus botones de reproducir/pausar, siguiente y anterior controlan la reproducción en el PC (consulte [Uso](usage#headphone-buttons))
-- **Ajustes por dispositivo**: un códec (con sus propios ajustes) y un origen de salida para cada dispositivo de audio, uno junto a otro en Inicio y que se pueden conectar desde la bandeja
-- **Actualizaciones**: la versión instalada se actualiza sola cuando se desconecta el dispositivo de audio (consulte [Uso](usage#updates))
+- **Ajustes por dispositivo**: cada dispositivo de audio tiene su propio códec (con sus ajustes) y su origen de salida; aparecen uno junto a otro en Inicio y se pueden conectar desde la bandeja
+- **Actualizaciones**: la versión instalada se actualiza automáticamente en cuanto se desconecta el dispositivo de audio (consulte [Uso](usage#updates))
 - **Localización**: inglés, japonés, chino simplificado / tradicional, coreano, alemán, francés, español, ucraniano y ruso
 - **Firmware de Realtek**: descarga guiada del firmware para adaptadores Realtek
 - **Diagnóstico**: flujo de conexión, registro, captura HCI, información de diagnóstico para informes de errores, prueba con receptor par frente a un PC con Linux (consulte [Uso](usage#receiver))

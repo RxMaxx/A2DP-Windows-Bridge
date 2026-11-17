@@ -24,7 +24,7 @@ nav_order: 3
 - **Git** (pour les sous-modules)
 - **PowerShell 7** (`pwsh`) pour `build.ps1` / `build.bat` (`winget install Microsoft.PowerShell`)
 - **Python 3.11 ou ultérieur** pour les vérifications (`tools/check_lang.py`) et le [test avec l'émulateur](#emu)
-- Pour les versions ARM64 : les composants Visual Studio « MSVC v143 - VS 2022 C++ ARM64 build tools » et, sur un PC x64, « C++ Clang Compiler for Windows » (`ring`, de rustls, assemble son code ARM64 avec clang ; `installer/build-release.ps1` trouve lui-même le clang de Visual Studio), et `rustup target add aarch64-pc-windows-msvc`
+- Pour les versions ARM64 : les composants Visual Studio « MSVC v143 - VS 2022 C++ ARM64 build tools » et, sur un PC x64, « C++ Clang Compiler for Windows » (`ring`, utilisé par rustls, assemble son code ARM64 avec clang ; `installer/build-release.ps1` trouve automatiquement le clang de Visual Studio), et `rustup target add aarch64-pc-windows-msvc`
 
 ## Compilation rapide
 
@@ -34,9 +34,9 @@ cd BlueCaster
 pwsh ./build.ps1
 ```
 
-Ou double-cliquez sur `build.bat` dans l'Explorateur : il lance `build.ps1` et attend une touche à la fin (`build.bat -Test` transmet les options). `build.ps1` vérifie d'abord que Rust, Node.js, pnpm et les sous-modules sont présents, lance `pnpm install` si `node_modules` est absent, compile la page de la fenêtre puis les trois programmes dans `target/release/` : `bluecaster-core.exe` (le cœur résident : Bluetooth, audio, zone de notification), `bluecaster.exe` (la fenêtre) et `bluecaster-driver.exe` (l'assistant élevé qui attribue / restaure le pilote WinUSB). Gardez les trois dans un même dossier ; `bluecaster-core.exe --cli` diffuse sans la fenêtre.
+Vous pouvez aussi double-cliquer sur `build.bat` dans l'Explorateur : il lance `build.ps1` et attend que vous appuyiez sur une touche à la fin (`build.bat -Test` transmet les options). `build.ps1` vérifie d'abord que Rust, Node.js, pnpm et les sous-modules sont présents, et lance `pnpm install` si `node_modules` est absent. Il compile ensuite la page de la fenêtre, puis les trois programmes dans `target/release/` : `bluecaster-core.exe` (le cœur résident : Bluetooth, audio, zone de notification), `bluecaster.exe` (la fenêtre) et `bluecaster-driver.exe` (le programme d'aide, exécuté avec les droits d'administrateur, qui attribue et restaure le pilote WinUSB). Gardez les trois programmes dans le même dossier ; `bluecaster-core.exe --cli` diffuse sans la fenêtre.
 
-Options : `-Debug` (profil de développement, `target/debug/`), `-Test` (puis les vérifications de la section « Tests »), `-Decoder` (aussi l'outil de décodage), `-Emu` (aussi le [test avec l'émulateur](#emu) ; `-Emu -Codecs sbc,ldac` ne teste que ces codecs), `-Release -Arch x64|arm64` (uniquement le script de publication, voir « Paquets de version »).
+Options : `-Debug` (profil de développement, `target/debug/`), `-Test` (exécute aussi les vérifications de la section « Tests »), `-Decoder` (compile aussi l'outil de décodage), `-Emu` (lance aussi le [test avec l'émulateur](#emu) ; `-Emu -Codecs sbc,ldac` ne teste que ces codecs), `-Release -Arch x64|arm64` (lance uniquement le script de publication, voir « Paquets de version »).
 
 **Pas à pas** (ce que fait `build.ps1` ; la page de la fenêtre doit être compilée avant `bluecaster.exe`, qui l'intègre) :
 
@@ -55,7 +55,7 @@ cargo build --release -p bluecaster-ui
 git submodule update --init --recursive
 ```
 
-Relancez-la aussi après un pull qui met à jour une bibliothèque. La compilation s'arrête si une bibliothèque de `extern/` n'est pas au commit indiqué dans `extern/versions.txt` ; le message explique comment compiler malgré tout avec une autre version.
+Relancez cette commande après chaque pull qui met à jour une bibliothèque. La compilation s'arrête si une bibliothèque de `extern/` n'est pas au commit indiqué dans `extern/versions.txt` ; le message d'erreur explique comment compiler malgré tout avec une autre version.
 
 ## Structure du projet
 
@@ -104,11 +104,11 @@ python tools/check_lang.py
 pwsh installer/build-release.ps1 -Arch x64
 ```
 
-produit le programme d'installation (`BlueCaster-<version>-win64-setup.exe`), le zip portable, le zip des symboles (fichiers `.pdb`, pour les vidages sur plantage) et le manifeste de mise à jour dans `target/dist`. Il faut Inno Setup 7.1.0 (`winget install JRSoftware.InnoSetup.7 --version 7.1.0`). La signature des mises à jour intégrées à l'application et les autres détails sont décrits dans `installer/README.md`.
+produit le programme d'installation (`BlueCaster-<version>-win64-setup.exe`), le zip portable, le zip des symboles (fichiers `.pdb`, pour les vidages sur plantage) et le manifeste de mise à jour dans `target/dist`. Ce script nécessite Inno Setup 7.1.0 (`winget install JRSoftware.InnoSetup.7 --version 7.1.0`). La signature des mises à jour intégrées à l'application et les autres détails sont décrits dans `installer/README.md`.
 
 ## Tester sans matériel (tools/emu) {#emu}
 
-`tools/emu` diffuse chaque codec depuis BlueCaster vers un récepteur Bluetooth virtuel sur le même PC, sans adaptateur ni casque. Il fonctionne uniquement sous Windows et nécessite **Python 3.11 ou ultérieur** ainsi que **CMake** (fourni avec Visual Studio) pour l'outil de décodage.
+`tools/emu` diffuse chaque codec depuis BlueCaster vers un récepteur Bluetooth virtuel sur le même PC, sans adaptateur ni casque. Cet outil fonctionne uniquement sous Windows et nécessite **Python 3.11 ou ultérieur** ainsi que **CMake** (fourni avec Visual Studio) pour l'outil de décodage.
 
 ```bash
 python tools/emu/setup_env.py                       # once: creates tools/emu/.venv with pinned packages
@@ -121,7 +121,7 @@ python tools/emu/run_test.py                        # every codec and negotiatio
 Fonctionnement :
 
 - `emu_sink.py` exécute deux contrôleurs virtuels [Bumble](https://github.com/google/bumble) reliés par une liaison interne au processus. L'un est exposé en H4 via TCP (`127.0.0.1`) pour BlueCaster. L'autre est utilisé par un récepteur A2DP Bumble qui propose SBC (compatible SBC XQ), AAC, aptX, aptX HD, aptX LL, LDAC, LHDC V5, FastStream, Opus, Opus 05 et aptX Adaptive, et enregistre son trafic HCI.
-- `run_test.py` lance `bluecaster-core.exe --cli` pour chaque codec avec les options de développement : `--hci-tcp` (contrôleur virtuel au lieu de WinUSB), `--test-tone` (1 kHz à gauche / 1,5 kHz à droite au lieu de l'audio du système), `--duration`, `--hci-capture`. La variable d'environnement `BLUECASTER_CONFIG_DIR` fait utiliser à BlueCaster un dossier de configuration séparé, si bien que l'association avec le récepteur virtuel ne touche jamais vos vraies clés de liaison.
+- `run_test.py` lance `bluecaster-core.exe --cli` pour chaque codec avec les options de développement : `--hci-tcp` (contrôleur virtuel au lieu de WinUSB), `--test-tone` (1 kHz à gauche / 1,5 kHz à droite au lieu de l'audio du système), `--duration`, `--hci-capture`. La variable d'environnement `BLUECASTER_CONFIG_DIR` indique à BlueCaster un dossier de configuration séparé : l'association avec le récepteur virtuel ne touche donc jamais vos vraies clés de liaison.
 - Les deux captures HCI sont ensuite vérifiées avec `bluecaster_decode` (le côté récepteur avec `--received`).
 
 Un codec réussit le test lorsque toutes ces conditions sont remplies :
@@ -129,7 +129,7 @@ Un codec réussit le test lorsque toutes ces conditions sont remplies :
 - le codec demandé a été négocié
 - `bluecaster_decode` ne trouve aucun problème, ni côté envoi ni côté réception
 - le récepteur a reçu chaque paquet média et chaque trame envoyés par BlueCaster, et au moins 90 % de la durée audio demandée a été envoyée
-- sauf pour LDAC, LHDC V5 et aptX Adaptive (pas de décodeur open source) : l'audio décodé est identique des deux côtés et correspond au signal de test
+- l'audio décodé est identique des deux côtés et correspond au signal de test (sauf pour LDAC, LHDC V5 et aptX Adaptive, qui n'ont pas de décodeur open source)
 
 | Option | Description |
 |:-------|:------------|
@@ -145,12 +145,12 @@ Un codec réussit le test lorsque toutes ces conditions sont remplies :
 | `--base-port <port>` | Premier port TCP (9101 par défaut ; les cas LE Audio utilisent +100) ; changez-le pour lancer plusieurs tests à la fois |
 | `--out <dir>` | Dossier de sortie (par défaut `tools/emu/out`) |
 
-Pour chaque codec, `tools/emu/out/<codec>/` contient les captures (`bluecaster.pklg`, `sink.pklg`), les journaux, les rapports d'`bluecaster_decode` et les fichiers WAV décodés. Le code de sortie est 0 lorsque tous les codecs ont réussi.
+Pour chaque codec, `tools/emu/out/<codec>/` contient les captures (`bluecaster.pklg`, `sink.pklg`), les journaux, les rapports de `bluecaster_decode` et les fichiers WAV décodés. Le code de sortie est 0 lorsque tous les codecs ont réussi.
 
 {: .note }
 La liaison virtuelle n'a pas de radio : elle vérifie l'encodage, la mise en paquets, la signalisation AVDTP / L2CAP et l'interopérabilité avec une pile Bluetooth indépendante (Bumble), mais pas les conditions radio, le timing sur du vrai matériel ni la façon dont un vrai casque restitue l'audio. Les paquets Bumble ne sont que des outils de test et ne font pas partie de BlueCaster (voir THIRD_PARTY_LICENSES.md).
 
-`emu_vhci.py` fait de même vis-à-vis de la pile Bluetooth de Linux : sous Linux, il attache un adaptateur virtuel à BlueZ via `/dev/vhci`, que le récepteur de mesure `tools/linux_sink` prend ensuite comme un vrai adaptateur - il peut ainsi être testé sans matériel, éventuellement avec des paquets média perdus ou retenus (`--drop`, `--stall`). Voir `tools/linux_sink/README.md`.
+`emu_vhci.py` fait de même pour la pile Bluetooth de Linux : sous Linux, il attache à BlueZ un adaptateur virtuel via `/dev/vhci`, que le récepteur de mesure `tools/linux_sink` utilise ensuite comme un vrai adaptateur. Le récepteur peut ainsi être testé sans matériel, éventuellement avec des paquets média perdus ou retardés (`--drop`, `--stall`). Voir `tools/linux_sink/README.md`.
 
 ## Dépendances
 
@@ -171,6 +171,6 @@ Les bibliothèques C sont des sous-modules git ; les crates Rust et les paquets 
 | Tauri, SolidJS, crates Rust | Cargo / pnpm | `Cargo.lock`, `pnpm-lock.yaml` | MIT / Apache-2.0 et autres (`licenses/third-party/rust-crates.txt` dans la version publiée) |
 
 {: .warning }
-Comme BTstack y est lié, tout BlueCaster que vous compilez ne peut être utilisé et redistribué qu'à des fins personnelles et non commerciales, même si le code source de BlueCaster lui-même est sous double licence Apache-2.0 ou MIT.
+Comme BTstack est lié au programme, tout BlueCaster que vous compilez ne peut être utilisé et redistribué qu'à des fins personnelles et non commerciales, même si le code source de BlueCaster lui-même est sous double licence Apache-2.0 ou MIT.
 
 Voir [THIRD_PARTY_LICENSES.md](https://github.com/SeiyaFunaokaJP/BlueCaster/blob/main/THIRD_PARTY_LICENSES.md) pour le détail complet des licences.

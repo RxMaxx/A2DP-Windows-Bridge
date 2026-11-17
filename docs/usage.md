@@ -136,7 +136,7 @@ On the first start (no audio device yet, or no adapter with WinUSB), the **Setup
 
 BlueCaster keeps running in the system tray, with or without the window:
 
-- **Left-click** the tray icon to open the flyout: the device and its state, **Connect** / **Disconnect**, the volume, the device switcher, the codec (a list to choose it, as on Home), the link quality and **Open app**. The flyout is only as tall as its content. Press Esc or click elsewhere to hide it. If an error needs a screen in the main window (Codecs, Audio Devices, the adapter), its button opens the window on that screen
+- **Left-click** the tray icon to open the flyout: the device and its state, **Connect** / **Disconnect**, the volume, the device switcher, the codec (a list to choose it, as on Home), the link quality and **Open BlueCaster**. The flyout is only as tall as its content. Press Esc or click elsewhere to hide it. If an error needs a screen in the main window (Codecs, Audio Devices, the adapter), its button opens the window on that screen
 - **Settings > Open the tray window from** (**Tray icon** by default): on Windows 11, with **Quick Settings (the volume button)**, the tray icon opens the main window, and the flyout opens with Quick Settings instead, on top of its panels, and closes with them. You can use the flyout there without closing them. If the screen is too short, it opens to their left. With **Nowhere**, no flyout opens and the tray icon opens the main window.
 - **Right-click** for the menu: **Open BlueCaster**, the first 10 devices by name (an LE Audio entry is tagged "(LE Audio)" and the streaming one is checked; click one to connect it), **Disconnect** and **Exit**. The menu opens immediately, without starting the window
 - The tooltip says whether BlueCaster is idle or connected
@@ -632,7 +632,7 @@ For sound that drops out or stutters, a connection that fails, or a lower bit ra
 
 ### The Window Says the Core Is Not Running
 
-The window needs `bluecaster-core.exe` next to it and starts it automatically. "The BlueCaster core is not running" means it could not be started: reinstall BlueCaster (or extract the portable zip again). "The core is a different version" means the two programs come from different versions: install the same version of both (the latest release does this).
+The window needs `bluecaster-core.exe` next to it and starts it automatically. "BlueCaster could not start" means the core is missing or could not be started: reinstall BlueCaster (or extract the portable zip again). "Version mismatch" means the two programs come from different versions: install the same version of both (the latest release does this).
 
 ### Assigning or Restoring the Driver Fails
 
@@ -669,9 +669,9 @@ A failed connection is retried automatically (up to 3 attempts) when the link ca
 
 | Message | Meaning |
 |:--|:--|
-| The device did not answer | Off, out of range, or not connectable (a new device: pairing mode) |
-| The connection came up but then carried nothing | Radio conditions: try again, or move the adapter / the device |
-| The device answered but then ended the connection itself | It does not accept a connection now: turning off, charging, or connected to another device |
+| The device did not respond | Off, out of range, or not connectable (a new device: pairing mode) |
+| The connection dropped right away | Radio conditions: try again, or move the adapter / the device |
+| The device ended the connection | It does not accept a connection now: turning off, charging, or connected to another device |
 | Authentication failed, also after pairing again | Put the device into pairing mode, or remove its pairing list entry, and try again |
 
 **The first connection** to headphones needs pairing mode; later ones reconnect with the saved link key. If it fails even though the headphones are in pairing mode, they may still be connected to a phone or another PC (possibly over LE Audio): disconnect them there, turn LE Audio off in the headphones' app if it has that option, put them into pairing mode and connect again. The log then shows `signaling connection failed (0x66)` (refused for security: the headphones kept the key of an earlier pairing, for example with this PC's Windows Bluetooth) or `(0x67)` (refused for lack of resources: busy with another device).

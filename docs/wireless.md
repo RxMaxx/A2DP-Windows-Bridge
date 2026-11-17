@@ -94,7 +94,7 @@ How to see what they offer: [Checking What Your Headphones Offer](usage#codec-fa
 The error on Home says what happened; the table in [Connection Timeouts](usage#connection-timeouts) explains each message. The radio cases:
 
 - **The device did not answer** (Page Timeout): the device is off, out of range or not in pairing mode for a first connection, or the adapter is still running its ROM firmware. A Realtek adapter without its firmware finds nothing in a scan and times out on every connection, or opens fine and then never streams; one firmware file turned out to be a saved web page. The Adapters screen shows whether the firmware is loaded.
-- **The connection came up but then carried nothing**: radio conditions, or the headphones are busy with another device. Try again, or move the adapter.
+- **The connection dropped right away**: radio conditions, or the headphones are busy with another device. Try again, or move the adapter.
 - **Authentication failed**, or the log says `signaling connection failed (0x66)`: the headphones kept a key from an earlier pairing, usually with this PC's own Windows Bluetooth. `(0x67)`: they are busy with another device, for example a phone with LE Audio on. Disconnect the other devices, turn LE Audio off in the headphones' app, put them into pairing mode and connect once; later connections use the saved key.
 - The headphones **cannot connect to the phone** after Disconnect: since 2.0.2, Disconnect releases the link; if you switch the headphones between the PC and a phone by turning them off and on, turn off **Reconnect automatically**.
 

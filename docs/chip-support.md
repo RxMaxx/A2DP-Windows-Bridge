@@ -228,7 +228,7 @@ Keep each file's line endings: some source files use CRLF, others LF. Some edito
 **What the window shows**:
 
 10. `app/src/core/src/state.rs`, `vendor_note()`: an arm with a new key `firmware.vendor_<vendor>`, taken out of the `MediaTek | Qualcomm` arm, and its test. Before that arm, the function returns `firmware.vendor_unsupported` for chips that `chip_supported` rejects, so the vendor's other chips keep that note. The Adapters screen offers WinUSB to every adapter whose note is not `firmware.vendor_unsupported`
-11. `app/lang/*.json` (all 8 languages, same line in each): the new key, like the Intel one ("Intel adapter. …"). Where it names a button or folder, use that language's own words from the same file (the firmware folder's button is `firmware.open_folder`). Whole vendor: take its name out of `firmware.vendor_unsupported`. Some chips: leave it there, as the vendor's other chips still show that text
+11. `app/lang/*.json` (all 10 languages, same line in each): the new key, like the Intel one ("Intel adapter. …"). Where it names a button or folder, use that language's own words from the same file (the firmware folder's button is `firmware.open_folder`). Whole vendor: take its name out of `firmware.vendor_unsupported`. Some chips: leave it there, as the vendor's other chips still show that text
 12. `app/src/ui/src/lib/links.ts`: the vendor's firmware page (in `LINKS`, `firmwareUrl()` and `vendorFirmwareUrl()`, like Intel's linux-firmware folder), so the Adapters screen shows where to get the files; tests in `app/src/ui/src/lib/chips.test.ts`. The Adapters screen shows the page only for adapters whose note is not `firmware.vendor_unsupported`, so the vendor's other chips do not get it
 
 **Docs**:
