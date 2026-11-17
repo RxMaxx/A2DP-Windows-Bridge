@@ -22,6 +22,8 @@
 // again in the same mode. Its recording side becomes Windows' default input
 // while the device is connected unless turned off (the core's
 // default_input.rs), so apps that record from the default microphone open it.
+// While the microphone is not Off, its processing (gain, noise suppression,
+// noise gate) follows; it applies in place.
 
 import { createSignal, Show } from "solid-js";
 import { useApp } from "../app/context";
@@ -36,6 +38,7 @@ import {
   headsetMode,
   hifiCable,
   isHifiCable,
+  MIC_PROCESSING_OFF,
   multichannelCable,
   ownDefaultOutput,
   type HeadsetMode,
@@ -44,6 +47,7 @@ import {
 import { saveHeadsetMic } from "../screens/Codecs";
 import { Segmented, Select, Toggle, type Option } from "./controls";
 import { Icon } from "./Icon";
+import { MicProcessingControls } from "./MicProcessing";
 
 /** The render endpoint the stream records with this source (the default
  *  output for System Loopback): the microphone must not go there */
@@ -258,6 +262,13 @@ export function InputSource(props: {
             <Icon name="warning" />
             <span>{t("capture.mic_is_default_output")}</span>
           </p>
+        </Show>
+        <Show when={mode() !== "off"}>
+          <MicProcessingControls
+            value={shown()?.mic_processing ?? MIC_PROCESSING_OFF}
+            disabled={busy()}
+            onChange={(p) => save({ mic_processing: p })}
+          />
         </Show>
         <Show when={devicesSwitchShown(snap().settings)}>
           <Toggle

@@ -76,6 +76,7 @@ export type { AdapterStatus } from "./bindings/AdapterStatus";
 export type { CrashReport } from "./bindings/CrashReport";
 export type { DriverKind } from "./bindings/DriverKind";
 export type { LogLevel } from "./bindings/LogLevel";
+export type { MicProcessing } from "./bindings/MicProcessing";
 export type { Msg } from "./bindings/Msg";
 export type { ReceiverConnection } from "./bindings/ReceiverConnection";
 export type { StreamState } from "./bindings/StreamState";

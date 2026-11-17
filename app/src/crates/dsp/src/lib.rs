@@ -2,10 +2,14 @@
 //! headset microphone path (gain, noise suppression, gate, limiter).
 //!
 //! `biquad` and `dynamics` come from Easy-MIC-Booster (same author, MIT OR
-//! Apache-2.0), so its presets sound the same here.
+//! Apache-2.0), so its presets sound the same here; `denoise` and `resample`
+//! follow its RNNoise and resampler, `mic` is the microphone's chain.
 
 pub mod biquad;
+pub mod denoise;
 pub mod dynamics;
+pub mod mic;
+pub mod resample;
 
 use serde::{Deserialize, Serialize};
 
