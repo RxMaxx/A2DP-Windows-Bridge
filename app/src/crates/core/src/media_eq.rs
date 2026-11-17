@@ -115,6 +115,6 @@ mod tests {
             enabled: true,
             bands: vec![ipc::EqPoint { frequency: 5.0, gain: 40.0, q: 0.0, band_type: ipc::EqBandType::Peaking }],
         };
-        assert_eq!(MediaEq::from_ipc(&wild).bands, [EqBand::peaking(20.0, 24.0, 0.1)]);
+        assert_eq!(MediaEq::from_ipc(&wild).bands, [EqBand::peaking(20.0, 12.0, 0.1)]);
     }
 }

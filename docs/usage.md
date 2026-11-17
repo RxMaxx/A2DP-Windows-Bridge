@@ -80,7 +80,7 @@ While the microphone is open, a classic Bluetooth device plays over its call con
 | Action | How |
 |:-------|:----|
 | Add a point | Double-click the graph, or click **Add point** |
-| Move a point | Drag it: left/right changes the frequency, up/down the gain (±24 dB) |
+| Move a point | Drag it: left/right changes the frequency, up/down the gain (±12 dB) |
 | Change its width (Q) | Scroll the mouse wheel over it |
 | Change its type or delete it | Right-click it: **Peak**, **Low shelf**, **High shelf**, **Low cut**, **High cut** |
 | Set exact values | Click a point and use the fields below the graph (type, frequency, gain, Q) |

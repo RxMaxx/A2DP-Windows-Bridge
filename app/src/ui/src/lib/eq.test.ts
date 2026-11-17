@@ -55,7 +55,7 @@ describe("EQ points", () => {
     expect(roundFreq(99999)).toBe(20000);
     expect(heldPoint({ frequency: 1, gain: 40, q: 0, band_type: "Peaking" })).toEqual({
       frequency: 20,
-      gain: 24,
+      gain: 12,
       q: 0.1,
       band_type: "Peaking",
     });

@@ -288,7 +288,7 @@ const H = 240;
 const PLOT = { left: 38, right: W - 10, top: 10, bottom: H - 22 };
 const DB_RANGE = GAIN_LIMIT;
 const GRID_F = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
-const GRID_DB = [-24, -18, -12, -6, 0, 6, 12, 18, 24];
+const GRID_DB = [-12, -9, -6, -3, 0, 3, 6, 9, 12];
 const LOG_SPAN = Math.log10(FREQ_MAX / FREQ_MIN);
 
 const xOf = (f: number) =>

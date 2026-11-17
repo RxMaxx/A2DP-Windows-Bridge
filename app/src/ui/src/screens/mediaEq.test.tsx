@@ -92,7 +92,7 @@ describe("Playback EQ", () => {
   it("is off until turned on, and adds a point where the graph is double-clicked", async () => {
     const { wh, svg, lastEq } = await eqOn();
     // 1 kHz is 2/3 of the way along the log axis; +6 dB a quarter from the top
-    fireEvent.dblClick(svg, { clientX: 38 + (592 * Math.log10(50)) / 3, clientY: 10 + 208 * 0.375 });
+    fireEvent.dblClick(svg, { clientX: 38 + (592 * Math.log10(50)) / 3, clientY: 10 + 208 * 0.25 });
     await waitFor(() => expect(lastEq().bands).toHaveLength(1));
     const p = lastEq().bands[0];
     expect(p.band_type).toBe("Peaking");
@@ -145,7 +145,7 @@ describe("Playback EQ", () => {
     await within(wh).findByRole("button", { name: /^Point 1:/ });
     const gain = within(wh).getByRole("spinbutton", { name: t("eq.gain") });
     fireEvent.change(gain, { target: { value: "40" } });
-    await waitFor(() => expect(lastEq().bands[0].gain).toBe(24));
+    await waitFor(() => expect(lastEq().bands[0].gain).toBe(12));
     fireEvent.change(within(wh).getByRole("spinbutton", { name: "Q" }), { target: { value: "2.5" } });
     await waitFor(() => expect(lastEq().bands[0].q).toBe(2.5));
   });
@@ -156,14 +156,14 @@ describe("Playback EQ", () => {
     const point = await within(wh).findByRole("button", { name: /^Point 1:/ });
     const before = saved().length;
     fireEvent.pointerDown(point, { button: 0, pointerId: 1, clientX: 432, clientY: 114 });
-    // The far left, the top: 20 Hz, +24 dB
+    // The far left, the top: 20 Hz, +12 dB
     fireEvent.pointerMove(svg, { pointerId: 1, clientX: 10, clientY: 0 });
     fireEvent.pointerMove(svg, { pointerId: 1, clientX: 38, clientY: 10 });
     // Shown while dragged, not saved yet
-    await within(wh).findByRole("button", { name: /^Point 1: Peak, 20 Hz, \+24.0 dB/ });
+    await within(wh).findByRole("button", { name: /^Point 1: Peak, 20 Hz, \+12.0 dB/ });
     expect(saved().length).toBe(before);
     fireEvent.pointerUp(svg, { pointerId: 1 });
-    await waitFor(() => expect(lastEq().bands[0]).toMatchObject({ frequency: 20, gain: 24 }));
+    await waitFor(() => expect(lastEq().bands[0]).toMatchObject({ frequency: 20, gain: 12 }));
     expect(saved().length).toBe(before + 1);
   });
 

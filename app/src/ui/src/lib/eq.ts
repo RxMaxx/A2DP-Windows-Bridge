@@ -8,7 +8,7 @@ import type { EqBandType, EqPoint } from "../ipc/types";
 export const MAX_POINTS = 16;
 export const FREQ_MIN = 20;
 export const FREQ_MAX = 20000;
-export const GAIN_LIMIT = 24;
+export const GAIN_LIMIT = 12;
 export const Q_MIN = 0.1;
 export const Q_MAX = 12;
 /** The rate the graph is drawn for (the curve differs only near the top) */
