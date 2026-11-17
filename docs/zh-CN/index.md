@@ -11,9 +11,13 @@ has_toc: false
 适用于 Windows 的高级蓝牙音频发射器，全面支持各种编解码器。
 {: .fs-6 .fw-300 }
 
-BlueCaster 能把你的蓝牙适配器（廉价的 USB 适配器，或许多笔记本电脑内置的适配器）变成 Hi-Fi 发射器。Windows 只支持基础编解码器，而 BlueCaster 能以最高 96 kHz 串流 **LHDC V5、LDAC 和 aptX Adaptive**（LHDC V5 最高 192 kHz），还支持 **aptX HD、aptX、aptX Low Latency、Opus、AAC、SBC XQ、SBC 和 FastStream**，以及 LE Audio（LC3，实验性，仅限开发者模式）。BlueCaster 会自动设置适配器，一键即可把适配器交还给 Windows（[工作原理](architecture)）。
+BlueCaster 能以 **LDAC 990 kbps / 96 kHz**、**LHDC V5（最高 192 kHz）** 和 **aptX Adaptive** 向你的头戴式耳机和入耳式耳机串流音频。Windows 本身不支持这三种编解码器。BlueCaster 还支持 aptX HD、aptX、aptX Low Latency、Opus、AAC、SBC XQ、SBC 和 FastStream。
 
-![BlueCaster 的编解码器页面，正在以 LDAC 990 kbps / 48 kHz 向 Sony WH-1000XM4 串流](../images/app_sample.png)
+- **直接使用你现有的蓝牙。** 许多笔记本电脑内置的 Intel、Realtek 或 MediaTek 蓝牙都能用，便宜的 USB 适配器也可以。BlueCaster 接管适配器后，一键即可交还给 Windows。
+- **只在需要时工作的耳机麦克风。** 麦克风只在应用录音时打开，其余时间音乐保持完整音质。内置噪声抑制和增益调节。
+- **无需额外工具。** 在应用内即可完成适配器设置（[工作原理](architecture)）。
+
+![BlueCaster 的编解码器页面，正在以 LDAC 990 kbps / 96 kHz 向 Sony WH-1000XM4 串流，Windows 快速设置上方显示着 BlueCaster 的卡片](../images/app_sample.png)
 
 [开始使用](setup){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [GitHub](https://github.com/SeiyaFunaokaJP/BlueCaster){: .btn .fs-5 .mb-4 .mb-md-0 }

@@ -9,9 +9,13 @@ nav_order: 1
 Advanced Bluetooth Audio Transmitter for Windows, with full codec support.
 {: .fs-6 .fw-300 }
 
-BlueCaster turns your Bluetooth adapter -- a cheap USB dongle or the one built into many laptops -- into a Hi-Fi transmitter. Windows supports only basic codecs; BlueCaster streams **LHDC V5, LDAC and aptX Adaptive** at up to 96 kHz (LHDC V5 up to 192 kHz), plus **aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC and FastStream**, and LE Audio (LC3, experimental, developer mode only). It sets up the adapter automatically, and one click returns the adapter to Windows ([how it works](architecture)).
+BlueCaster streams **LDAC at 990 kbps / 96 kHz**, **LHDC V5 up to 192 kHz** and **aptX Adaptive** to your headphones and earbuds. Windows doesn't support these three codecs on its own. BlueCaster also supports aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC and FastStream.
 
-![BlueCaster's Codecs screen, streaming LDAC 990 kbps / 48 kHz to Sony WH-1000XM4](images/app_sample.png)
+- **Works with the Bluetooth you already have.** The built-in Intel, Realtek or MediaTek Bluetooth on many laptops works, and so does an inexpensive USB dongle. BlueCaster takes over the adapter, and one click gives it back to Windows.
+- **A headset mic that stays out of the way.** The mic turns on only while an app is recording, so your music plays at full quality the rest of the time. Noise suppression and gain control are built in.
+- **No extra tools needed.** BlueCaster sets up the adapter right in the app ([how it works](architecture)).
+
+![BlueCaster's Codecs screen, streaming LDAC 990 kbps / 96 kHz to Sony WH-1000XM4, with its card above Windows Quick Settings](images/app_sample.png)
 
 [Get Started](setup){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [GitHub](https://github.com/SeiyaFunaokaJP/BlueCaster){: .btn .fs-5 .mb-4 .mb-md-0 }

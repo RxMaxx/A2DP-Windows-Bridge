@@ -11,9 +11,13 @@ has_toc: false
 Émetteur audio Bluetooth avancé pour Windows, compatible avec tous les codecs.
 {: .fs-6 .fw-300 }
 
-BlueCaster fait de votre adaptateur Bluetooth -- une clé USB bon marché ou celui intégré à de nombreux portables -- un émetteur Hi-Fi. Windows ne prend en charge que les codecs de base ; BlueCaster diffuse en **LHDC V5, LDAC et aptX Adaptive** jusqu'à 96 kHz (LHDC V5 jusqu'à 192 kHz), ainsi qu'en **aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC et FastStream**, et en LE Audio (LC3, expérimental, en mode développeur uniquement). Il configure l'adaptateur automatiquement, et un clic suffit pour le rendre à Windows ([fonctionnement](architecture)).
+BlueCaster diffuse en **LDAC à 990 kbps / 96 kHz**, en **LHDC V5 jusqu'à 192 kHz** et en **aptX Adaptive** vers votre casque ou vos écouteurs. Windows ne prend en charge aucun de ces trois codecs nativement. BlueCaster prend aussi en charge aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC et FastStream.
 
-![BlueCaster's Codecs screen, streaming LDAC 990 kbps / 48 kHz to Sony WH-1000XM4](../images/app_sample.png)
+- **Fonctionne avec le Bluetooth que vous avez déjà.** Le Bluetooth Intel, Realtek ou MediaTek intégré à de nombreux portables fonctionne, tout comme une clé USB bon marché. BlueCaster prend le contrôle de l'adaptateur, et un clic suffit pour le rendre à Windows.
+- **Un micro de casque qui reste discret.** Le micro ne s'active que lorsqu'une application enregistre. Le reste du temps, votre musique garde sa pleine qualité. La réduction du bruit et le réglage du gain sont intégrés.
+- **Aucun outil supplémentaire.** BlueCaster configure l'adaptateur directement dans l'application ([fonctionnement](architecture)).
+
+![Écran Codecs de BlueCaster : diffusion LDAC 990 kbps / 96 kHz vers un Sony WH-1000XM4, avec sa carte au-dessus des paramètres rapides de Windows](../images/app_sample.png)
 
 [Commencer](setup){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [GitHub](https://github.com/SeiyaFunaokaJP/BlueCaster){: .btn .fs-5 .mb-4 .mb-md-0 }
