@@ -31,10 +31,10 @@ BlueCaster は Bluetooth アダプターを自分で（WinUSB を通して）動
 ## 手順 1: アダプターを BlueCaster に渡す
 
 1. **設定 > 開発者モード**: オン
-2. **アダプタ**: そのアダプターのカードで **WinUSB ドライバに置き換える**（Windows が管理者の許可を求めます）。BlueCaster がまだ使えないチップでは、このボタンは開発者モードのときだけ押せます
-3. カードに **差し直すか Windows を再起動** と出たら、そのとおりにします
+2. **アダプター**: そのアダプターのカードで **WinUSB ドライバーに置き換える**（Windows が管理者の許可を求めます）。BlueCaster がまだ使えないチップでは、このボタンは開発者モードのときだけ押せます
+3. カードに **挿し直すか Windows を再起動** と出たら、そのとおりにします
 
-アダプターが WinUSB の間は、Windows 自身の Bluetooth はそのアダプターを使えません。Bluetooth がそのチップだけのノート PC では、Windows で接続しているキーボード、マウス、ヘッドセットが、ドライバーを戻すまで使えなくなります。戻すには、同じカードの **元のドライバに戻す** を押します。
+アダプターが WinUSB の間は、Windows 自身の Bluetooth はそのアダプターを使えません。Bluetooth がそのチップだけのノート PC では、Windows で接続しているキーボード、マウス、ヘッドセットが、ドライバーを戻すまで使えなくなります。戻すには、同じカードの **元のドライバーに戻す** を押します。
 
 ## 手順 2: チップの応答を読む（チッププローブ）
 
@@ -67,7 +67,7 @@ BlueCaster は Bluetooth アダプターを自分で（WinUSB を通して）動
 
 プローブでわかるのはチップの状態で、それを変える方法ではありません。それを知っているのはメーカーの Windows ドライバーです。一度記録すれば、ローダーで同じことを繰り返せます。
 
-1. アダプターのカードで **元のドライバに戻す** を押し、Windows のドライバーでもう一度動かします
+1. アダプターのカードで **元のドライバーに戻す** を押し、Windows のドライバーでもう一度動かします
 2. USBPcap と Wireshark をインストールし、Wireshark を管理者として起動して、アダプターがつながっている USBPcap のインターフェイスをキャプチャします。`USBPcapCMD.exe`（USBPcap のフォルダーにあります）で、ルートハブごとのデバイスを一覧できます。ノート PC 内蔵のアダプターは内部のハブにつながっていて、「USB 複合デバイス」（"USB Composite Device"）か VID:PID だけで出ることがよくあります。わからなければ、USBPcap のインターフェイスをすべて同時にキャプチャします
 3. ドライバーにファームウェアを読み込ませます。アダプターを抜いて挿し直します。内蔵のものは、デバイス マネージャーで **デバイスを無効にする** と **デバイスを有効にする** を行います。再起動では消えないファームウェアは、完全にシャットダウンしたあとでないと読み込まれないことがあります
 4. Windows の Bluetooth 設定にアダプターが出たら、キャプチャを止めます。最初のほうのパケットからアダプターのデバイスディスクリプター（VID:PID）を探し、そのアドレスで絞り込んで（`usb.bus_id == <bus> && usb.device_address == <address>`）キャプチャを保存します
@@ -143,7 +143,7 @@ upload-bulk patch.bin fc09 01      # 同じものを Bulk OUT パイプで
 | `on_control(result)` | 最後の `UsbControl` の結果（読んだバイト、または失敗の理由）を渡すとき |
 | `on_timeout()` | 最後の `Timer` のタイマーが切れたとき |
 | `missing_file_hint(file)` | ローダーが `MissingFile` で終わったときのログ用: 何をどこに置くか（"x.bin from linux-firmware (mediatek/)"） |
-| `step()`、`progress()` | アクションをまとめて返すたび: 手順の名前（"download"）と進み具合（全体のうち送ったコマンドの数）。アダプターの起動中にアダプタ画面に表示します |
+| `step()`、`progress()` | アクションをまとめて返すたび: 手順の名前（"download"）と進み具合（全体のうち送ったコマンドの数）。アダプターの起動中にアダプター画面に表示します |
 
 `Done` のあと、アプリはローダーを破棄します。遅れて届いた応答がローダーに渡ることはありません。
 
@@ -204,7 +204,7 @@ cargo test -p bt-host
 
 変更するファイルをすべて挙げます。すでに未対応として載っているベンダー（MediaTek、Qualcomm）でも、新しいベンダーでも同じです。新しいベンダーなら、そのバリアントが必要な `match` はコンパイラーが示します。それ以外の箇所と、すでに載っているベンダーの場合のすべては、この一覧でしか見つかりません。
 
-**一部のチップか、ベンダー全体か**: ローダーは普通、ベンダーのチップの一部に対応します（MT7921 には対応しても MT7925 には対応しない、など）。その場合、"unsupported" から外してよいのはそのチップだけです。その VID:PID を `app/src/crates/bt-host/src/chips.rs` の `LOADER_CHIPS` に並べ、ベンダーは `listed_chips_only()` に残します。すると `chips::chip_supported(vendor, vid, pid)` と `chip_support_tag()` がアダプターごとに答え、アダプターの名前のタグ、アダプタ画面での説明、そこで WinUSB を勧めるかどうか、"not implemented" の警告がそれに従います。ベンダーを `listed_chips_only()` から外すのは、（Intel のように）ベンダーのすべてのチップに対応するローダーの場合だけです。
+**一部のチップか、ベンダー全体か**: ローダーは普通、ベンダーのチップの一部に対応します（MT7921 には対応しても MT7925 には対応しない、など）。その場合、"unsupported" から外してよいのはそのチップだけです。その VID:PID を `app/src/crates/bt-host/src/chips.rs` の `LOADER_CHIPS` に並べ、ベンダーは `listed_chips_only()` に残します。すると `chips::chip_supported(vendor, vid, pid)` と `chip_support_tag()` がアダプターごとに答え、アダプターの名前のタグ、アダプター画面での説明、そこで WinUSB を勧めるかどうか、"not implemented" の警告がそれに従います。ベンダーを `listed_chips_only()` から外すのは、（Intel のように）ベンダーのすべてのチップに対応するローダーの場合だけです。
 
 {: .note }
 各ファイルの改行コードはそのままにしてください。ソースファイルには CRLF のものも LF のものもあります。エディターや Git Bash の `sed -i` には、黙って書き換えるものがあり、`cargo fmt` では元に戻りません。`git diff --stat` で気づけます。数か所しか変えていないファイルで、すべての行が数えられていれば、それです。その場合は、コミットの前に（たとえば VS Code のステータスバーにある改行コードの切り替えで）元に戻してください。
@@ -228,13 +228,13 @@ cargo test -p bt-host
 
 **ウィンドウに出る内容**:
 
-10. `app/src/core/src/state.rs` の `vendor_note()`: `MediaTek | Qualcomm` のアームから外して、新しいキー `firmware.vendor_<vendor>` のアームを作り、そのテストも追加します。この関数は、`chip_supported` が受け入れないチップにはその前で `firmware.vendor_unsupported` を返すので、ベンダーのほかのチップはそのままです。アダプタ画面は、説明が `firmware.vendor_unsupported` でないすべてのアダプターに WinUSB を勧めます
-11. `app/lang/*.json`（全 8 言語、それぞれ同じ行）: 新しいキー。Intel のもの（「Intel アダプタ。…」）にならいます。ボタンやフォルダーの名前を書くときは、同じファイルにあるその言語の言葉を使います（ファームウェアのフォルダーを開くボタンは `firmware.open_folder`）。ベンダー全体: `firmware.vendor_unsupported` からそのベンダー名を外します。一部のチップ: ベンダーのほかのチップがまだその文を表示するので、そのまま残します
-12. `app/src/ui/src/lib/links.ts`: ベンダーのファームウェアのページ（`LINKS`、`firmwareUrl()`、`vendorFirmwareUrl()` に。Intel の linux-firmware のフォルダーと同じように）。これでアダプタ画面がファイルの入手先を示します。テストは `app/src/ui/src/lib/chips.test.ts` に書きます。アダプタ画面がそのページを示すのは説明が `firmware.vendor_unsupported` でないアダプターだけなので、ベンダーのほかのチップには出ません
+10. `app/src/core/src/state.rs` の `vendor_note()`: `MediaTek | Qualcomm` のアームから外して、新しいキー `firmware.vendor_<vendor>` のアームを作り、そのテストも追加します。この関数は、`chip_supported` が受け入れないチップにはその前で `firmware.vendor_unsupported` を返すので、ベンダーのほかのチップはそのままです。アダプター画面は、説明が `firmware.vendor_unsupported` でないすべてのアダプターに WinUSB を勧めます
+11. `app/lang/*.json`（全 8 言語、それぞれ同じ行）: 新しいキー。Intel のもの（「Intel アダプター。…」）にならいます。ボタンやフォルダーの名前を書くときは、同じファイルにあるその言語の言葉を使います（ファームウェアのフォルダーを開くボタンは `firmware.open_folder`）。ベンダー全体: `firmware.vendor_unsupported` からそのベンダー名を外します。一部のチップ: ベンダーのほかのチップがまだその文を表示するので、そのまま残します
+12. `app/src/ui/src/lib/links.ts`: ベンダーのファームウェアのページ（`LINKS`、`firmwareUrl()`、`vendorFirmwareUrl()` に。Intel の linux-firmware のフォルダーと同じように）。これでアダプター画面がファイルの入手先を示します。テストは `app/src/ui/src/lib/chips.test.ts` に書きます。アダプター画面がそのページを示すのは説明が `firmware.vendor_unsupported` でないアダプターだけなので、ベンダーのほかのチップには出ません
 
 **ドキュメント**:
 
-13. `docs/setup.md` と `docs/*/setup.md`（全言語）のチップの表: Intel と同じような行に、対応するチップ、ファームウェアのファイルとその置き場所（ファームウェアのフォルダー `%APPDATA%\BlueCaster\firmware`、またはその `<vendor>` サブフォルダー。古い行にはまだ "config folder" とあります）を書きます。ウィンドウのボタンは、各言語の `app/lang/*.json` にあるとおりの名前で書きます（アダプタ画面は `ui.nav.adapter`、そのフォルダーを開くボタンは `firmware.open_folder`）。ベンダー全体: "Not supported" の行から外します。一部のチップ: ベンダーはそこに残し、まだ対応していないチップを書きます。Firmware の節の最初の文（"Intel and Broadcom adapters may need firmware files of their own"）にそのベンダーを加えます
+13. `docs/setup.md` と `docs/*/setup.md`（全言語）のチップの表: Intel と同じような行に、対応するチップ、ファームウェアのファイルとその置き場所（ファームウェアのフォルダー `%APPDATA%\BlueCaster\firmware`、またはその `<vendor>` サブフォルダー。古い行にはまだ "config folder" とあります）を書きます。ウィンドウのボタンは、各言語の `app/lang/*.json` にあるとおりの名前で書きます（アダプター画面は `ui.nav.adapter`、そのフォルダーを開くボタンは `firmware.open_folder`）。ベンダー全体: "Not supported" の行から外します。一部のチップ: ベンダーはそこに残し、まだ対応していないチップを書きます。Firmware の節の最初の文（"Intel and Broadcom adapters may need firmware files of their own"）にそのベンダーを加えます
 14. 誰かが使ったら [動作確認済みハードウェア](hardware)（`docs/hardware.md`）に載せます。またこのページの冒頭（`docs/chip-support.md`、全言語）も直します。ここではローダーのないベンダーを挙げています（一部のチップなら "the other <vendor> chips"）
 
 ## 手順 7: アダプターで試す
@@ -248,9 +248,9 @@ target\release\bluecaster-core.exe --cli -u 0e8d:7961 --scan 5 --hci-capture loa
 ログに各手順が出ます。`loader.pklg` は Wireshark で開け、コマンド、イベント、コントロール転送がすべて順に入っています。アダプターを抜いて（またはシャットダウンして）もう一度試してください。ダウンロードは電源が切れていたチップから動き、ファームウェアがすでに動いているときは何もしない必要があります。
 
 {: .note }
-WinUSB のアダプターが複数あると、`-u` を指定しても Realtek のものが優先され、そのチップの設定が適用されます。**アダプタ > Bluetooth チップ** を **Realtek 以外** にするか、自分のアダプターだけを WinUSB にしてテストしてください。
+WinUSB のアダプターが複数あると、`-u` を指定しても Realtek のものが優先され、そのチップの設定が適用されます。**アダプター > Bluetooth チップ** を **Realtek 以外** にするか、自分のアダプターだけを WinUSB にしてテストしてください。
 
-そのあと、ウィンドウからしばらくヘッドホンに配信し、**Bluetooth を再起動** と差し直しで元に戻ることを確かめます。アダプターの起動中は、**アダプタ** 画面の Bluetooth の状態の下にローダーの様子（「読み込み中 42%」、または失敗したこと）が表示されます。開発者モードでは準備ができたあとも、`step()` の名前と終わり方が表示されます。
+そのあと、ウィンドウからしばらくヘッドホンに配信し、**Bluetooth を再起動** と差し直しで元に戻ることを確かめます。アダプターの起動中は、**アダプター** 画面の Bluetooth の状態の下にローダーの様子（「読み込み中 42%」、または失敗したこと）が表示されます。開発者モードでは準備ができたあとも、`step()` の名前と終わり方が表示されます。
 
 ## 手順 8: プルリクエストを出す
 

@@ -18,12 +18,12 @@ nav_order: 4
 ## Requirements
 
 - **Rust** (stable, 1.90 or later) via [rustup](https://rustup.rs/)
-- **Visual Studio 2022 or later** (or its Build Tools) with the "Desktop development with C++" workload: the C libraries (BTstack, the codecs) are compiled with MSVC
+- **Visual Studio 2022 or later** (or its Build Tools) with the "Desktop development with C++" workload, because MSVC compiles the C libraries (BTstack, the codecs)
 - **Node.js** 22 and **pnpm** for the UI (`corepack enable` provides pnpm)
 - **Git** (for the submodules)
 - **PowerShell 7** (`pwsh`) for `build.ps1` / `build.bat` (`winget install Microsoft.PowerShell`)
 - **Python 3.11 or later** for the checks (`tools/check_lang.py`) and the [emulator test](#emu)
-- For ARM64 builds: the Visual Studio components "MSVC v143 - VS 2022 C++ ARM64 build tools" and, on an x64 PC, "C++ Clang Compiler for Windows" (rustls' `ring` assembles its ARM64 code with clang; `installer/build-release.ps1` finds Visual Studio's clang itself), and `rustup target add aarch64-pc-windows-msvc`
+- For ARM64 builds: the Visual Studio components "MSVC v143 - VS 2022 C++ ARM64 build tools" and, on an x64 PC, "C++ Clang Compiler for Windows" (rustls' `ring` assembles its ARM64 code with clang; `installer/build-release.ps1` finds Visual Studio's clang automatically), and `rustup target add aarch64-pc-windows-msvc`
 
 ## Quick Build
 
@@ -33,9 +33,9 @@ cd BlueCaster
 pwsh ./build.ps1
 ```
 
-Or double-click `build.bat` in Explorer: it runs `build.ps1` and waits for a key at the end (`build.bat -Test` passes the switches on). `build.ps1` first checks that Rust, Node.js, pnpm and the submodules are there, runs `pnpm install` when `node_modules` is missing, builds the window's page and then the three programs into `target/release/`: `bluecaster-core.exe` (the resident core: Bluetooth, audio, tray), `bluecaster.exe` (the window) and `bluecaster-driver.exe` (the elevated helper that assigns / restores the WinUSB driver). Keep the three in one folder; `bluecaster-core.exe --cli` streams without the window.
+Or double-click `build.bat` in Explorer: it runs `build.ps1` and waits for a key press at the end (`build.bat -Test` passes switches through). `build.ps1` first checks that Rust, Node.js, pnpm and the submodules are present, runs `pnpm install` when `node_modules` is missing, then builds the window's page and the three programs into `target/release/`: `bluecaster-core.exe` (the resident core: Bluetooth, audio, tray), `bluecaster.exe` (the window) and `bluecaster-driver.exe` (the elevated helper that assigns / restores the WinUSB driver). Keep all three in the same folder; `bluecaster-core.exe --cli` streams without the window.
 
-Switches: `-Debug` (dev profile, `target/debug/`), `-Test` (then the checks under Tests), `-Decoder` (also the decoder tool), `-Emu` (also the [emulator test](#emu); `-Emu -Codecs sbc,ldac` tests only these codecs), `-Release -Arch x64|arm64` (only the release script, see Release Packages).
+Switches: `-Debug` (dev profile, `target/debug/`), `-Test` (also runs the checks under Tests), `-Decoder` (also builds the decoder tool), `-Emu` (also runs the [emulator test](#emu); `-Emu -Codecs sbc,ldac` tests only these codecs), `-Release -Arch x64|arm64` (runs only the release script, see Release Packages).
 
 **Step by step** (what `build.ps1` does; the window's page must be built before `bluecaster.exe`, which embeds it):
 
@@ -54,7 +54,7 @@ cargo build --release -p bluecaster-ui
 git submodule update --init --recursive
 ```
 
-Run it again after a pull that updates a library. The build stops when a library under `extern/` is not at the commit listed in `extern/versions.txt`, and its message says how to build another version anyway.
+Run it again after a pull that updates a library. The build stops when a library under `extern/` is not at the commit listed in `extern/versions.txt`, and the error message explains how to build another version anyway.
 
 ## Project Structure
 
@@ -103,7 +103,7 @@ python tools/check_lang.py
 pwsh installer/build-release.ps1 -Arch x64
 ```
 
-writes the installer (`BlueCaster-<version>-win64-setup.exe`), the portable zip, the symbols zip (`.pdb` files, for crash dumps) and the updater manifest to `target/dist`. It needs Inno Setup 7.1.0 (`winget install JRSoftware.InnoSetup.7 --version 7.1.0`). Signing the in-app updates and the other details are in `installer/README.md`.
+writes the installer (`BlueCaster-<version>-win64-setup.exe`), the portable zip, the symbols zip (`.pdb` files, for crash dumps) and the updater manifest to `target/dist`. It needs Inno Setup 7.1.0 (`winget install JRSoftware.InnoSetup.7 --version 7.1.0`). `installer/README.md` covers signing the in-app updates and other details.
 
 ## Testing Without Hardware (tools/emu) {#emu}
 
@@ -119,7 +119,7 @@ python tools/emu/run_test.py                        # every codec and negotiatio
 
 How it works:
 
-- `emu_sink.py` runs two [Bumble](https://github.com/google/bumble) virtual controllers on an in-process link. One is served as H4 over TCP (`127.0.0.1`) for BlueCaster. The other is used by a Bumble A2DP sink that offers SBC (SBC XQ capable), AAC, aptX, aptX HD, aptX LL, LDAC, LHDC V5, FastStream, Opus, Opus 05 and aptX Adaptive, and records its HCI traffic.
+- `emu_sink.py` runs two [Bumble](https://github.com/google/bumble) virtual controllers on an in-process link. BlueCaster connects to one as H4 over TCP (`127.0.0.1`). A Bumble A2DP sink uses the other; it offers SBC (SBC XQ capable), AAC, aptX, aptX HD, aptX LL, LDAC, LHDC V5, FastStream, Opus, Opus 05 and aptX Adaptive, and records its HCI traffic.
 - `run_test.py` runs `bluecaster-core.exe --cli` for each codec with development options: `--hci-tcp` (virtual controller instead of WinUSB), `--test-tone` (1 kHz left / 1.5 kHz right instead of system audio), `--duration`, `--hci-capture`. The environment variable `BLUECASTER_CONFIG_DIR` points BlueCaster at a separate config folder, so pairing with the virtual sink never touches your real link keys.
 - Both HCI captures are then checked with `bluecaster_decode` (the sink side with `--received`).
 
@@ -128,7 +128,7 @@ A codec passes when all of these hold:
 - the requested codec was negotiated
 - `bluecaster_decode` finds no problem on the sent side or the received side
 - the sink received every media packet and frame BlueCaster sent, and at least 90% of the requested audio duration was sent
-- except LDAC, LHDC V5 and aptX Adaptive (no open-source decoder): the decoded audio is identical on both sides and is the test tone
+- the decoded audio is identical on both sides and matches the test tone (except LDAC, LHDC V5 and aptX Adaptive, which have no open-source decoder)
 
 | Option | Description |
 |:-------|:------------|
@@ -149,7 +149,7 @@ For each codec, `tools/emu/out/<codec>/` holds the captures (`bluecaster.pklg`, 
 {: .note }
 The virtual link has no radio: it checks encoding, packetization, AVDTP / L2CAP signalling and interoperability with an independent Bluetooth stack (Bumble), but not radio conditions, timing on real hardware or how real headphones play the audio. The Bumble packages are test tooling only and are not part of BlueCaster (see THIRD_PARTY_LICENSES.md).
 
-`emu_vhci.py` does the same towards the Linux Bluetooth stack: on Linux it attaches a virtual adapter to BlueZ through `/dev/vhci`, which the measuring receiver `tools/linux_sink` then takes like a real adapter - it can be tested without hardware, optionally with lost or held-back media packets (`--drop`, `--stall`). See `tools/linux_sink/README.md`.
+`emu_vhci.py` does the same for the Linux Bluetooth stack: on Linux it attaches a virtual adapter to BlueZ through `/dev/vhci`, which the measuring receiver `tools/linux_sink` then uses like a real adapter. This tests the receiver without hardware, optionally with lost or held-back media packets (`--drop`, `--stall`). See `tools/linux_sink/README.md`.
 
 ## Dependencies
 

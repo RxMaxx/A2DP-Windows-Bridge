@@ -129,9 +129,9 @@ bluecaster-core.exe --cli --scan
 
 **适配器**页面（以及设置向导的**驱动程序和固件**步骤）会显示适配器的固件状态：**固件正常**、**无需 Realtek 文件**（BlueCaster 无法识别的适配器，且芯片设为**非 Realtek**），或**未找到固件**并列出所需的文件名。使用**打开下载页面**按钮在浏览器中打开 [linux-firmware/rtl_bt](https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/rtl_bt) 页面，然后使用**打开固件文件夹**打开目标文件夹。下载所需的 `.bin` 文件并放入该固件文件夹。
 
-其他厂商的适配器不显示 **Bluetooth 芯片** 选项，其标签说明固件的来源：**来自 MediaTek 的驱动程序**或**来自 Qualcomm 的驱动程序**（从厂商的 Windows 驱动程序读取，改用 WinUSB 后它仍保持安装），**来自 Wi-Fi 驱动程序**（Marvell；请保持 Wi-Fi 开启），**来自固件文件夹**（Intel，附有**打开下载页面**、**打开固件文件夹**和**设置指南**），**可选**（Broadcom 的 `.hcd`）或**不需要**（CSR、Barrot、Actions）。BlueCaster 在 WinUSB 下加载后显示**已加载**，加载失败时显示**未加载**，并附有**打开下载页面**、**打开固件文件夹**以及说明固件来源的一行。
+其他厂商的适配器不显示 **蓝牙芯片** 选项，其标签说明固件的来源：**来自 MediaTek 的驱动程序**或**来自 Qualcomm 的驱动程序**（从厂商的 Windows 驱动程序读取，改用 WinUSB 后它仍保持安装），**来自 Wi-Fi 驱动程序**（Marvell；请保持 Wi-Fi 开启），**来自固件文件夹**（Intel，附有**打开下载页面**、**打开固件文件夹**和**设置指南**），**可选**（Broadcom 的 `.hcd`）或**不需要**（CSR、Barrot、Actions）。BlueCaster 在 WinUSB 下加载后显示**已加载**，加载失败时显示**未加载**，并附有**打开下载页面**、**打开固件文件夹**以及说明固件来源的一行。
 
-对于 **Bluetooth 芯片** 列表中的芯片，**下载固件** 可以代劳：确认后，BlueCaster 会从 linux-firmware (kernel.org) 下载文件，逐个按预期的 SHA-256 校验，并保存到固件文件夹。linux-firmware 中没有 config 文件的芯片会得到一个空的 `_config.bin`（芯片将使用自身的设置）。这些文件不属于 BlueCaster，只在您请求时下载。
+对于 **蓝牙芯片** 列表中的芯片，**下载固件** 可以代劳：确认后，BlueCaster 会从 linux-firmware (kernel.org) 下载文件，逐个按预期的 SHA-256 校验，并保存到固件文件夹。linux-firmware 中没有 config 文件的芯片会得到一个空的 `_config.bin`（芯片将使用自身的设置）。这些文件不属于 BlueCaster，只在您请求时下载。
 
 BlueCaster 会检测适配器的芯片组，并显示需要哪些固件文件。
 
@@ -139,7 +139,7 @@ BlueCaster 会检测适配器的芯片组，并显示需要哪些固件文件。
 
 ### Bluetooth 芯片设置
 
-**适配器**页面上的 **Bluetooth 芯片**列表决定 BlueCaster 是否对适配器执行 Realtek 初始化（上传固件）：
+**适配器**页面上的 **蓝牙芯片**列表决定 BlueCaster 是否对适配器执行 Realtek 初始化（上传固件）：
 
 | 选项 | 含义 |
 |:-------|:--------|

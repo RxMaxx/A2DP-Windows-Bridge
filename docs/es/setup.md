@@ -66,7 +66,7 @@ BlueCaster se comunica directamente con un adaptador Bluetooth USB mediante WinU
 3. Lea la confirmación y continúe: Windows solicita permiso de administrador (UAC)
 4. El controlador indica ahora **Controlador WinUSB**
 
-Si Windows no pudo cargar WinUSB en ese momento (el adaptador estaba en uso), BlueCaster lo indica y la línea del controlador muestra **Reconecta o reinicia Windows**. Desconecte el adaptador y vuelva a conectarlo; si es un adaptador integrado, reinicie Windows. Hasta entonces, la conexión falla con `failed to initialize WinUSB (error 50)` en el registro.
+Si Windows no pudo cargar WinUSB en ese momento (el adaptador estaba en uso), BlueCaster lo indica y la línea del controlador muestra **Reconecte o reinicie Windows**. Desconecte el adaptador y vuelva a conectarlo; si es un adaptador integrado, reinicie Windows. Hasta entonces, la conexión falla con `failed to initialize WinUSB (error 50)` en el registro.
 
 {: .warning }
 Mientras WinUSB esté asignado, el Bluetooth de Windows ya no ve el adaptador: los dispositivos emparejados con Windows a través de él dejan de funcionar hasta que se restaure el controlador. Use el Bluetooth integrado para los periféricos habituales (teclado, ratón, etc.). Un adaptador integrado que sea un dispositivo USB (uno de Realtek en muchos portátiles) también puede cederse a BlueCaster, pero entonces **el PC se queda sin Bluetooth de Windows** (configuración de Bluetooth, ratones, teclados, otros dispositivos de audio) hasta que restaure su controlador.

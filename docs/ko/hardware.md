@@ -66,5 +66,5 @@ Qualcomm 어댑터는 아직 보고가 없습니다. 이 어댑터들에 대해 
 ## 아직 검증되지 않음
 
 - **실제 헤드폰에서의 코덱**: aptX HD, aptX Low Latency, Opus, Opus 05, FastStream
-- **LE 오디오** (실험적, 개발자 모드 전용): 에뮬레이터와 MediaTek MT7925에서만 테스트됨, 알려진 문제 있음
+- **LE Audio** (실험적, 개발자 모드 전용): 에뮬레이터와 MediaTek MT7925에서만 테스트됨, 알려진 문제 있음
 - **ARM64용 Windows**, 그리고 **v2를 사용하는 Windows 10**(v1은 Windows 10 22H2에서 실행됨: [#18](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/18), [#30](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/30))

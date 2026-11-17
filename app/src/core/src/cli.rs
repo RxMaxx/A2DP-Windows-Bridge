@@ -1069,7 +1069,7 @@ fn run_script(service: &Service, file: &std::path::Path, allow_writes: bool, ada
         .map_or(bt_host::chips::ChipVendor::Unknown, |(vid, pid)| bt_host::chips::vendor_for_usb(vid, pid, None));
     let denied = script.denied(bt_host::chips::denied_opcodes(vendor));
     if !denied.is_empty() {
-        eoutln!("These lines could change the chip for good and never run on a {} adapter:", vendor.name());
+        eoutln!("These lines could permanently change the chip and will not run on a {} adapter:", vendor.name());
         for l in denied {
             eoutln!("  {}", line(l));
         }

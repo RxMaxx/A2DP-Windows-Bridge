@@ -78,7 +78,7 @@ WinUSB（Microsoft 署名済みの汎用 USB ドライバー）経由で USB Blu
 - デバイスのアドレスは手入力するか、USB アダプターでの検索（GAP inquiry）で見つける
 
 **動作の流れ**:
-1. USB Bluetooth アダプターに WinUSB を割り当てる。アプリで（**アダプタ > WinUSB ドライバに置き換える**、[ドライバーの割り当て](#driver-assignment)を参照）、または Zadig で
+1. USB Bluetooth アダプターに WinUSB を割り当てる。アプリで（**アダプター > WinUSB ドライバーに置き換える**、[ドライバーの割り当て](#driver-assignment)を参照）、または Zadig で
 2. `hci-transport` クレートが `nusb` で WinUSB 経由でアダプターを開き、BTstack の HCI トランスポートとしてつなぐ
 3. BTstack が HCI コマンドを送って Bluetooth コントローラーを初期化する
 4. （Realtek、Intel、Broadcom のアダプター）必要ならファームウェアをアップロードする
@@ -241,7 +241,7 @@ sequenceDiagram
 - デバイス検索のための GAP inquiry
 - AVRCP の絶対音量とヘッドホンのボタン
 - AFH のホストチャネル分類と、通信品質の表示のための RSSI / AFH の読み取り
-- ファームウェアの読み込み: Realtek と Broadcom は BTstack のチップセットドライバーで、Intel（レガシーと TLV のブートローダー）は共通のチップローダーのインターフェース（`bringup`）の上の Rust で行い、その進み具合はアダプターの起動中にアダプタ画面に表示する
+- ファームウェアの読み込み: Realtek と Broadcom は BTstack のチップセットドライバーで、Intel（レガシーと TLV のブートローダー）は共通のチップローダーのインターフェース（`bringup`）の上の Rust で行い、その進み具合はアダプターの起動中にアダプター画面に表示する
 - 開発者モード: チップのプローブ（アダプターが標準の読み取りコマンドに何を答えるか。`logs\probe\` に JSON のレポート）、チップスクリプト（テキストで書いた要求を WinUSB のアダプターで実行）、接続中のデバイスが公開する SDP サービス
 - HCI キャプチャ（`.pklg`）。接続中に始めた場合も接続時のやり取りを含める
 
@@ -340,7 +340,7 @@ AAC と SBC は、A2DP の仕様で定義された標準のコーデック ID �
 | `devices\device_codecs.json` | クラシックの各デバイスが前回の接続で提示した内容（と、OPPO のイヤホンに Hi-Res を求めたかどうか） |
 | `pairing\link_keys.txt` | リンクキー。v1 や 2.0.x でペアリングしたヘッドホンは、ペアリングし直さずに再接続する |
 | `pairing\le_audio_bonds.tlv`、`pairing\le_audio_csip.txt` | LE Audio: LE のボンディング情報（GATT サーバーが保持する CCC の値を含む）とコーディネートセット |
-| `pairing\windows_le_keys.txt`、`pairing\replaced_windows_keys.json` | Windows から引き継いだ LE のキー（スタックが取り込むまで）と、**元のドライバに戻す** で置き換えた Windows のキー |
+| `pairing\windows_le_keys.txt`、`pairing\replaced_windows_keys.json` | Windows から引き継いだ LE のキー（スタックが取り込むまで）と、**元のドライバーに戻す** で置き換えた Windows のキー |
 | `adapters\adapter_caps.json` | スタックが各アダプターについて知ったこと（LE Audio への対応、アドレス、HCI のバージョン、Windows でのアダプターの名前） |
 | `adapters\driver\<instance id>.json` | WinUSB を割り当てた各アダプターの、元のドライバー |
 | `firmware\` | ファームウェアのファイル（`*.bin`、`*.hcd`、`ibt-*`。Intel のものは linux-firmware と同じ配置で `firmware\intel\` にも）。以前のバージョンが設定フォルダーに直接置いていたファイルはここに移す |

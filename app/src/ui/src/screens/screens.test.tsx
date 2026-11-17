@@ -330,7 +330,7 @@ describe("Home", () => {
   it("shows the cause of an error and a fix", async () => {
     start("#/home", { scenario: "error" });
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("The device did not answer");
+    expect(alert).toHaveTextContent("The device did not respond");
     expect(within(alert).getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
@@ -587,7 +587,7 @@ describe("update", () => {
     await mock!.call("stream.start", { profile: "WH-1000XM5 (LDAC)" });
     await waitFor(() => expect(mock!["snap"].stream.state).toBe("streaming"));
     fireEvent.click(await screen.findByRole("button", { name: "Update now" }));
-    await screen.findByText(/It is installed when the audio device disconnects/);
+    await screen.findByText(/will install when the audio device disconnects/);
     await mock!.call("stream.stop");
     await screen.findByText(/Installing version 2\.0\.0-beta\.1/, {}, { timeout: 3000 });
   });

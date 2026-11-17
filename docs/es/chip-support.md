@@ -32,7 +32,7 @@ El diseño que hay detrás y lo que sigue pendiente están en la [nota para desa
 
 1. **Configuración > Modo de desarrollador**: activado
 2. **Adaptador**: en la tarjeta del adaptador, **Reemplazar por el controlador WinUSB** (Windows solicita permiso de administrador). Para un chip que BlueCaster todavía no puede usar, este botón solo está disponible en modo de desarrollador
-3. Si la tarjeta indica **Reconecta o reinicia Windows**, hágalo
+3. Si la tarjeta indica **Reconecte o reinicie Windows**, hágalo
 
 Mientras el adaptador tenga WinUSB, el Bluetooth de Windows no puede usarlo. En un portátil cuyo único Bluetooth sea ese chip, los teclados, ratones y auriculares conectados a través de Windows dejan de funcionar hasta que devuelva el controlador: **Restaurar el controlador original** en la misma tarjeta.
 
