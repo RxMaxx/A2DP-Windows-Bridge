@@ -3,7 +3,7 @@
 // on the stream while dragged, saved when let go), their type changed from
 // the right-click menu, edited in the fields, and reset
 
-import { cleanup, fireEvent, render, waitFor, within } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 import { App } from "../app/App";
 import { setLanguage, t } from "../i18n";
@@ -56,26 +56,43 @@ function layOut(svg: SVGSVGElement) {
 
 async function eqOn() {
   const env = start();
-  const wh = await deviceEntry(/WH-1000XM5/);
+  const entry = await deviceEntry(/WH-1000XM5/);
+  // A line on the device, the EQ itself in a dialog
+  const row = [...entry.querySelectorAll<HTMLElement>(".dialog-row")].find((r) =>
+    r.textContent?.includes(t("eq.playback_title")),
+  )!;
+  expect(row).toHaveTextContent(t("ui.state_off"));
+  expect(entry.querySelector(".media-eq")).toBeNull();
+  fireEvent.click(within(row).getByRole("button", { name: t("ui.adjust") }));
+  const wh = await screen.findByRole("dialog", { name: t("eq.playback_title") });
   const toggle = within(wh).getByRole("switch", { name: t("eq.title") });
   expect(toggle).not.toBeChecked();
   expect(wh.querySelector(".eq-graph")).toBeNull();
   fireEvent.click(toggle);
   await waitFor(() => expect(env.lastEq()).toEqual({ enabled: true, bands: [] }));
+  await waitFor(() => expect(row).toHaveTextContent(t("ui.state_on")));
   const svg = await waitFor(() => {
     const s = wh.querySelector<SVGSVGElement>(".eq-graph svg");
     expect(s).toBeTruthy();
     return s!;
   });
   layOut(svg);
-  return { ...env, wh, svg };
+  // The core's profile has the last save (a change made before it arrives
+  // starts from the profile as it was)
+  const synced = () =>
+    waitFor(() =>
+      expect(env.core.state.snap!.profiles.find((p) => p.device_name === "WH-1000XM5")?.media_eq).toEqual(
+        env.lastEq(),
+      ),
+    );
+  return { ...env, wh, svg, synced };
 }
 
 describe("Playback EQ", () => {
   it("is off until turned on, and adds a point where the graph is double-clicked", async () => {
     const { wh, svg, lastEq } = await eqOn();
     // 1 kHz is 2/3 of the way along the log axis; +6 dB a quarter from the top
-    fireEvent.dblClick(svg, { clientX: 38 + (592 * Math.log10(50)) / 3, clientY: 10 + 208 * 0.375 });
+    fireEvent.dblClick(svg, { clientX: 38 + (592 * Math.log10(50)) / 3, clientY: 10 + 208 * 0.25 });
     await waitFor(() => expect(lastEq().bands).toHaveLength(1));
     const p = lastEq().bands[0];
     expect(p.band_type).toBe("Peaking");
@@ -88,7 +105,7 @@ describe("Playback EQ", () => {
   });
 
   it("moves a focused point with the keyboard and deletes it", async () => {
-    const { wh, lastEq } = await eqOn();
+    const { wh, lastEq, synced } = await eqOn();
     fireEvent.click(within(wh).getByRole("button", { name: t("eq.add_point") }));
     const point = await within(wh).findByRole("button", { name: /^Point 1:/ });
     point.focus();
@@ -98,12 +115,13 @@ describe("Playback EQ", () => {
     await waitFor(() => expect(lastEq().bands[0].frequency).toBe(2000));
     fireEvent.keyDown(within(wh).getByRole("button", { name: /^Point 1:/ }), { key: "PageUp" });
     await waitFor(() => expect(lastEq().bands[0].q).toBe(1.25));
+    await synced();
     fireEvent.keyDown(within(wh).getByRole("button", { name: /^Point 1:/ }), { key: "Delete" });
     await waitFor(() => expect(lastEq().bands).toEqual([]));
   });
 
   it("changes a point's type from its menu, and resets", async () => {
-    const { wh, lastEq } = await eqOn();
+    const { wh, lastEq, synced } = await eqOn();
     fireEvent.click(within(wh).getByRole("button", { name: t("eq.add_point") }));
     const point = await within(wh).findByRole("button", { name: /^Point 1:/ });
     fireEvent.keyDown(point, { key: "ArrowUp", shiftKey: true });
@@ -116,6 +134,7 @@ describe("Playback EQ", () => {
     // A pass filter has no gain to type
     expect(within(wh).getByRole("spinbutton", { name: t("eq.gain") })).toBeDisabled();
     expect(within(wh).getByRole("combobox", { name: t("eq.type") })).toHaveValue("HighPass");
+    await synced();
     fireEvent.click(within(wh).getByRole("button", { name: t("eq.reset") }));
     await waitFor(() => expect(lastEq()).toEqual({ enabled: true, bands: [] }));
   });
@@ -126,7 +145,7 @@ describe("Playback EQ", () => {
     await within(wh).findByRole("button", { name: /^Point 1:/ });
     const gain = within(wh).getByRole("spinbutton", { name: t("eq.gain") });
     fireEvent.change(gain, { target: { value: "40" } });
-    await waitFor(() => expect(lastEq().bands[0].gain).toBe(24));
+    await waitFor(() => expect(lastEq().bands[0].gain).toBe(12));
     fireEvent.change(within(wh).getByRole("spinbutton", { name: "Q" }), { target: { value: "2.5" } });
     await waitFor(() => expect(lastEq().bands[0].q).toBe(2.5));
   });
@@ -137,14 +156,14 @@ describe("Playback EQ", () => {
     const point = await within(wh).findByRole("button", { name: /^Point 1:/ });
     const before = saved().length;
     fireEvent.pointerDown(point, { button: 0, pointerId: 1, clientX: 432, clientY: 114 });
-    // The far left, the top: 20 Hz, +24 dB
+    // The far left, the top: 20 Hz, +12 dB
     fireEvent.pointerMove(svg, { pointerId: 1, clientX: 10, clientY: 0 });
     fireEvent.pointerMove(svg, { pointerId: 1, clientX: 38, clientY: 10 });
     // Shown while dragged, not saved yet
-    await within(wh).findByRole("button", { name: /^Point 1: Peak, 20 Hz, \+24.0 dB/ });
+    await within(wh).findByRole("button", { name: /^Point 1: Peak, 20 Hz, \+12.0 dB/ });
     expect(saved().length).toBe(before);
     fireEvent.pointerUp(svg, { pointerId: 1 });
-    await waitFor(() => expect(lastEq().bands[0]).toMatchObject({ frequency: 20, gain: 24 }));
+    await waitFor(() => expect(lastEq().bands[0]).toMatchObject({ frequency: 20, gain: 12 }));
     expect(saved().length).toBe(before + 1);
   });
 

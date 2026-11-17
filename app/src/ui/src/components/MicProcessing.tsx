@@ -1,13 +1,38 @@
-// The headset microphone's processing, under its Input Source: gain, noise
-// suppression with its strength, and the noise gate's threshold (lowest:
-// off). Kept in the device's profile; the running microphone takes a change
-// in place, nothing reconnects. A slider saves when let go and shows what
-// it holds until the profile has it.
+// The headset microphone's processing, in a dialog opened under its Input
+// Source: gain, noise suppression with its strength, and the noise gate's
+// threshold (lowest: off). Kept in the device's profile; the running
+// microphone takes a change in place, nothing reconnects. A slider saves
+// when let go and shows what it holds until the profile has it.
 
 import { createSignal, createUniqueId, Show } from "solid-js";
 import { t } from "../i18n";
 import type { MicProcessing } from "../ipc/types";
-import { Toggle } from "./controls";
+import { Button, Dialog, Toggle } from "./controls";
+
+/** Anything set away from "off" */
+export const micProcessingOn = (p: MicProcessing) =>
+  p.gain_db !== 0 || p.noise_suppression || p.gate_db > MIC_GATE_RANGE[0];
+
+/** A line saying whether the processing is on, with the dialog behind it */
+export function MicProcessingRow(props: {
+  value: MicProcessing;
+  disabled?: boolean;
+  onChange: (p: MicProcessing) => Promise<unknown>;
+}) {
+  const [open, setOpen] = createSignal(false);
+  return (
+    <div class="row dialog-row">
+      <span class="row-label">{t("ui.mic_processing")}</span>
+      <div class="inline">
+        <span class="row-state">{t(micProcessingOn(props.value) ? "ui.state_on" : "ui.state_off")}</span>
+        <Button onClick={() => setOpen(true)}>{t("ui.adjust")}</Button>
+      </div>
+      <Dialog open={open()} title={t("ui.mic_processing")} onCancel={() => setOpen(false)}>
+        <MicProcessingControls value={props.value} disabled={props.disabled} onChange={props.onChange} />
+      </Dialog>
+    </div>
+  );
+}
 
 export const MIC_GAIN_RANGE = [-12, 24] as const;
 export const MIC_GATE_RANGE = [-80, -20] as const;

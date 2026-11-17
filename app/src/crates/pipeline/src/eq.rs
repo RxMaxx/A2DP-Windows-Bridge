@@ -21,7 +21,7 @@ use dsp::{BandType, EqBand, MAX_EQ_POINTS};
 pub const FREQ_MIN: f32 = 20.0;
 pub const FREQ_MAX: f32 = 20_000.0;
 /// Largest boost or cut of a point (dB)
-pub const GAIN_LIMIT: f32 = 24.0;
+pub const GAIN_LIMIT: f32 = 12.0;
 /// Narrowest and widest Q
 pub const Q_MIN: f32 = 0.1;
 pub const Q_MAX: f32 = 12.0;
@@ -368,7 +368,7 @@ mod tests {
                     EqBand { frequency: 80.0, gain: 12.0, q: 0.7, band_type: BandType::LowShelf },
                     EqBand::peaking(100.0, 12.0, 0.5),
                     EqBand::peaking(3000.0, -9.0, 4.0),
-                    EqBand { frequency: 8000.0, gain: 24.0, q: 1.0, band_type: BandType::HighShelf },
+                    EqBand { frequency: 8000.0, gain: 12.0, q: 1.0, band_type: BandType::HighShelf },
                 ],
             ));
             let mut p = EqProcessor::new(h, rate, 2);
