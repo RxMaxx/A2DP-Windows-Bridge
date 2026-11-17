@@ -11,7 +11,7 @@ has_toc: false
 Émetteur audio Bluetooth avancé pour Windows, compatible avec tous les codecs.
 {: .fs-6 .fw-300 }
 
-BlueCaster diffuse en **LDAC à 990 kbps / 96 kHz**, en **LHDC V5 jusqu'à 192 kHz** et en **aptX Adaptive** vers votre casque ou vos écouteurs. Windows ne prend en charge aucun de ces trois codecs nativement. BlueCaster prend aussi en charge aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC et FastStream.
+BlueCaster transforme votre adaptateur Bluetooth en émetteur audio Hi-Fi. Profitez de codecs Hi-Fi comme **LDAC@96 kHz**, **LHDC V5@192 kHz** et **aptX Adaptive** sur votre casque ou vos écouteurs. Windows ne prend en charge nativement aucun de ces codecs. BlueCaster prend aussi en charge aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC et FastStream.
 
 - **Fonctionne avec le Bluetooth que vous avez déjà.** Le Bluetooth Intel, Realtek ou MediaTek intégré à de nombreux portables fonctionne, tout comme une clé USB bon marché. BlueCaster prend le contrôle de l'adaptateur, et un clic suffit pour le rendre à Windows.
 - **Un micro de casque qui reste discret.** Le micro ne s'active que lorsqu'une application enregistre. Le reste du temps, votre musique garde sa pleine qualité. La réduction du bruit et le réglage du gain sont intégrés.

@@ -11,7 +11,7 @@ has_toc: false
 适用于 Windows 的高级蓝牙音频发射器，全面支持各种编解码器。
 {: .fs-6 .fw-300 }
 
-BlueCaster 能以 **LDAC 990 kbps / 96 kHz**、**LHDC V5（最高 192 kHz）** 和 **aptX Adaptive** 向你的头戴式耳机和入耳式耳机串流音频。Windows 本身不支持这三种编解码器。BlueCaster 还支持 aptX HD、aptX、aptX Low Latency、Opus、AAC、SBC XQ、SBC 和 FastStream。
+BlueCaster 能把你的蓝牙适配器变成 Hi-Fi 音频发射器，通过 **LDAC@96 kHz**、**LHDC V5@192 kHz** 和 **aptX Adaptive** 等 Hi-Fi 编解码器向你的头戴式耳机和入耳式耳机串流音频。Windows 本身不支持这些编解码器。BlueCaster 还支持 aptX HD、aptX、aptX Low Latency、Opus、AAC、SBC XQ、SBC 和 FastStream。
 
 - **直接使用你现有的蓝牙。** 许多笔记本电脑内置的 Intel、Realtek 或 MediaTek 蓝牙都能用，便宜的 USB 适配器也可以。BlueCaster 接管适配器后，一键即可交还给 Windows。
 - **只在需要时工作的耳机麦克风。** 麦克风只在应用录音时打开，其余时间音乐保持完整音质。内置噪声抑制和增益调节。

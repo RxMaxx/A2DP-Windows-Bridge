@@ -11,7 +11,7 @@ has_toc: false
 Продвинутый Bluetooth-аудиопередатчик для Windows с полной поддержкой кодеков.
 {: .fs-6 .fw-300 }
 
-BlueCaster передаёт звук на наушники в **LDAC 990 kbps / 96 kHz**, **LHDC V5 до 192 kHz** и **aptX Adaptive**. Сама Windows эти три кодека не поддерживает. Также BlueCaster поддерживает aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC и FastStream.
+BlueCaster превращает ваш адаптер Bluetooth в Hi-Fi-аудиопередатчик. Он передаёт звук на наушники через Hi-Fi-кодеки, такие как **LDAC@96 kHz**, **LHDC V5@192 kHz** и **aptX Adaptive**. Сама Windows ни один из этих кодеков не поддерживает. Также BlueCaster поддерживает aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC и FastStream.
 
 - **Работает с Bluetooth, который у вас уже есть.** Подойдёт встроенный Bluetooth Intel, Realtek или MediaTek во многих ноутбуках, а также недорогой USB-адаптер. BlueCaster берёт адаптер на себя, а вернуть его Windows можно одним щелчком.
 - **Микрофон гарнитуры, который не мешает.** Микрофон включается, только пока приложение ведёт запись. В остальное время музыка звучит в полном качестве. Шумоподавление и регулировка усиления встроены.

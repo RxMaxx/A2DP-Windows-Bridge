@@ -11,7 +11,7 @@ has_toc: false
 Transmisor de audio Bluetooth avanzado para Windows, compatible con todos los códecs.
 {: .fs-6 .fw-300 }
 
-BlueCaster transmite **LDAC a 990 kbps / 96 kHz**, **LHDC V5 hasta 192 kHz** y **aptX Adaptive** a sus auriculares. Windows no admite estos tres códecs por sí solo. BlueCaster también admite aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC y FastStream.
+BlueCaster convierte su adaptador Bluetooth en un transmisor de audio Hi-Fi. Transmite códecs Hi-Fi como **LDAC@96 kHz**, **LHDC V5@192 kHz** y **aptX Adaptive** a sus auriculares. Windows no admite ninguno de estos códecs por sí solo. BlueCaster también admite aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC y FastStream.
 
 - **Funciona con el Bluetooth que ya tiene.** Puede usar el Bluetooth integrado de Intel, Realtek o MediaTek de muchos portátiles o un adaptador USB económico. BlueCaster toma el control del adaptador, y un clic lo devuelve a Windows.
 - **Un micrófono de auriculares que no estorba.** El micrófono solo se activa mientras una aplicación graba. El resto del tiempo, la música suena con toda su calidad. Incluye supresión de ruido y control de ganancia.

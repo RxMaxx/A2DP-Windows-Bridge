@@ -11,7 +11,7 @@ has_toc: false
 Windows 向け Bluetooth A2DP オーディオストリーミングツール（全コーデック対応）
 {: .fs-6 .fw-300 }
 
-BlueCaster は **LDAC（990 kbps / 96 kHz）**、**LHDC V5（最大 192 kHz）**、**aptX Adaptive** でヘッドホンやイヤホンに音声を送信できます。この 3 つのコーデックは Windows 単体では使えません。ほかに aptX HD・aptX・aptX Low Latency・Opus・AAC・SBC XQ・SBC・FastStream にも対応しています。
+BlueCaster は、お使いの Bluetooth アダプターを Hi-Fi オーディオトランスミッターに変えます。**LDAC@96 kHz**、**LHDC V5@192 kHz**、**aptX Adaptive** などの Hi-Fi コーデックで、ヘッドホンやイヤホンに音声を送信できます。これらのコーデックは Windows 単体では使えません。ほかに aptX HD・aptX・aptX Low Latency・Opus・AAC・SBC XQ・SBC・FastStream にも対応しています。
 
 - **今ある Bluetooth をそのまま使えます。** 多くのノート PC に内蔵されている Intel・Realtek・MediaTek の Bluetooth でも、手ごろな USB ドングルでも動作します。BlueCaster はアダプターを専用で使いますが、ワンクリックで Windows に戻せます。
 - **必要なときだけ動くヘッドセットマイク。** マイクはアプリが録音している間だけオンになるので、それ以外の時間は音楽を本来の音質で聴けます。ノイズ抑制とゲイン調整も備えています。

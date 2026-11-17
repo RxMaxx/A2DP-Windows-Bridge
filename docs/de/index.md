@@ -11,7 +11,7 @@ has_toc: false
 Leistungsstarker Bluetooth-Audiosender für Windows mit voller Codec-Unterstützung.
 {: .fs-6 .fw-300 }
 
-BlueCaster streamt **LDAC mit 990 kbps / 96 kHz**, **LHDC V5 mit bis zu 192 kHz** und **aptX Adaptive** an Ihre Kopfhörer und Ohrhörer. Windows selbst unterstützt diese drei Codecs nicht. Außerdem unterstützt BlueCaster aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC und FastStream.
+BlueCaster macht aus Ihrem Bluetooth-Adapter einen Hi-Fi-Audiosender. Damit streamen Sie Hi-Fi-Codecs wie **LDAC@96 kHz**, **LHDC V5@192 kHz** und **aptX Adaptive** an Ihre Kopfhörer und Ohrhörer. Windows selbst unterstützt keinen dieser Codecs. Außerdem unterstützt BlueCaster aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC und FastStream.
 
 - **Funktioniert mit dem Bluetooth, das Sie schon haben.** Das eingebaute Bluetooth von Intel, Realtek oder MediaTek in vielen Notebooks funktioniert, ebenso ein günstiger USB-Dongle. BlueCaster übernimmt den Adapter, und mit einem Klick geben Sie ihn an Windows zurück.
 - **Ein Headset-Mikrofon, das nicht stört.** Das Mikrofon schaltet sich nur ein, während eine App aufnimmt. Den Rest der Zeit hören Sie Musik in voller Qualität. Rauschunterdrückung und Verstärkung sind eingebaut.
