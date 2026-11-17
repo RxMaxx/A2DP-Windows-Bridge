@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 audio-capture.workspace = true
 btstack-sys.workspace = true
+dsp.workspace = true
 lc3-sys.workspace = true
 win-sys.workspace = true
 wasapi = "0.26.0"

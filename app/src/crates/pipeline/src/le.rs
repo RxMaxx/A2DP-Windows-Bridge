@@ -229,6 +229,9 @@ impl LinearResampler {
     }
 }
 
+/// Frames the LE path hands the playback EQ at a time
+const EQ_BLOCK: usize = 512;
+
 /// Float to 16-bit as v1 (clamped, lrintf: rounded to nearest, ties even)
 #[inline]
 fn to_i16(x: f32) -> i16 {
@@ -313,6 +316,11 @@ pub struct LeEncoder {
     input: InputFormat,
     resampler: LinearResampler,
     frame: FrameEncoder,
+    /// The playback EQ (at the capture rate, after the downmix), and room
+    /// for a block of stereo audio for it
+    eq: Option<crate::eq::EqProcessor>,
+    eq_buf: Vec<f32>,
+    eq_was_on: bool,
 }
 
 impl LeEncoder {
@@ -378,7 +386,17 @@ impl LeEncoder {
                 errors: 0,
                 clock: crate::EncodeClock::default(),
             },
+            eq: None,
+            eq_buf: Vec::new(),
+            eq_was_on: false,
         })
+    }
+
+    /// The playback EQ of `handle` applied to the audio, while it is on
+    pub fn with_eq(mut self, handle: crate::eq::EqHandle) -> LeEncoder {
+        self.eq = Some(crate::eq::EqProcessor::new(handle, self.input.sample_rate, 2));
+        self.eq_buf = vec![0.0; 2 * EQ_BLOCK];
+        self
     }
 
     pub fn layout(&self) -> &SduLayout {
@@ -397,13 +415,41 @@ impl LeEncoder {
         let t = self.input.sample;
         let used = in_ch.min(8);
         let mut ch = [0.0f32; 8];
-        let Self { resampler, frame, .. } = self;
-        for f in 0..raw.len() / (in_ch * t.bytes()) {
-            for (c, v) in ch[..used].iter_mut().enumerate() {
-                *v = input_sample(raw, f * in_ch + c, t);
+        let frames = raw.len() / (in_ch * t.bytes());
+        let eq_on = self.eq.as_mut().is_some_and(crate::eq::EqProcessor::active);
+        if eq_on != self.eq_was_on {
+            self.eq_was_on = eq_on;
+            tracing::debug!("LE encode thread: EQ {}", if eq_on { "on" } else { "off" });
+        }
+        let Self { resampler, frame, eq, eq_buf, .. } = self;
+        match eq.as_mut() {
+            Some(eq) if eq_on => {
+                // In blocks: downmixed, through the EQ, then resampled
+                let mut f0 = 0;
+                while f0 < frames {
+                    let n = (frames - f0).min(EQ_BLOCK);
+                    for (i, out) in eq_buf[..2 * n].as_chunks_mut::<2>().0.iter_mut().enumerate() {
+                        for (c, v) in ch[..used].iter_mut().enumerate() {
+                            *v = input_sample(raw, (f0 + i) * in_ch + c, t);
+                        }
+                        (out[0], out[1]) = downmix(&ch[..used]);
+                    }
+                    eq.process(&mut eq_buf[..2 * n]);
+                    for lr in eq_buf[..2 * n].as_chunks::<2>().0 {
+                        resampler.process(lr[0], lr[1], &mut |l, r| frame.add(l, r, sink));
+                    }
+                    f0 += n;
+                }
             }
-            let (l, r) = downmix(&ch[..used]);
-            resampler.process(l, r, &mut |l, r| frame.add(l, r, sink));
+            _ => {
+                for f in 0..frames {
+                    for (c, v) in ch[..used].iter_mut().enumerate() {
+                        *v = input_sample(raw, f * in_ch + c, t);
+                    }
+                    let (l, r) = downmix(&ch[..used]);
+                    resampler.process(l, r, &mut |l, r| frame.add(l, r, sink));
+                }
+            }
         }
     }
 
@@ -421,6 +467,8 @@ pub struct LePipelineConfig {
     pub plan: StreamPlan,
     pub input: InputFormat,
     pub buffer: BufferPreset,
+    /// The playback EQ, applied before encoding while it is on; None: none
+    pub media_eq: Option<crate::eq::EqHandle>,
 }
 
 /// A running LE encode thread
@@ -438,8 +486,11 @@ impl LePipeline {
         sink: impl SduSink,
         stats: Arc<LinkStats>,
     ) -> Result<(LePipeline, CaptureInput), String> {
-        let LePipelineConfig { plan, input, buffer } = config;
-        let encoder = LeEncoder::new(&plan, input)?;
+        let LePipelineConfig { plan, input, buffer, media_eq } = config;
+        let mut encoder = LeEncoder::new(&plan, input)?;
+        if let Some(h) = media_eq {
+            encoder = encoder.with_eq(h);
+        }
         let layout = encoder.layout().clone();
         let ring = buffer.ring_bytes(&input);
         tracing::debug!(
@@ -846,7 +897,7 @@ mod tests {
         let queue = Arc::new(Mutex::new(SduQueue::new()));
         queue.lock().unwrap().configure(2, silence_set(&p));
         let stats = Arc::new(LinkStats::default());
-        let config = LePipelineConfig { plan: p, input, buffer: BufferPreset::Standard };
+        let config = LePipelineConfig { plan: p, input, buffer: BufferPreset::Standard, media_eq: None };
         let (pipeline, mut capture) = LePipeline::start(config, queue.clone(), stats.clone()).unwrap();
         assert_eq!(pipeline.layout().sdu_lens, vec![150]);
         // 4 frames of 7.5 ms
@@ -863,7 +914,39 @@ mod tests {
         assert_eq!((enc.calls, enc.audio_ns), (4, 4 * 7_500_000));
         assert!(enc.busy_ns > 0);
         let p = plan(preset(44100, 7500, 75), vec![cis(1, &[L])]);
-        let config = LePipelineConfig { plan: p, input, buffer: BufferPreset::Standard };
+        let config = LePipelineConfig { plan: p, input, buffer: BufferPreset::Standard, media_eq: None };
         assert!(LePipeline::start(config, queue, stats).is_err());
+    }
+
+    /// The EQ off or flat: the SDUs are bit for bit those without an EQ;
+    /// on, they differ
+    #[test]
+    fn eq_off_is_bit_identical_and_on_changes_the_sdus() {
+        let p = plan(preset(48000, 10000, 100), vec![cis(1, &[L, R])]);
+        let input = InputFormat { sample_rate: 44100, channels: 2, sample: SampleType::I16 };
+        let audio: Vec<u8> =
+            (0..4410 * 2).flat_map(|n| (((n as f32 * 0.07).sin() * 30000.0) as i16).to_le_bytes()).collect();
+        let run = |eq: Option<crate::eq::EqHandle>| {
+            let mut enc = LeEncoder::new(&p, input).unwrap();
+            if let Some(h) = eq {
+                enc = enc.with_eq(h);
+            }
+            let sink = Collect::default();
+            for piece in audio.chunks(4 * 441) {
+                enc.push(piece, &sink);
+            }
+            sink.0.lock().unwrap().clone()
+        };
+        let plain = run(None);
+        assert_eq!(plain.len(), 10);
+        let off = crate::eq::EqHandle::default();
+        off.set(crate::eq::EqSettings::new(false, &[dsp::EqBand::peaking(500.0, 9.0, 1.0)]));
+        assert_eq!(run(Some(off)), plain);
+        let flat = crate::eq::EqHandle::default();
+        flat.set(crate::eq::EqSettings::new(true, &[dsp::EqBand::peaking(500.0, 0.0, 1.0)]));
+        assert_eq!(run(Some(flat)), plain);
+        let on = crate::eq::EqHandle::default();
+        on.set(crate::eq::EqSettings::new(true, &[dsp::EqBand::peaking(500.0, 9.0, 1.0)]));
+        assert_ne!(run(Some(on)), plain);
     }
 }

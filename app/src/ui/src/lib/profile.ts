@@ -8,7 +8,7 @@
 // into it at start (crates/core/src/profiles.rs consolidate).
 
 import type { CodecValues } from "../ipc/bindings/CodecValues";
-import type { AudioDevice, Device, ParamsOf, Profile, Snapshot } from "../ipc/types";
+import type { AudioDevice, Device, MicProcessing, ParamsOf, Profile, Snapshot } from "../ipc/types";
 import { cardCodec, cardOf, carryToCodec, fitToCodec, PACKET_DEFAULT, PACKET_MAX, PACKET_MIN, type CodecCaps } from "./codecs";
 import { parseAddress } from "./format";
 
@@ -65,6 +65,14 @@ export function headsetMode(p: Pick<Profile, "headset_mic">): HeadsetMode {
   return (HEADSET_MODES as readonly string[]).includes(m) ? (m as HeadsetMode) : "off";
 }
 
+/** The headset microphone's processing all off: the microphone as it comes */
+export const MIC_PROCESSING_OFF: MicProcessing = {
+  gain_db: 0,
+  noise_suppression: false,
+  suppression: 100,
+  gate_db: -80,
+};
+
 export function newProfile(): Profile {
   return {
     name: "",
@@ -102,6 +110,7 @@ export function newProfile(): Profile {
     mic_default_input: true,
     voice_codec: "",
     mic_rate: 0,
+    mic_processing: { ...MIC_PROCESSING_OFF },
     sbc_bitpool: 0,
     sbcxq_bitpool: 0,
     sbc_min_bitpool: 0,
@@ -112,6 +121,7 @@ export function newProfile(): Profile {
     sbc_channel_mode: "",
     codec_settings: {},
     codec_order: [],
+    media_eq: { enabled: false, bands: [] },
   };
 }
 

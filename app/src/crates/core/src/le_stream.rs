@@ -183,6 +183,7 @@ impl LeAudioPath {
                 plan: plan.clone(),
                 input: crate::stream::input_format(format),
                 buffer: BufferPreset::Standard,
+                media_eq: Some(crate::media_eq::handle()),
             },
             started.sink.clone(),
             stats,
@@ -256,11 +257,13 @@ pub struct LeMicPath {
 }
 
 impl LeMicPath {
-    /// Opens `target` at the stream's source rate and starts decoding into it
-    pub fn start(rx: LeRxHandle, target: &MicTarget) -> Result<LeMicPath, String> {
+    /// Opens `target` at the stream's source rate and starts decoding into
+    /// it, through the processing `dsp` asks for
+    pub fn start(rx: LeRxHandle, target: &MicTarget, dsp: voice_link::MicDsp) -> Result<LeMicPath, String> {
         let rate = rx.sample_rate;
         let mut output = MicOutput::open(target, rate)?;
-        let producer = output.producer().ok_or("the microphone output has no producer")?;
+        let mut producer = output.producer().ok_or("the microphone output has no producer")?;
+        producer.set_processing(dsp, rate);
         let pipeline = LeRxPipeline::start(rx, Box::new(ProducerOut(producer)))?;
         tracing::info!("LE Audio: microphone to {target} at {rate} Hz");
         Ok(LeMicPath { pipeline: Some(pipeline), output: Some(output), target: target.clone(), rate })
@@ -317,9 +320,14 @@ impl Drop for LeMicPath {
 /// The microphone of a just started stream into `target` (the `stream`th of
 /// the session: [`MicTarget::nth`]). Ok(None): the stream has none (none
 /// asked for, or the plan found none); Err: the output did not open.
-pub fn start_mic(started: &mut LeStreamStarted, target: &MicTarget, stream: u32) -> Result<Option<LeMicPath>, String> {
+pub fn start_mic(
+    started: &mut LeStreamStarted,
+    target: &MicTarget,
+    stream: u32,
+    dsp: voice_link::MicDsp,
+) -> Result<Option<LeMicPath>, String> {
     let Some(rx) = started.rx.take() else { return Ok(None) };
-    LeMicPath::start(rx, &target.nth(stream)).map(Some).inspect_err(|e| {
+    LeMicPath::start(rx, &target.nth(stream), dsp).map(Some).inspect_err(|e| {
         tracing::error!("LE Audio: microphone: {e}");
     })
 }
@@ -755,7 +763,7 @@ fn open_mic(
     note: &mut Option<Msg>,
 ) -> Option<LeMicPath> {
     let target = target?;
-    match start_mic(started, target, stream) {
+    match start_mic(started, target, stream, inner.mic_dsp.clone()) {
         Ok(Some(m)) => {
             inner.voice_status(Some(m.status()));
             *note = None;
@@ -1132,7 +1140,7 @@ mod tests {
             preset: "16_2_1".into(),
             stats: Arc::default(),
         };
-        let mic = LeMicPath::start(rx, &MicTarget::Wav(path.clone())).unwrap();
+        let mic = LeMicPath::start(rx, &MicTarget::Wav(path.clone()), voice_link::MicDsp::new()).unwrap();
         assert_eq!(mic.rate(), 16000);
         let status = mic.status();
         assert_eq!((status.codec.as_str(), status.link.as_str(), status.rate), ("lc3", "le", 16000));

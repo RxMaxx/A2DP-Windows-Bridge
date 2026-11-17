@@ -560,8 +560,38 @@ pub struct MicTestState {
     pub error: Option<String>,
 }
 
+/// The kind of a playback EQ point
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum EqBandType {
+    #[default]
+    Peaking,
+    LowShelf,
+    HighShelf,
+    HighPass,
+    LowPass,
+}
+
+/// One playback EQ point: frequency (Hz, 20..20000), gain (dB, -24..24;
+/// not used by the pass filters), Q (0.1..12; not used by the shelves)
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+pub struct EqPoint {
+    pub frequency: f32,
+    pub gain: f32,
+    pub q: f32,
+    pub band_type: EqBandType,
+}
+
+/// A device's playback EQ, applied to the audio before it is encoded: on
+/// or off, and up to 16 points (kept while off)
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct MediaEq {
+    pub enabled: bool,
+    pub bands: Vec<EqPoint>,
+}
+
 /// A connection profile, as in profiles.json
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 
 pub struct Profile {
     pub name: String,
@@ -645,6 +675,10 @@ pub struct Profile {
     /// to Auto's. Kept but not used while Auto-select is on.
     #[serde(default)]
     pub mic_rate: u32,
+    /// The headset microphone's processing (all off by default); a change
+    /// applies to the running microphone in place
+    #[serde(default)]
+    pub mic_processing: MicProcessing,
     /// SBC / SBC XQ: the bitpool to encode with, within what the device
     /// allows (0 = by quality)
     #[serde(default)]
@@ -685,6 +719,41 @@ pub struct Profile {
     /// #86 round 8). Empty: highest sound quality first.
     #[serde(default)]
     pub codec_order: Vec<String>,
+    /// The playback EQ for this device: a change saved while it streams
+    /// takes effect without reconnecting
+    #[serde(default)]
+    pub media_eq: MediaEq,
+}
+
+/// What is done to the headset microphone before apps get it
+/// (Profile.mic_processing): gain, then noise suppression, then the noise
+/// gate; a limiter holds the peaks while any of them is on. The default
+/// does nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct MicProcessing {
+    /// dB, -12 to 24
+    pub gain_db: i8,
+    pub noise_suppression: bool,
+    /// Percent of the denoised signal (the rest is the original), 0 to 100
+    pub suppression: u8,
+    /// The gate's threshold in dBFS, up to -20; -80 or lower: off
+    pub gate_db: i8,
+}
+
+impl MicProcessing {
+    /// The gate's threshold that means off
+    pub const GATE_OFF_DB: i8 = -80;
+
+    pub fn is_default(&self) -> bool {
+        *self == MicProcessing::default()
+    }
+}
+
+impl Default for MicProcessing {
+    fn default() -> Self {
+        MicProcessing { gain_db: 0, noise_suppression: false, suppression: 100, gate_db: Self::GATE_OFF_DB }
+    }
 }
 
 /// One codec's settings in a profile (Profile.codec_settings)
@@ -1755,6 +1824,11 @@ pub enum Method {
     ProfileSave { profile: Box<Profile>, original_name: Option<String> },
     #[serde(rename = "profile.delete")]
     ProfileDelete { name: String },
+    /// Plays the stream with this EQ while it streams the profile `name`,
+    /// without saving it (while a point is dragged; profile.save keeps it).
+    /// Nothing happens for another profile or no stream.
+    #[serde(rename = "media_eq.preview")]
+    MediaEqPreview { name: String, eq: MediaEq },
     #[serde(rename = "profile.set_active")]
     ProfileSetActive { name: String },
     /// -> SettingsApplied (the settings come back as an event too)

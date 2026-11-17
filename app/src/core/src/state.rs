@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use bluecaster_core::default_input::{DefaultInput, Want as InputWant};
 use bluecaster_core::diag::AudioRates;
+use bluecaster_core::media_eq::{self, MediaEq};
 use bluecaster_core::paths;
 use bluecaster_core::profiles::{self, Profile as CoreProfile};
 use bluecaster_core::receiver::{self, ReceiverClient};
@@ -207,6 +208,7 @@ fn to_ipc_profile(p: &CoreProfile, legacy: u16) -> Profile {
         mic_default_input: p.mic_default_input,
         voice_codec: p.voice_codec.clone(),
         mic_rate: p.mic_rate,
+        mic_processing: p.mic_processing,
         sbc_bitpool: p.sbc_bitpool,
         sbcxq_bitpool: p.sbcxq_bitpool,
         sbc_min_bitpool: p.sbc_min_bitpool,
@@ -217,6 +219,7 @@ fn to_ipc_profile(p: &CoreProfile, legacy: u16) -> Profile {
         sbc_channel_mode: p.sbc_channel_mode.clone(),
         codec_settings: p.codec_settings.iter().map(|(c, v)| (c.clone(), to_ipc_codec_values(v))).collect(),
         codec_order: p.codec_order.clone(),
+        media_eq: p.media_eq.to_ipc(),
     }
 }
 
@@ -256,6 +259,17 @@ fn from_ipc_codec_values(v: &ipc::CodecValues) -> profiles::CodecValues {
     }
 }
 
+/// The microphone's processing within the ranges the chain takes (a gate
+/// below its lowest threshold is off)
+fn clamp_mic_processing(p: ipc::MicProcessing) -> ipc::MicProcessing {
+    ipc::MicProcessing {
+        gain_db: p.gain_db.clamp(-12, 24),
+        noise_suppression: p.noise_suppression,
+        suppression: p.suppression.min(100),
+        gate_db: p.gate_db.clamp(ipc::MicProcessing::GATE_OFF_DB, -20),
+    }
+}
+
 /// Applies the UI's profile onto the stored one (unknown keys kept)
 fn merge_profile(base: Option<&CoreProfile>, p: &Profile) -> CoreProfile {
     let mut c = base.cloned().unwrap_or_default();
@@ -291,6 +305,7 @@ fn merge_profile(base: Option<&CoreProfile>, p: &Profile) -> CoreProfile {
     // A call codec not known reads as none chosen
     c.voice_codec = bluecaster_core::VoiceCodec::from_name(&p.voice_codec).map_or(String::new(), |v| v.name().into());
     c.mic_rate = p.mic_rate;
+    c.mic_processing = clamp_mic_processing(p.mic_processing);
     c.sbc_bitpool = p.sbc_bitpool;
     c.sbcxq_bitpool = p.sbcxq_bitpool;
     c.sbc_min_bitpool = p.sbc_min_bitpool;
@@ -312,6 +327,7 @@ fn merge_profile(base: Option<&CoreProfile>, p: &Profile) -> CoreProfile {
     // The codecs' keys, each once (the cards' order: FastStream and Opus 05
     // too, which Auto and the fallback never take); the UI sends none for
     // the default order; aptX Adaptive LL's card has its own place
+    c.media_eq = MediaEq::from_ipc(&p.media_eq);
     c.codec_order = Vec::new();
     let keys = p.codec_order.iter().filter_map(|k| {
         if k.eq_ignore_ascii_case(profiles::APTXAD_LL_CARD) {
@@ -2615,6 +2631,12 @@ impl CoreState {
 
     fn begin_stream(&self, req: StreamRequest, profile: Option<String>) {
         *self.starting_profile.lock().unwrap_or_else(|e| e.into_inner()) = profile.clone();
+        // The profile's playback EQ (none for a stream without one)
+        let eq = profile
+            .as_deref()
+            .and_then(|name| profiles::load(&self.config_dir()).into_iter().find(|p| p.name == name))
+            .map(|p| p.media_eq);
+        media_eq::apply(eq.as_ref());
         self.publish(Event::Stream(StreamStatus {
             state: StreamState::Connecting,
             message: Msg::new("status.initializing"),
@@ -3173,9 +3195,14 @@ impl CoreState {
                 });
                 let auto_select = self.service.settings().auto_codec;
                 // Settings of a codec not in use: nothing the stream uses
-                let kept_only = pos.is_some_and(|i| {
-                    list[i].only_kept_settings_differ(&merged) || list[i].only_default_input_differs(&merged)
-                });
+                // The playback EQ and the microphone's processing (one or
+                // both): the running stream takes them in place
+                let live_only = pos.is_some_and(|i| list[i].only_live_processing_differs(&merged));
+                let processing_only = live_only && pos.is_some_and(|i| list[i].mic_processing != merged.mic_processing);
+                let kept_only = live_only
+                    || pos.is_some_and(|i| {
+                        list[i].only_kept_settings_differ(&merged) || list[i].only_default_input_differs(&merged)
+                    });
                 let in_order = merged.clone();
                 // The profile's device joins the saved ones of its kind (as
                 // a connection saves it)
@@ -3208,8 +3235,16 @@ impl CoreState {
                     self.set_active_profile(Some(profile.name.clone()));
                 }
                 self.refresh_devices();
+                // The stream of this profile plays its EQ as saved from now
+                // on (also when it starts again below)
+                if restart_after_save(&s.stream, &key) {
+                    media_eq::apply(Some(&in_order.media_eq));
+                }
                 // The profile in use starts again with what was saved (v1),
                 // but for another source, which needs nothing of the link
+                if processing_only && restart_after_save(&s.stream, &key) {
+                    self.service.set_mic_processing(in_order.mic_processing);
+                }
                 let order_keeps_codec = order_only && !restart_for_order(&s.stream, &in_order, auto_select);
                 let headset = headset_change(&s.stream, before.as_ref(), &in_order);
                 let headset_kept = match headset {
@@ -3294,6 +3329,13 @@ impl CoreState {
                         bluecaster_core::diag::quoted(&profile.name)
                     );
                     self.start_profile(&profile.name)?;
+                }
+                Ok(Value::Null)
+            }
+            Method::MediaEqPreview { name, eq } => {
+                let (_, s) = self.snapshot();
+                if restart_after_save(&s.stream, &name) {
+                    media_eq::apply(Some(&MediaEq::from_ipc(&eq)));
                 }
                 Ok(Value::Null)
             }
@@ -4357,6 +4399,33 @@ mod tests {
         assert_eq!(headset_mic_in_force(&muted), HeadsetMic::Off);
         let no_output = CoreProfile { mic_device_id: String::new(), ..auto };
         assert_eq!(headset_mic_in_force(&no_output), HeadsetMic::Off);
+    }
+
+    #[test]
+    fn mic_processing_round_trips_and_is_clamped() {
+        let core =
+            CoreProfile { name: "WH".into(), device_address: "00:11:22:33:44:55".into(), ..CoreProfile::default() };
+        let mut p = to_ipc_profile(&core, 679);
+        assert_eq!(p.mic_processing, ipc::MicProcessing::default());
+        p.mic_processing = ipc::MicProcessing { gain_db: 40, noise_suppression: true, suppression: 120, gate_db: -127 };
+        let merged = merge_profile(Some(&core), &p);
+        assert_eq!(
+            merged.mic_processing,
+            ipc::MicProcessing { gain_db: 24, noise_suppression: true, suppression: 100, gate_db: -80 }
+        );
+        let unchanged = merge_profile(Some(&core), &to_ipc_profile(&core, 679));
+        assert!(unchanged.only_mic_processing_differs(&merged));
+        assert_eq!(to_ipc_profile(&merged, 679).mic_processing, merged.mic_processing);
+        // An older UI without the field leaves it off
+        let old: Profile = serde_json::from_value(serde_json::json!({
+            "name": "x", "device_address": "", "device_name": "", "codec": "auto", "quality": "hq",
+            "abr": false, "codec_fallback": true, "sample_rate": 0, "bit_depth": 0, "capture_mode": "loopback",
+            "audio_device_id": "", "audio_device_name": "", "auto_switch_device": true, "app_exe": "",
+            "app_name": "", "volume_sync": "auto", "volume_device_id": "", "volume_device_name": "",
+            "max_media_payload": 679
+        }))
+        .unwrap();
+        assert_eq!(old.mic_processing, ipc::MicProcessing::default());
     }
 
     #[test]
@@ -5610,6 +5679,25 @@ mod tests {
             merge_profile(None, &Profile { codec_order: order, ..ui }).codec_order,
             ["aac", "aptxadll", "aptxad"]
         );
+    }
+
+    /// The playback EQ goes through the UI and back as saved, and a save
+    /// that changes only it keeps the stream going
+    #[test]
+    fn media_eq_is_saved_and_changes_in_place() {
+        let base =
+            CoreProfile { name: "WH".into(), device_address: "C0:11:22:33:44:55".into(), ..CoreProfile::default() };
+        let ui = to_ipc_profile(&base, 679);
+        assert_eq!(ui.media_eq, ipc::MediaEq::default());
+        let eq = ipc::MediaEq {
+            enabled: true,
+            bands: vec![ipc::EqPoint { frequency: 120.0, gain: 3.5, q: 0.9, band_type: ipc::EqBandType::LowShelf }],
+        };
+        let merged = merge_profile(Some(&base), &Profile { media_eq: eq.clone(), ..ui });
+        assert_eq!(to_ipc_profile(&merged, 679).media_eq, eq);
+        // As saved before from the UI: the EQ alone differs
+        let before = merge_profile(Some(&base), &to_ipc_profile(&base, 679));
+        assert!(before.only_media_eq_differs(&merged));
     }
 
     #[test]

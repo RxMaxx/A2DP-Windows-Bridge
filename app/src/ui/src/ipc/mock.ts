@@ -19,7 +19,7 @@ import {
   REALTEK_CHIPS,
 } from "../lib/chips";
 import { FlowTracker, flowView } from "../lib/flow";
-import { leAudioOn as leOn } from "../lib/profile";
+import { leAudioOn as leOn, MIC_PROCESSING_OFF } from "../lib/profile";
 import type {
   ConnStatus,
   Transport,
@@ -164,6 +164,7 @@ export function sampleProfile(over: Partial<Profile> = {}): Profile {
     mic_default_input: true,
     voice_codec: "",
     mic_rate: 0,
+    mic_processing: { ...MIC_PROCESSING_OFF },
     sbc_bitpool: 0,
     sbcxq_bitpool: 0,
     sbc_min_bitpool: 0,
@@ -175,6 +176,7 @@ export function sampleProfile(over: Partial<Profile> = {}): Profile {
     ...over,
     codec_settings: over.codec_settings ?? {},
     codec_order: over.codec_order ?? [],
+    media_eq: over.media_eq ?? { enabled: false, bands: [] },
   };
 }
 
@@ -1404,6 +1406,9 @@ export class MockCore implements Transport {
         }
         return null;
       }
+      // Nothing plays in the mock: the curve is all there is to see
+      case "media_eq.preview":
+        return null;
       case "profile.delete":
         this.snap.profiles = this.snap.profiles.filter(
           (x) => x.name !== p.name,

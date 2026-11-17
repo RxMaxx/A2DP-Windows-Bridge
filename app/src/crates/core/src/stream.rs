@@ -86,6 +86,9 @@ pub struct StreamRequest {
     /// the best both sides have. One the headphones lack falls back to the
     /// next lower one.
     pub voice_codec: Option<voice_link::VoiceCodec>,
+    /// What is done to the microphone (the profile's `mic_processing`);
+    /// [`crate::Service::set_mic_processing`] changes it while streaming
+    pub mic_processing: ipc::MicProcessing,
 }
 
 /// The bitpools of a request ([`crate::profiles::Profile::bitpools`]; 0 = Auto)
@@ -1318,6 +1321,7 @@ fn start_pipeline(
                 let zero = host.volume_is_zero();
                 move || zero() || crate::mute_output::key_silenced()
             })),
+            media_eq: Some(crate::media_eq::handle()),
         },
         sink,
         host.stats().clone(),
