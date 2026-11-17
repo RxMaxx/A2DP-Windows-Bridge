@@ -56,7 +56,7 @@ bluecaster-core.exe --cli --scan lists it:
     from a name request after the first inquiry
 Outputs go to tools/emu/out/scan-<case>/.
 
-    python tools/emu/run_test.py --voice [cvsd msbc lc3swb cvsd-roundtrip cvsd-auto lc3swb-msbc lc3swb-cvsd]
+    python tools/emu/run_test.py --voice [cvsd msbc lc3swb cvsd-roundtrip cvsd-auto lc3swb-msbc lc3swb-cvsd msbc-gain]
 
 runs the HFP audio cases instead (headset mode: bluecaster-core --headset-mic
 --mic-output <out>/mic.wav): emu_sink.py --hfp <codec> adds a hands-free
@@ -84,6 +84,8 @@ checks are cvsd's, plus Auto's "an application records" in the log.
 lc3swb-msbc / lc3swb-cvsd: the hands-free unit offers LC3-SWB, BlueCaster is
 given --voice-codec msbc / cvsd (the call codec chosen with Auto-select off):
 the link must come up with that codec instead.
+msbc-gain: msbc with --mic-gain 6: the microphone's processing runs, so
+mic.wav holds the tone 6 dB louder.
 Outputs go to tools/emu/out/voice-<case>/.
 
     python tools/emu/run_test.py --le-pairing [link-key link-key-ct2 no-link-key replaces-classic drops-authenticated]
@@ -1384,7 +1386,10 @@ VOICE_CASES = {
     'cvsd-auto': ('CVSD', 16000 / 60),
     'lc3swb-msbc': ('mSBC', 8000 / 60),
     'lc3swb-cvsd': ('CVSD', 16000 / 60),
+    'msbc-gain': ('mSBC', 8000 / 60),
 }
+# Cases with the microphone's gain (--mic-gain, dB): mic.wav's tone that much louder
+VOICE_MIC_GAIN = {'msbc-gain': 6}
 # Cases that choose the call codec (--voice-codec): the hands-free unit
 # offers more, the link takes the one chosen (hfp_audio.py's name for it)
 VOICE_CHOSEN = {'lc3swb-msbc': ('msbc', 'msbc'), 'lc3swb-cvsd': ('cvsd', 'cvsd')}
@@ -1411,9 +1416,9 @@ def pklg_records(path):
     return records
 
 
-def mic_tone_check(path):
+def mic_tone_check(path, gain_db=0):
     """(ok, description) for the hands-free unit's tone in the middle half
-    second of BlueCaster's mic.wav"""
+    second of BlueCaster's mic.wav (gain_db: the microphone's gain)"""
     try:
         rate, channels = read_wav(path)
     except (OSError, EOFError, wave.Error) as e:
@@ -1422,7 +1427,8 @@ def mic_tone_check(path):
     if len(channels) != 1 or len(xs) < rate:
         return False, f'expected >= 1 s of mono audio, got {len(channels)} ch, {len(xs) / max(rate, 1):.2f} s'
     start = len(xs) // 2 - rate // 4
-    ok, notes = tone_block(xs[start:start + rate // 2], rate, (MIC_TONE,))
+    freq, amp = MIC_TONE
+    ok, notes = tone_block(xs[start:start + rate // 2], rate, ((freq, amp * 10 ** (gain_db / 20)),))
     return ok, f'{rate} Hz {len(xs) / rate:.1f} s, {", ".join(notes)}'
 
 
@@ -1462,6 +1468,9 @@ def run_voice_case(args, case, port):
     chosen, negotiated = VOICE_CHOSEN.get(case, (None, hf_case))
     if chosen:
         headset += ['--voice-codec', chosen]
+    gain = VOICE_MIC_GAIN.get(case, 0)
+    if gain:
+        headset += ['--mic-gain', str(gain)]
     sink = start_sink(port, sink_capture, os.path.join(out, 'sink.log'), extra=['--hfp', hf_case])
     try:
         env = dict(os.environ, BLUECASTER_CONFIG_DIR=os.path.join(out, 'config'), BLUECASTER_LOG='debug')
@@ -1506,7 +1515,7 @@ def run_voice_case(args, case, port):
         detail.append(f'{side} SCO out {sent} in {received}')
         if sent < rate or received < rate:
             failures.append(f'{side}.pklg: SCO out {sent}, in {received} (less than a second of audio)')
-    ok, notes = mic_tone_check(mic_wav)
+    ok, notes = mic_tone_check(mic_wav, gain)
     detail.append(f'mic.wav {notes}')
     if not ok:
         failures.append(f'mic.wav: the sink\'s 1.5 kHz tone not found ({notes})')
@@ -1524,6 +1533,8 @@ def run_voice_case(args, case, port):
             failures.append(f'sink: what BlueCaster sent is not right ({tone})')
     if 'dropped an incoming HCI packet' in bc_log:
         failures.append('bluecaster.log: incoming HCI packets dropped')
+    if gain and f'microphone processing: gain {gain} dB' not in bc_log:
+        failures.append(f"bluecaster.log: the microphone's gain of {gain} dB never applied")
     if auto and 'voice: auto: an application records' not in bc_log:
         failures.append('bluecaster.log: Auto never saw the WAV output as recorded from')
     if roundtrip:

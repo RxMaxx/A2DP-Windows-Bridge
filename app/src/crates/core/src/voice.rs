@@ -35,8 +35,8 @@ use std::time::{Duration, Instant};
 use audio_capture::{Capture, CaptureOptions, Running, Source};
 use bt_host::{BtHost, HostError, LinkStats, VoiceEvent, VoiceRx, VoiceTx};
 use voice_link::{
-    MicTap, PcmConsumer, PcmProducer, Renderer, UplinkConsumer, UplinkSink, UplinkStats, VoiceCodec, VoiceDecoder,
-    VoiceEncoder, WavSink,
+    MicDsp, MicTap, PcmConsumer, PcmProducer, Renderer, UplinkConsumer, UplinkSink, UplinkStats, VoiceCodec,
+    VoiceDecoder, VoiceEncoder, WavSink,
 };
 
 use crate::messages::Msg;
@@ -513,6 +513,24 @@ impl VoiceRx for ShellRx {
     }
 }
 
+/// A profile's microphone processing as the chain takes it (out-of-range
+/// values clamped there)
+pub(crate) fn mic_settings(p: &ipc::MicProcessing) -> voice_link::MicSettings {
+    voice_link::MicSettings {
+        gain_db: f32::from(p.gain_db),
+        noise_suppression: p.noise_suppression,
+        suppression: f32::from(p.suppression.min(100)) / 100.0,
+        gate_db: f32::from(p.gate_db),
+    }
+    .clamped()
+}
+
+/// `p` into `dsp`, for a microphone outside a [`crate::Service`] (the
+/// developer CLI's LE Audio stream)
+pub fn apply_mic_processing(dsp: &MicDsp, p: &ipc::MicProcessing) {
+    dsp.set(mic_settings(p));
+}
+
 /// The open microphone output: mono 16-bit PCM at the voice rate pushed
 /// through its [`PcmProducer`]
 pub enum MicOutput {
@@ -592,6 +610,8 @@ struct VoiceLink {
     summary_at: Instant,
     /// The microphone test's tap: on the microphone and the uplink
     tap: MicTap,
+    /// The microphone's processing, before the tap and the output
+    dsp: MicDsp,
     /// The link's counters: the uplink capture goes there as A2DP's does
     stats: Arc<LinkStats>,
     /// The uplink's counters last added to them
@@ -601,7 +621,12 @@ struct VoiceLink {
 }
 
 impl VoiceLink {
-    fn new(target: MicTarget, tap: MicTap, stats: Arc<LinkStats>) -> (VoiceLink, Box<dyn VoiceTx>, Box<dyn VoiceRx>) {
+    fn new(
+        target: MicTarget,
+        tap: MicTap,
+        dsp: MicDsp,
+        stats: Arc<LinkStats>,
+    ) -> (VoiceLink, Box<dyn VoiceTx>, Box<dyn VoiceRx>) {
         let (tx, rx): (Slot<TxParts>, Slot<RxParts>) = Default::default();
         let now = Instant::now();
         let link = VoiceLink {
@@ -617,6 +642,7 @@ impl VoiceLink {
             app_failed_pid: None,
             summary_at: now,
             tap,
+            dsp,
             stats: stats.clone(),
             counted: UplinkStats::default(),
             phase: Arc::default(),
@@ -635,6 +661,7 @@ impl VoiceLink {
             Msg::new("status.headset_mic_output_failed")
         })?;
         let mut out = output.producer().ok_or_else(|| Msg::new("status.headset_mic_output_failed"))?;
+        self.wire_processing(&mut out, rate);
         out.set_tap(self.tap.clone(), rate);
         let uplink = self.start_uplink(rate, source);
         *self.rx.lock().unwrap_or_else(|e| e.into_inner()) = Some(RxParts { decoder: VoiceDecoder::new(codec), out });
@@ -651,6 +678,16 @@ impl VoiceLink {
             self.target
         );
         Ok(())
+    }
+
+    /// The microphone's processing on `out` (at `rate`): it runs where the
+    /// output reads the queue, which the microphone test alone
+    /// ([`MicTarget::Test`], headset mode off, nothing to process for)
+    /// never does: its tap stays on the raw samples
+    fn wire_processing(&self, out: &mut PcmProducer, rate: u32) {
+        if self.target != MicTarget::Test {
+            out.set_processing(self.dsp.clone(), rate);
+        }
     }
 
     /// A capture of `source` into a new uplink (its consumer returned)
@@ -744,6 +781,7 @@ impl VoiceLink {
             Msg::new("status.headset_mic_output_failed")
         })?;
         let mut out = output.producer().ok_or_else(|| Msg::new("status.headset_mic_output_failed"))?;
+        self.wire_processing(&mut out, codec.rate());
         out.set_tap(self.tap.clone(), codec.rate());
         if let Some(parts) = self.rx.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
             parts.out = out;
@@ -1225,7 +1263,8 @@ impl HeadsetMode {
         };
         tracing::info!("voice: the headphones opened the audio connection ({}), taking it over", codec.name());
         a2dp.suspend();
-        let (mut link, tx, rx) = VoiceLink::new(target, inner.mic_test.tap(), host.stats().clone());
+        let (mut link, tx, rx) =
+            VoiceLink::new(target, inner.mic_test.tap(), inner.mic_dsp.clone(), host.stats().clone());
         if let Err(e) = host.voice_attach(tx, rx) {
             tracing::warn!("voice: cannot take the audio connection over: {e:?}");
             let _ = host.voice_stop();
@@ -1284,7 +1323,7 @@ impl HeadsetMode {
             tracing::info!("voice: headset mode on, suspending A2DP and asking for the audio connection");
         }
         a2dp.suspend();
-        let (link, tx, rx) = VoiceLink::new(target, inner.mic_test.tap(), host.stats().clone());
+        let (link, tx, rx) = VoiceLink::new(target, inner.mic_test.tap(), inner.mic_dsp.clone(), host.stats().clone());
         match host.voice_start(tx, rx) {
             Ok(()) => {
                 self.link = Some(link);
@@ -1393,6 +1432,16 @@ fn first_sound_text(d: Option<&voice_link::DecoderStats>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_profiles_mic_processing_reaches_the_chain() {
+        assert!(!mic_settings(&ipc::MicProcessing::default()).is_active());
+        let s =
+            mic_settings(&ipc::MicProcessing { gain_db: 30, noise_suppression: true, suppression: 250, gate_db: -10 });
+        assert_eq!((s.gain_db, s.noise_suppression, s.suppression, s.gate_db), (24.0, true, 1.0, -20.0));
+        // A gate below its lowest threshold is off
+        assert!(!mic_settings(&ipc::MicProcessing { gate_db: -100, ..Default::default() }).is_active());
+    }
 
     #[test]
     fn the_microphone_level_reads_in_dbfs() {
@@ -1598,7 +1647,8 @@ mod tests {
 
     #[test]
     fn unarmed_shells_send_silence_and_drop_packets() {
-        let (link, mut tx, mut rx) = VoiceLink::new(MicTarget::Wav("unused.wav".into()), MicTap::new(), Arc::default());
+        let (link, mut tx, mut rx) =
+            VoiceLink::new(MicTarget::Wav("unused.wav".into()), MicTap::new(), MicDsp::new(), Arc::default());
         let mut out = [0x55u8; 60];
         tx.fill(&mut out);
         assert_eq!(out, [0u8; 60]);
@@ -1609,7 +1659,7 @@ mod tests {
     #[test]
     fn armed_shells_count_as_the_links_media() {
         let stats = Arc::<LinkStats>::default();
-        let (mut link, mut tx, mut rx) = VoiceLink::new(MicTarget::Test, MicTap::new(), stats.clone());
+        let (mut link, mut tx, mut rx) = VoiceLink::new(MicTarget::Test, MicTap::new(), MicDsp::new(), stats.clone());
         // Nothing counts before the link is armed
         tx.fill(&mut [0u8; 60]);
         rx.packet(&[0u8; 60], 0);

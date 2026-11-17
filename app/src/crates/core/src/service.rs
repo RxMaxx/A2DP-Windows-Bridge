@@ -386,6 +386,9 @@ pub(crate) struct Inner {
     voice_events: Mutex<Vec<bt_host::VoiceEvent>>,
     /// The microphone test (Diagnostics)
     pub mic_test: crate::mic_test::MicTest,
+    /// The microphone's processing in force (the request's, changed in
+    /// place by [`Service::set_mic_processing`])
+    pub mic_dsp: voice_link::MicDsp,
     /// The running stack was started with LE Audio
     le_active: AtomicBool,
     /// A device scan runs
@@ -416,6 +419,20 @@ pub(crate) struct Inner {
 }
 
 impl Inner {
+    /// The microphone's processing in force from the next samples on
+    pub(crate) fn apply_mic_processing(&self, p: &ipc::MicProcessing) {
+        let s = crate::voice::mic_settings(p);
+        if s != self.mic_dsp.get() {
+            tracing::info!(
+                "microphone processing: gain {} dB, noise suppression {}, gate {}",
+                p.gain_db,
+                if s.noise_suppression { format!("{} %", p.suppression.min(100)) } else { "off".into() },
+                if p.gate_db > ipc::MicProcessing::GATE_OFF_DB { format!("{} dB", p.gate_db) } else { "off".into() }
+            );
+        }
+        self.mic_dsp.set(s);
+    }
+
     /// An event for the state machine (the LE stream's headset volume)
     pub(crate) fn send_event(&self, e: ServiceEvent) {
         let _ = self.events.lock().unwrap_or_else(|e| e.into_inner()).send(e);
@@ -1132,6 +1149,7 @@ impl Service {
             voice_change: Mutex::new(None),
             voice_events: Mutex::new(Vec::new()),
             mic_test: Default::default(),
+            mic_dsp: voice_link::MicDsp::new(),
             le_active: AtomicBool::new(false),
             scanning: AtomicBool::new(false),
             le_stream: Mutex::new(None),
@@ -1415,6 +1433,16 @@ impl Service {
         self.inner.mic_test.status()
     }
 
+    /// Other processing for the headset microphone: the running microphone
+    /// (classic or LE Audio) takes it with its next samples, and a stream
+    /// started again for the same request keeps it
+    pub fn set_mic_processing(&self, p: ipc::MicProcessing) {
+        if let Some(req) = self.last_request.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            req.mic_processing = p;
+        }
+        self.inner.apply_mic_processing(&p);
+    }
+
     /// Other bitpools for the A2DP stream running, without touching the link
     /// (the session's next tick). False when none runs: the caller starts it
     /// again instead.
@@ -1656,6 +1684,7 @@ impl Service {
         // Before the stack starts: one that offers HFP audio
         self.inner.voice_wanted.store(req.headset_mic.is_on() && req.le.is_none(), Ordering::Release);
         self.inner.unlisted_keeps.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self.inner.apply_mic_processing(&req.mic_processing);
         *self.last_request.lock().unwrap_or_else(|e| e.into_inner()) = Some(req.clone());
         self.inner.turned_off.store(false, Ordering::Release);
         self.inner.stop.store(false, Ordering::Release);
@@ -2096,6 +2125,21 @@ mod tests {
         }
         .to_request(1000)
         .unwrap()
+    }
+
+    #[test]
+    fn mic_processing_applies_now_and_stays_with_the_request() {
+        let s = service();
+        let p = ipc::MicProcessing { gain_db: 9, noise_suppression: true, suppression: 50, gate_db: -50 };
+        // Nothing runs: the next microphone takes it
+        s.set_mic_processing(p);
+        let got = s.inner.mic_dsp.get();
+        assert_eq!((got.gain_db, got.noise_suppression, got.suppression, got.gate_db), (9.0, true, 0.5, -50.0));
+        *s.last_request.lock().unwrap() = Some(request());
+        s.set_mic_processing(ipc::MicProcessing::default());
+        assert!(!s.inner.mic_dsp.get().is_active());
+        s.set_mic_processing(p);
+        assert_eq!(s.last_request.lock().unwrap().as_ref().unwrap().mic_processing, p);
     }
 
     #[test]

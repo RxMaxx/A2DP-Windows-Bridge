@@ -645,6 +645,10 @@ pub struct Profile {
     /// to Auto's. Kept but not used while Auto-select is on.
     #[serde(default)]
     pub mic_rate: u32,
+    /// The headset microphone's processing (all off by default); a change
+    /// applies to the running microphone in place
+    #[serde(default)]
+    pub mic_processing: MicProcessing,
     /// SBC / SBC XQ: the bitpool to encode with, within what the device
     /// allows (0 = by quality)
     #[serde(default)]
@@ -685,6 +689,37 @@ pub struct Profile {
     /// #86 round 8). Empty: highest sound quality first.
     #[serde(default)]
     pub codec_order: Vec<String>,
+}
+
+/// What is done to the headset microphone before apps get it
+/// (Profile.mic_processing): gain, then noise suppression, then the noise
+/// gate; a limiter holds the peaks while any of them is on. The default
+/// does nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct MicProcessing {
+    /// dB, -12 to 24
+    pub gain_db: i8,
+    pub noise_suppression: bool,
+    /// Percent of the denoised signal (the rest is the original), 0 to 100
+    pub suppression: u8,
+    /// The gate's threshold in dBFS, up to -20; -80 or lower: off
+    pub gate_db: i8,
+}
+
+impl MicProcessing {
+    /// The gate's threshold that means off
+    pub const GATE_OFF_DB: i8 = -80;
+
+    pub fn is_default(&self) -> bool {
+        *self == MicProcessing::default()
+    }
+}
+
+impl Default for MicProcessing {
+    fn default() -> Self {
+        MicProcessing { gain_db: 0, noise_suppression: false, suppression: 100, gate_db: Self::GATE_OFF_DB }
+    }
 }
 
 /// One codec's settings in a profile (Profile.codec_settings)

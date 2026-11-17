@@ -2183,6 +2183,15 @@ option {
 .input-source .hint {
   margin: 0;
 }
+/* The microphone's processing: a label, then its slider and value */
+.mic-processing {
+  display: flex;
+  flex-direction: column;
+}
+.mic-slider .volume {
+  flex: 0 1 18rem;
+  padding-right: 0;
+}
 .device-global,
 .device-add {
   display: flex;

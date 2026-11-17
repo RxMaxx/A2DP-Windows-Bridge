@@ -186,15 +186,18 @@ async function saveEntry(
   return ok ? saved.name : null;
 }
 
-/** Saves a device's headset mode, microphone output, default input
- *  (Audio Devices) or mute (Home's and the flyout's chip). The core opens or
- *  closes the microphone link (Auto: as apps record from the output).
- *  True once saved. */
+/** Saves a device's headset mode, microphone output, default input, the
+ *  microphone's processing (Audio Devices) or mute (Home's and the flyout's
+ *  chip). The core opens or closes the microphone link (Auto: as apps record
+ *  from the output); the processing applies in place. True once saved. */
 export async function saveHeadsetMic(
   app: ReturnType<typeof useApp>,
   entry: AudioEntry,
   patch: Partial<
-    Pick<Profile, "headset_mic" | "mic_device_id" | "mic_device_name" | "mic_muted" | "mic_default_input">
+    Pick<
+      Profile,
+      "headset_mic" | "mic_device_id" | "mic_device_name" | "mic_muted" | "mic_default_input" | "mic_processing"
+    >
   >,
 ): Promise<boolean> {
   return (await saveEntry(app, entry, (base) => ({ ...base, ...patch }))) !== null;

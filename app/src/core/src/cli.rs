@@ -128,6 +128,9 @@ Headset microphone:
   --mic-rate <hz>       LE Audio: the microphone's sampling rate (16000,
                         24000, 32000, 48000; one the headphones do not allow
                         falls back; default: the first they allow)
+  --mic-gain <db>       the microphone's gain (-12 to 24; default 0)
+  --mic-noise-suppression
+                        suppress noise on the microphone
 
 Development / testing:
   --hci-tcp <host:port> H4 over TCP to a virtual controller (tools/emu)
@@ -195,6 +198,8 @@ struct Args {
     voice_codec: Option<bluecaster_core::VoiceCodec>,
     /// --mic-rate: the LE Audio microphone's rate (None: Auto)
     mic_rate: Option<u32>,
+    /// --mic-gain, --mic-noise-suppression: the microphone's processing
+    mic_processing: ipc::MicProcessing,
     /// --headset-mic-toggle: headset mode on and off at these seconds
     headset_mic_toggle: Option<(u64, u64)>,
     script: Option<PathBuf>,
@@ -287,6 +292,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
         mic_output: None,
         voice_codec: None,
         mic_rate: None,
+        mic_processing: ipc::MicProcessing::default(),
         headset_mic_toggle: None,
         script: None,
         allow_writes: false,
@@ -404,6 +410,15 @@ fn parse(args: &[String]) -> Result<Args, String> {
                     bluecaster_core::VoiceCodec::from_name(&v).ok_or("--voice-codec takes cvsd, msbc or lc3_swb")?,
                 );
             }
+            "--mic-gain" => {
+                let v = value(&mut it, "--mic-gain")?;
+                a.mic_processing.gain_db = v
+                    .parse::<i8>()
+                    .ok()
+                    .filter(|db| (-12..=24).contains(db))
+                    .ok_or("--mic-gain takes -12 to 24 (dB)")?;
+            }
+            "--mic-noise-suppression" => a.mic_processing.noise_suppression = true,
             "--mic-rate" => {
                 let v = value(&mut it, "--mic-rate")?;
                 a.mic_rate = Some(v.parse::<u32>().ok().filter(|&hz| hz > 0).ok_or("--mic-rate takes a rate in Hz")?);
@@ -775,6 +790,7 @@ pub fn run(args: &[String]) -> i32 {
         headset_mic: if a.headset_mic_toggle.is_none() { a.headset_mic } else { HeadsetMic::Off },
         mic_output: a.mic_output.clone(),
         voice_codec: a.voice_codec,
+        mic_processing: a.mic_processing,
     };
 
     let mut code = 0;
@@ -1310,7 +1326,9 @@ fn le_run(a: &Args, service: &Service, running: &Arc<AtomicBool>) -> i32 {
     let mut mic_streams = 1;
     let start_mic = |started: &mut bt_host::LeStreamStarted, n: u32| {
         let target = mic_target.as_ref()?;
-        match bluecaster_core::start_mic(started, target, n) {
+        let dsp = bluecaster_core::MicDsp::new();
+        bluecaster_core::apply_mic_processing(&dsp, &a.mic_processing);
+        match bluecaster_core::start_mic(started, target, n, dsp) {
             Ok(Some(m)) => {
                 outln!("Microphone: LC3 at {} Hz -> {}", m.rate(), m.target());
                 Some(m)
@@ -1567,6 +1585,9 @@ mod tests {
         assert_eq!(parse(&args("--cli --headset-mic on")).unwrap().headset_mic, HeadsetMic::On);
         assert_eq!(parse(&args("--cli --headset-mic")).unwrap().headset_mic, HeadsetMic::On);
         assert_eq!(parse(&args("--cli --mic-output")).err().as_deref(), Some("--mic-output needs a value"));
+        let a = parse(&args("--cli --headset-mic --mic-gain 6 --mic-noise-suppression")).unwrap();
+        assert_eq!((a.mic_processing.gain_db, a.mic_processing.noise_suppression), (6, true));
+        assert_eq!(parse(&args("--cli --mic-gain 30")).err().as_deref(), Some("--mic-gain takes -12 to 24 (dB)"));
         // The microphone's codec (run_test.py's voice-limit cases)
         let a = parse(&args("--cli --headset-mic --voice-codec msbc --mic-rate 16000")).unwrap();
         assert_eq!((a.voice_codec, a.mic_rate), (Some(bluecaster_core::VoiceCodec::Msbc), Some(16000)));

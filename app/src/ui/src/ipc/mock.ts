@@ -19,7 +19,7 @@ import {
   REALTEK_CHIPS,
 } from "../lib/chips";
 import { FlowTracker, flowView } from "../lib/flow";
-import { leAudioOn as leOn } from "../lib/profile";
+import { leAudioOn as leOn, MIC_PROCESSING_OFF } from "../lib/profile";
 import type {
   ConnStatus,
   Transport,
@@ -164,6 +164,7 @@ export function sampleProfile(over: Partial<Profile> = {}): Profile {
     mic_default_input: true,
     voice_codec: "",
     mic_rate: 0,
+    mic_processing: { ...MIC_PROCESSING_OFF },
     sbc_bitpool: 0,
     sbcxq_bitpool: 0,
     sbc_min_bitpool: 0,

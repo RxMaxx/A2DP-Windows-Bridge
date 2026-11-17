@@ -10,7 +10,9 @@
 //! the rate (AUTOCONVERTPCM); the mono sample goes to the front left and
 //! right ([`upmix`]). It writes silence
 //! until the queue holds the prefill, silence on an underrun (and primes
-//! again), and a slow drift control keeps the queue near the prefill.
+//! again), and a slow drift control keeps the queue near the prefill. The
+//! microphone's processing ([`crate::MicDsp`]) runs there too, on what is
+//! written.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
@@ -21,6 +23,7 @@ use wasapi::{AudioClient, AudioRenderClient, DeviceEnumerator, Direction, Handle
 use win_sys::audio_policy::ComApartment;
 
 use crate::drift::{Primed, pop_into, push_from};
+use crate::process::Processor;
 
 /// The stream buffer asked for (100 ns units); the engine period decides
 /// how much is written per event, normally 10 ms
@@ -100,6 +103,7 @@ struct Shared {
     dropped: AtomicU64,
     duplicated: AtomicU64,
     queued: AtomicU64,
+    handoff: Handoff,
 }
 
 impl Shared {
@@ -124,18 +128,39 @@ pub struct PcmProducer {
     shared: Arc<Shared>,
     /// The microphone test's tap and the rate of what is pushed
     tap: Option<(crate::MicTap, u32)>,
+    /// The processing runs where the queue is read ([`set_processing`]),
+    /// the tap there too, after it
+    ///
+    /// [`set_processing`]: PcmProducer::set_processing
+    downstream: bool,
 }
 
 impl PcmProducer {
-    /// Everything pushed from now on also goes to `tap` (as `rate` Hz)
+    /// Everything pushed from now on also goes to `tap` (as `rate` Hz;
+    /// processed, once [`PcmProducer::set_processing`] was called)
     pub fn set_tap(&mut self, tap: crate::MicTap, rate: u32) {
-        self.tap = Some((tap, rate));
+        self.tap = Some((tap.clone(), rate));
+        if self.downstream {
+            self.shared.handoff.give(None, Some((tap, rate)));
+        }
+    }
+
+    /// What is pushed (at `rate` Hz) goes through the processing `settings`
+    /// ask for, which may change at any time (everything off: untouched),
+    /// and then to the tap. Both run where the queue is read (the render
+    /// thread, the WAV writer), not on the pushing thread; a queue nobody
+    /// reads gets neither.
+    pub fn set_processing(&mut self, settings: crate::MicDsp, rate: u32) {
+        self.downstream = true;
+        self.shared.handoff.give(Some(Processor::new(settings, rate)), self.tap.clone());
     }
 
     /// Queues as much of `mono_i16` as fits; returns the frames accepted
     /// (the rest is counted as overflow)
     pub fn push(&mut self, mono_i16: &[i16]) -> usize {
-        if let Some((tap, rate)) = &self.tap {
+        if !self.downstream
+            && let Some((tap, rate)) = &self.tap
+        {
             tap.feed(*rate, mono_i16);
         }
         let n = self.queue.as_mut().map_or(0, |q| push_from(q, mono_i16));
@@ -143,6 +168,51 @@ impl PcmProducer {
             self.shared.overflow.fetch_add((mono_i16.len() - n) as u64, Ordering::Relaxed);
         }
         n
+    }
+}
+
+/// The processing and tap a producer hands to the reader of its queue
+#[derive(Default)]
+struct Handoff {
+    given: AtomicBool,
+    processor: Mutex<Option<Processor>>,
+    tap: Mutex<Option<(crate::MicTap, u32)>>,
+}
+
+impl Handoff {
+    fn give(&self, processor: Option<Processor>, tap: Option<(crate::MicTap, u32)>) {
+        if let Some(p) = processor {
+            *self.processor.lock().unwrap_or_else(|e| e.into_inner()) = Some(p);
+        }
+        if let Some(t) = tap {
+            *self.tap.lock().unwrap_or_else(|e| e.into_inner()) = Some(t);
+        }
+        self.given.store(true, Ordering::Release);
+    }
+
+    /// What was given since the last call, without waiting (a lock held
+    /// right now: the next call)
+    fn take(&self, processor: &mut Option<Processor>, tap: &mut Option<(crate::MicTap, u32)>) {
+        if !self.given.swap(false, Ordering::AcqRel) {
+            return;
+        }
+        match (self.processor.try_lock(), self.tap.try_lock()) {
+            (Ok(mut p), Ok(mut t)) => {
+                if let Some(p) = p.take() {
+                    *processor = Some(p);
+                }
+                if let Some(t) = t.take() {
+                    *tap = Some(t);
+                }
+            }
+            _ => self.given.store(true, Ordering::Release),
+        }
+    }
+}
+
+impl std::fmt::Debug for Handoff {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Handoff").field("given", &self.given).finish()
     }
 }
 
@@ -156,12 +226,29 @@ impl std::fmt::Debug for PcmProducer {
 pub struct PcmConsumer {
     queue: rtrb::Consumer<i16>,
     shared: Arc<Shared>,
+    /// The producer's processing and tap, run on what is read
+    processor: Option<Processor>,
+    tap: Option<(crate::MicTap, u32)>,
 }
 
 impl PcmConsumer {
-    /// Moves up to `out.len()` queued frames to `out`; returns how many
+    /// Moves up to `out.len()` queued frames to `out` (processed); returns
+    /// how many
     pub fn pop(&mut self, out: &mut [i16]) -> usize {
-        pop_into(&mut self.queue, out)
+        let n = pop_into(&mut self.queue, out);
+        self.finish(&mut out[..n]);
+        n
+    }
+
+    /// The producer's processing, then its tap, on frames read from the queue
+    fn finish(&mut self, pcm: &mut [i16]) {
+        self.shared.handoff.take(&mut self.processor, &mut self.tap);
+        if let Some(p) = self.processor.as_mut() {
+            p.process(pcm);
+        }
+        if let Some((tap, rate)) = &self.tap {
+            tap.feed(*rate, pcm);
+        }
     }
 
     pub fn queued(&self) -> usize {
@@ -187,7 +274,10 @@ impl std::fmt::Debug for PcmConsumer {
 pub fn pcm_channel(capacity: usize) -> (PcmProducer, PcmConsumer) {
     let (p, c) = rtrb::RingBuffer::new(capacity.max(1));
     let shared = Arc::new(Shared::default());
-    (PcmProducer { queue: Some(p), shared: shared.clone(), tap: None }, PcmConsumer { queue: c, shared })
+    (
+        PcmProducer { queue: Some(p), shared: shared.clone(), tap: None, downstream: false },
+        PcmConsumer { queue: c, shared, processor: None, tap: None },
+    )
 }
 
 /// The device side of the render loop, so the loop can be tested without
@@ -234,6 +324,7 @@ impl Feeder {
         }
         let out = &mut self.buf[..space];
         let r = self.primed.pull(&mut queue.queue, out);
+        queue.finish(out);
         endpoint.write(out)?;
         let s = &queue.shared;
         s.frames_written.fetch_add(r.got as u64, Ordering::Relaxed);
@@ -322,7 +413,7 @@ impl Renderer {
         let taken = self.producer.lock().unwrap_or_else(|e| e.into_inner()).take();
         taken.unwrap_or_else(|| {
             tracing::warn!("voice link: render producer requested twice; the second one is not connected");
-            PcmProducer { queue: None, shared: self.shared.clone(), tap: None }
+            PcmProducer { queue: None, shared: self.shared.clone(), tap: None, downstream: false }
         })
     }
 
@@ -752,9 +843,85 @@ mod tests {
         let (p, c) = pcm_channel(10);
         let shared = c.shared.clone();
         drop(p);
-        let mut detached = PcmProducer { queue: None, shared, tap: None };
+        let mut detached = PcmProducer { queue: None, shared, tap: None, downstream: false };
         assert_eq!(detached.push(&[1, 2, 3]), 0);
         assert_eq!(c.stats().overflow, 3);
+    }
+
+    #[test]
+    fn the_render_thread_processes_what_it_writes_and_taps_it() {
+        // 16 kHz, 10 ms device period, 7.5 ms link packets of a full-scale ramp
+        let (mut producer, mut consumer) = pcm_channel(4000);
+        let settings = crate::MicDsp::new();
+        settings.set(crate::MicSettings { gain_db: -6.0, ..Default::default() });
+        let tap = crate::MicTap::new();
+        producer.set_tap(tap.clone(), 16_000);
+        producer.set_processing(settings, 16_000);
+        let mut dev = FakeDevice {
+            period: 160,
+            speed: 1.0,
+            producer,
+            packet: 120,
+            credit: 0.0,
+            next_value: 0,
+            written: Vec::new(),
+            events: 0,
+            gap: 0..0,
+        };
+        let mut feeder = Feeder::new(16_000, 640, 160);
+        for _ in 0..600 {
+            feeder.step(&mut dev, &mut consumer).unwrap();
+        }
+        // The pushed values reach 32767; written at -6 dB they stay near half
+        let peak = dev.written.iter().map(|&s| i32::from(s).abs()).max().unwrap();
+        assert!((16_300..=16_500).contains(&peak), "{peak}");
+        // The tap heard the processed level, not what was pushed
+        let level = tap.take_level();
+        assert!((0.49..=0.51).contains(&level), "{level}");
+    }
+
+    #[test]
+    fn processing_off_is_bit_identical() {
+        let (mut p, mut c) = pcm_channel(4000);
+        p.set_processing(crate::MicDsp::new(), 16_000);
+        let input: Vec<i16> = (0..3000).map(|n| ((n * 7919) % 65_536 - 32_768) as i16).collect();
+        for chunk in input.chunks(120) {
+            assert_eq!(p.push(chunk), chunk.len());
+        }
+        let mut out = vec![0; input.len()];
+        assert_eq!(c.pop(&mut out), input.len());
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn processing_reaches_the_queue_and_the_tap_and_follows_changes() {
+        let (mut p, mut c) = pcm_channel(16_000);
+        let settings = crate::MicDsp::new();
+        let tap = crate::MicTap::new();
+        p.set_processing(settings.clone(), 16_000);
+        p.set_tap(tap.clone(), 16_000);
+        let tone: Vec<i16> = (0..1600)
+            .map(|n| (2000.0 * (2.0 * std::f32::consts::PI * 300.0 * n as f32 / 16_000.0).sin()) as i16)
+            .collect();
+        let peak = |x: &[i16]| x.iter().map(|&s| i32::from(s).abs()).max().unwrap_or(0);
+        let mut out = vec![0; tone.len()];
+        for gain_db in [0.0, 12.0, -6.0] {
+            settings.set(crate::MicSettings { gain_db, ..Default::default() });
+            // Twice: the first settles the gain ramp and the limiter's delay
+            for _ in 0..2 {
+                tap.take_level();
+                for chunk in tone.chunks(120) {
+                    p.push(chunk);
+                }
+                assert_eq!(c.pop(&mut out), tone.len());
+            }
+            let want = f64::from(peak(&tone)) * 10f64.powf(f64::from(gain_db) / 20.0);
+            let got = f64::from(peak(&out[200..]));
+            assert!((got / want - 1.0).abs() < 0.02, "{gain_db} dB: {got} for {want}");
+            // The tap hears what the queue gets
+            let level = f64::from(tap.take_level()) * 32768.0;
+            assert!((level / want - 1.0).abs() < 0.02, "{gain_db} dB: tap {level} for {want}");
+        }
     }
 
     #[test]

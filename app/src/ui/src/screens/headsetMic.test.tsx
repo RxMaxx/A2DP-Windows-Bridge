@@ -269,6 +269,50 @@ describe("Input Source on Audio Devices", () => {
     expect(micSelect(wh).value).toBe(CABLE);
   });
 
+  it("processes the microphone while it is not Off, saved with the device's profile", async () => {
+    const { saves } = start("#/devices", "voice");
+    const wh = await deviceEntry(/WH-1000XM5/);
+    await waitFor(() => expect(mode(wh, "on")).toBeChecked());
+    const gain = within(wh).getByRole("slider", { name: t("ui.mic_gain") }) as HTMLInputElement;
+    const gate = within(wh).getByRole("slider", { name: t("ui.mic_gate") }) as HTMLInputElement;
+    // All off by default
+    expect(gain.value).toBe("0");
+    expect(gate).toHaveAttribute("aria-valuetext", t("ui.mic_gate_off"));
+    expect(within(wh).queryByRole("slider", { name: t("ui.mic_suppression_strength") })).toBeNull();
+    // A slider saves when let go
+    fireEvent.input(gain, { target: { value: "6" } });
+    expect(gain).toHaveAttribute("aria-valuetext", "+6 dB");
+    expect(saves().some((p) => p.mic_processing.gain_db === 6)).toBe(false);
+    fireEvent.change(gain);
+    await waitFor(() =>
+      expect(saves().at(-1)).toMatchObject({
+        headset_mic: "on",
+        mic_device_id: CABLE,
+        mic_processing: { gain_db: 6, noise_suppression: false, suppression: 100, gate_db: -80 },
+      }),
+    );
+    await waitFor(() => expect(gain).toBeEnabled());
+    fireEvent.click(within(wh).getByRole("switch", { name: t("ui.mic_noise_suppression") }));
+    await waitFor(() =>
+      expect(saves().at(-1)?.mic_processing).toEqual({
+        gain_db: 6,
+        noise_suppression: true,
+        suppression: 100,
+        gate_db: -80,
+      }),
+    );
+    const strength = await within(wh).findByRole("slider", { name: t("ui.mic_suppression_strength") });
+    expect(strength).toHaveAttribute("aria-valuetext", "100%");
+    await waitFor(() => expect(gate).toBeEnabled());
+    fireEvent.input(gate, { target: { value: "-50" } });
+    fireEvent.change(gate);
+    await waitFor(() => expect(saves().at(-1)?.mic_processing.gate_db).toBe(-50));
+    // Off hides it (the microphone is closed)
+    await waitFor(() => expect(mode(wh, "off")).toBeEnabled());
+    fireEvent.click(mode(wh, "off"));
+    await waitFor(() => expect(within(wh).queryByRole("slider", { name: t("ui.mic_gain") })).toBeNull());
+  });
+
   it("makes the microphone's cable the default input while connected, a switch in developer mode", async () => {
     const { core, saves } = start("#/devices", "voice");
     const wh = await deviceEntry(/WH-1000XM5/);
