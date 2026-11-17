@@ -154,7 +154,7 @@ describe("Adapter firmware", () => {
     const mtkDriver = within(mtk).getByRole("group", { name: "Driver: Original driver" });
     expect(within(mtkDriver).getByText("Original driver")).toHaveAttribute("title", "mtkbtfilterx");
     expect(within(mtkDriver).getByRole("button", { name: "Replace with WinUSB driver" })).toBeDisabled();
-    expect(mtkDriver).toHaveTextContent("BlueCaster cannot use this adapter, so its driver stays as it is");
+    expect(mtkDriver).toHaveTextContent("BlueCaster cannot use this adapter, so its driver is left unchanged");
     // The chip choice goes with the Realtek adapter only
     expect(within(mtk).queryByLabelText("Bluetooth Chip")).toBeNull();
     expect(within(rtl).getByLabelText("Bluetooth Chip")).toBeInTheDocument();
@@ -197,7 +197,7 @@ describe("Adapter firmware", () => {
     // Windows paired a saved device too: the restore hands it BlueCaster's key
     m.windowsPaired = [saved[0].address.toLowerCase()];
     fireEvent.click((await screen.findAllByRole("button", { name: "Restore original driver" }))[0]);
-    const dialog = await screen.findByRole("dialog", { name: "Give the adapter back to Windows" });
+    const dialog = await screen.findByRole("dialog", { name: "Return the adapter to Windows" });
     await new Promise((r) => setTimeout(r, 10));
     expect(within(dialog).queryByText(/may not connect in Windows/)).toBeNull();
   });
@@ -250,7 +250,7 @@ describe("Adapter firmware", () => {
     await waitFor(() =>
       expect(calls.find((c) => c.method === "adapter.download_firmware")?.params).toEqual({ file: "rtl8852bu_fw.bin" }),
     );
-    expect(await screen.findByText("Firmware downloaded. Bluetooth loads it at the next connection.")).toBeInTheDocument();
+    expect(await screen.findByText("Firmware downloaded. It takes effect the next time you connect.")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText("Firmware not found")).not.toBeInTheDocument());
   });
 

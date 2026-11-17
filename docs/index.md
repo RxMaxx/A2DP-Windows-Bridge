@@ -9,7 +9,7 @@ nav_order: 1
 Advanced Bluetooth Audio Transmitter for Windows, with full codec support.
 {: .fs-6 .fw-300 }
 
-Turns an ordinary Bluetooth adapter -- a cheap USB dongle, or on many laptops the built-in one -- from the basic codecs Windows gives it into a Hi-Fi transmitter: **LHDC V5, LDAC and aptX Adaptive** at up to 96 kHz (LHDC V5 up to 192 kHz), plus **aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC and FastStream**, and LE Audio (LC3, experimental, developer mode only). BlueCaster sets the adapter up by itself and gives it back to Windows with one click ([how it works](architecture)).
+BlueCaster turns your Bluetooth adapter -- a cheap USB dongle or the one built into many laptops -- into a Hi-Fi transmitter. Windows supports only basic codecs; BlueCaster streams **LHDC V5, LDAC and aptX Adaptive** at up to 96 kHz (LHDC V5 up to 192 kHz), plus **aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC and FastStream**, and LE Audio (LC3, experimental, developer mode only). It sets up the adapter automatically, and one click returns the adapter to Windows ([how it works](architecture)).
 
 ![BlueCaster's Codecs screen, streaming LDAC 990 kbps / 48 kHz to Sony WH-1000XM4](images/app_sample.png)
 
@@ -55,28 +55,28 @@ Turns an ordinary Bluetooth adapter -- a cheap USB dongle, or on many laptops th
 | Opus 05 (PipeWire's own Opus) | ❌ | ❌ | ✅ PipeWire 0.3.57+ (`opus_05`, to PipeWire devices only) | ✅ (chosen explicitly, developer mode only) |
 | LC3 (LE Audio, BAP unicast) | ❌ | ✅ on PCs whose Bluetooth hardware and driver support LE Audio | ✅ PipeWire BAP `lc3` (BlueZ LE Audio) | 🧪 experimental, developer mode only (a device's LE Audio entry; GMAP low latency with gaming headsets; Bluetooth 5.2 adapter with ISO, [Usage](usage#le-audio)) |
 
-✅ supported · 🧪 experimental · ❌ not supported. All columns are the sending side (PC → headphones). "Built-in" is the OS's own Bluetooth audio, without BlueCaster; the Ubuntu column is the PipeWire codec set of Ubuntu 26.04 (`libspa-0.2-bluetooth`).
+✅ supported · 🧪 experimental · ❌ not supported. All columns show the sending side (PC → headphones). "Built-in" means the OS's own Bluetooth audio, without BlueCaster; the Ubuntu column shows the PipeWire codec set of Ubuntu 26.04 (`libspa-0.2-bluetooth`).
 
 {: .warning }
 **aptX HD and aptX Low Latency** follow the Android / PipeWire implementations and pass encode/decode round-trip tests, but have not yet been verified with real headphones. Latency values in this table are typical figures, not measured with BlueCaster.
 
 {: .warning }
-**About LHDC V5.** It uses a C port of the LHDC V5 encoder that Google added to Android 17 (AOSP, Apache-2.0); the port was verified bit-exact against the AOSP Rust encoder, and the A2DP signaling follows Android's `a2dp_vendor_lhdcv5`. A user verified it with real LHDC V5 headphones at 1000 kbps / 192 kHz on v1.1.1-beta.1 ([#50](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/50)); v2 uses the same encoder. Only lossy LHDC V5 is supported: LHDC V2/V3 (older headphones) and the lossless "LHDC-RAW" mode have no open-source encoder. In Auto mode LHDC V5 ranks first, above LDAC.
+**About LHDC V5.** BlueCaster uses a C port of the LHDC V5 encoder that Google added to Android 17 (AOSP, Apache-2.0). The port's output is bit-exact with the AOSP Rust encoder, and the A2DP signaling follows Android's `a2dp_vendor_lhdcv5`. A user confirmed LHDC V5 with real LHDC V5 headphones at 1000 kbps / 192 kHz on v1.1.1-beta.1 ([#50](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/50)); v2 uses the same encoder. Only lossy LHDC V5 is supported: LHDC V2/V3 (older headphones) and the lossless "LHDC-RAW" mode have no open-source encoder. In Auto mode LHDC V5 ranks first, above LDAC.
 
 {: .warning }
 **Opus** is Android's A2DP Opus vendor codec (Android 13+, vendor ID 0x000000E0 Google): 48 kHz, 20 ms frames, 256 kbps stereo as Android requests it (Standard 192, Mobile 128 kbps), encoded with libopus 1.6.1. It passes the end-to-end test against a virtual sink, but has not yet been verified with real Opus headphones. In Auto mode it ranks below aptX Adaptive and above aptX HD.
 
 {: .warning }
-**Opus 05** is PipeWire's own A2DP Opus vendor codec (vendor ID 0x000005F1, codec 0x1005; PipeWire `opus_05`), which only PipeWire implements, so the receiver has to be a PC running PipeWire as an A2DP sink. BlueCaster sends the stereo music direction only (no 5.1 / 7.1, no return channel): 48 kHz, 10 ms frames (20 ms if the sink has only that), the same libopus encoder and bit rates as Opus, capped at the sink's limit. Auto never picks it; choose it on **Codecs** or with `-c opus05`. It passes the end-to-end test against a virtual sink that offers PipeWire's capabilities, but has not been tried with a real PipeWire receiver. PipeWire as an A2DP sink decodes Opus 05 since 0.3.57 and Android's Opus (`opus_g`) since 1.2.0: Ubuntu 24.04 LTS ships PipeWire 1.0.5 (Opus 05 only), Ubuntu 25.10 (1.4.7) and 26.04 LTS (1.6.2) ship both; neither is verified with BlueCaster yet.
+**Opus 05** is PipeWire's own A2DP Opus vendor codec (vendor ID 0x000005F1, codec 0x1005; PipeWire `opus_05`), which only PipeWire implements, so the receiver has to be a PC running PipeWire as an A2DP sink. BlueCaster sends stereo music only (no 5.1 / 7.1, no return channel): 48 kHz, 10 ms frames (20 ms if the sink has only that), the same libopus encoder and bit rates as Opus, capped at the sink's limit. Auto never picks it; choose it on **Codecs** or with `-c opus05`. It passes the end-to-end test against a virtual sink that offers PipeWire's capabilities, but has not been tried with a real PipeWire receiver. As an A2DP sink, PipeWire has decoded Opus 05 since 0.3.57 and Android's Opus (`opus_g`) since 1.2.0. Ubuntu 24.04 LTS ships PipeWire 1.0.5 (Opus 05 only); Ubuntu 25.10 (1.4.7) and 26.04 LTS (1.6.2) ship both. Neither codec has been tested with BlueCaster yet.
 
 {: .warning }
-**SBC XQ** was verified with a Sony WH-1000XM4 (dual channel, bitpool 43 at 48 kHz, 552 kbps). Sinks that refuse the configuration are reconnected with plain SBC. **FastStream** passes the end-to-end test against a virtual sink but has not been tried with real FastStream headphones. Music direction only; Auto never picks it.
+**SBC XQ** was verified with a Sony WH-1000XM4 (dual channel, bitpool 43 at 48 kHz, 552 kbps). If a sink refuses that configuration, BlueCaster reconnects with plain SBC. **FastStream** passes the end-to-end test against a virtual sink but has not been tried with real FastStream headphones. It carries music only, and Auto never picks it.
 
 {: .note }
 **Only need classic aptX?** Windows 10 already supports classic aptX in its built-in Bluetooth stack (not aptX HD, aptX LL or aptX Adaptive), so BlueCaster is not required for it. BlueCaster is mainly useful for LHDC V5, LDAC, aptX Adaptive, aptX HD and aptX Low Latency.
 
 {: .note }
-**About aptX Adaptive.** It is encoded with the MIT-licensed pure-Rust encoder of [AKS-Logic/aptx-adaptive-linux](https://github.com/AKS-Logic/aptx-adaptive-linux), whose tables its authors reconstructed from shipped Qualcomm binaries and on-air captures. 48 kHz stereo (44.1 kHz requests are captured at 48 kHz), 24-bit: High 427 kbps or Low Latency 265 kbps (R2 sinks: 270), ABR in High. 96 kHz (High, 646 kbps) is used when you choose it in its settings, if the headphones are an R2 sink that lists 96 kHz, and never in Low Latency; Auto streams 48 kHz. Auto picks it after LHDC V5 and LDAC; or choose it on **Codecs** or with `-c aptxad`. A user confirmed it on an EarFun Air Pro 4+ at 48 kHz on 2.0.2-beta.6, as stable as classic aptX, and 96 kHz on real headphones since ([#86](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/86)); upstream reports it working on Linux with Bose QuietComfort Ultra (gen 1) and B&W Px7 S2e. See [aptX Family and aptX Adaptive](usage#aptx-compatibility).
+**About aptX Adaptive.** BlueCaster encodes it with the MIT-licensed pure-Rust encoder from [AKS-Logic/aptx-adaptive-linux](https://github.com/AKS-Logic/aptx-adaptive-linux); its authors reconstructed the encoder's tables from shipped Qualcomm binaries and on-air captures. 48 kHz stereo (44.1 kHz requests are captured at 48 kHz), 24-bit: High 427 kbps or Low Latency 265 kbps (R2 sinks: 270), ABR in High. 96 kHz (High, 646 kbps) is used when you choose it in the codec's settings and the headphones are an R2 sink that lists 96 kHz; Low Latency never uses it, and Auto streams 48 kHz. Auto ranks aptX Adaptive after LHDC V5 and LDAC; you can also choose it on **Codecs** or with `-c aptxad`. A user confirmed it on an EarFun Air Pro 4+ at 48 kHz on 2.0.2-beta.6 (as stable as classic aptX), and has since confirmed 96 kHz on real headphones ([#86](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/86)); upstream reports it working on Linux with Bose QuietComfort Ultra (gen 1) and B&W Px7 S2e. See [aptX Family and aptX Adaptive](usage#aptx-compatibility).
 
 ## Platform Support
 
@@ -89,19 +89,19 @@ Turns an ordinary Bluetooth adapter -- a cheap USB dongle, or on many laptops th
 | Virtual adapter `tools/emu/emu_vhci.py` | ❌ | ❌ | ✅ |
 | [Measuring receiver](usage#receiver) `tools/linux_sink` | ❌ | ❌ | ✅ |
 
-BlueCaster itself runs on Windows only (Windows 10 22H2 or Windows 11), built for x64 and ARM64. The Linux tools need Python 3.11 or later (verified on Ubuntu 26.04); `setup.sh` targets Ubuntu / Debian, other distributions need the packages installed by hand.
+BlueCaster itself runs on Windows only (Windows 10 22H2 or Windows 11), built for x64 and ARM64. The Linux tools need Python 3.11 or later (verified on Ubuntu 26.04); `setup.sh` targets Ubuntu / Debian, and other distributions need the packages installed by hand.
 
 ## Verified Hardware
 
-Tested with Sony WH-1000XM4 and WH-1000XM6, EarFun Air Pro 4+, Grado GW100x and more, on TP-Link UB500, generic RTL8761B, a laptop's built-in RTL8852BE, ASUS BT400 and CSR8510 adapters. The full list with codecs, versions and the reports behind it: **[Verified Hardware](hardware)**.
+Tested with Sony WH-1000XM4 and WH-1000XM6, EarFun Air Pro 4+, Grado GW100x and more, on TP-Link UB500, generic RTL8761B, a laptop's built-in RTL8852BE, ASUS BT400 and CSR8510 adapters. **[Verified Hardware](hardware)** has the full list, with codecs, versions and the reports behind each entry.
 
 ## Dropouts and Connection Problems
 
-What the dropout and connection reports turned out to be, the checks to run before reporting, and how to read Link Quality: **[Dropouts and Connection Problems](wireless)**.
+**[Dropouts and Connection Problems](wireless)** covers what past dropout and connection reports turned out to be, the checks to run before you report, and how to read Link Quality.
 
 ## Works With
 
-Third-party apps that work together with BlueCaster, such as earbud control apps, as reported in the issues (not made or supported by BlueCaster): **[Works With](works-with)**.
+**[Works With](works-with)** lists third-party apps, such as earbud control apps, that users report working with BlueCaster. BlueCaster does not make or support them.
 
 ## Audio Capture Modes
 
@@ -113,9 +113,9 @@ BlueCaster captures audio via WASAPI and offers three modes:
 | **Virtual Device** | Captures from a user-selected virtual audio device (e.g., VB-CABLE, VoiceMeeter) | Route specific apps to Bluetooth while keeping other audio on speakers |
 | **Application** | Captures only what one app plays, after its own processing (Windows 11 / Windows 10 2004+) | Send one app, or the output of a system-wide effects app (equalizer, sound enhancer) |
 
-In **Virtual Device** mode, BlueCaster can switch the Windows default playback device to the selected virtual device (**Set as Windows default output while connected**), then captures its loopback output. Apps that output to the virtual device are streamed over Bluetooth. When streaming stops, the previous default device is restored.
+In **Virtual Device** mode, BlueCaster can make the selected virtual device the Windows default playback device (**Set as Windows default output while connected**) and then captures its loopback output. Any app that plays to the virtual device is streamed over Bluetooth. When streaming stops, the previous default device is restored.
 
-The **Default device** source does not take the audio away from the default playback device: it plays there as well as over Bluetooth. If the selected virtual device cannot be opened, the connection sends the system audio instead and says so. See [Capture Modes](usage#capture-modes).
+The **Default device** source does not take the audio away from the default playback device: the sound plays there as well as over Bluetooth. If the selected virtual device cannot be opened, BlueCaster sends the system audio instead and tells you. See [Capture Modes](usage#capture-modes).
 
 ## How It Works
 
@@ -137,7 +137,7 @@ flowchart TD
     usb -.-> hp["Headphones"]
 ```
 
-BlueCaster bypasses the Windows Bluetooth stack entirely. It communicates directly with a USB Bluetooth adapter through WinUSB, using [BTstack](https://github.com/bluekitchen/btstack) to implement the full Bluetooth protocol stack in user-mode. A small resident program (`bluecaster-core.exe`, with the tray icon) streams the audio; the window only shows its state, so closing it does not stop the audio (see [Architecture](architecture)).
+BlueCaster bypasses the Windows Bluetooth stack entirely. It communicates directly with a USB Bluetooth adapter through WinUSB, using [BTstack](https://github.com/bluekitchen/btstack) to implement the full Bluetooth protocol stack in user mode. A small background program (`bluecaster-core.exe`, with the tray icon) streams the audio; the window only displays its state, so closing the window does not stop the audio (see [Architecture](architecture)).
 
 ## Features
 
@@ -145,14 +145,14 @@ BlueCaster bypasses the Windows Bluetooth stack entirely. It communicates direct
 - **LE Audio (experimental, developer mode only)**: LC3 to LE Audio headphones and earbuds (BAP unicast, both earbuds of a pair, headset volume, media buttons, GMAP low latency). Needs an adapter with Bluetooth 5.2 isochronous channels; tested on one MediaTek MT7925 only, with known problems ([Usage](usage#le-audio))
 - **Three capture modes**: System loopback, virtual audio device routing, or one application's output
 - **Window, tray and CLI**: a window for setup and diagnostics, a tray flyout and menu for everyday connecting, and a command line (see [Usage](usage))
-- **WinUSB in the app**: assigns the WinUSB driver to the adapter and restores the original driver, no Zadig needed (see [Setup](setup#winusb)); headphones Windows paired through the adapter connect without pairing again
+- **WinUSB in the app**: assigns the WinUSB driver to the adapter and restores the original driver, no Zadig needed (see [Setup](setup#winusb)); headphones that Windows paired through the adapter connect without pairing again
 - **First-run setup**: adapter, driver and firmware, headphones, a first connection, general settings
 - **ABR**: Adaptive Bit Rate for unstable connections (LDAC, LHDC V5 and aptX Adaptive; adaptive bitpool for SBC and SBC XQ)
-- **Auto-reconnect**: Reconnects after a lost link (3 attempts; 10 when the adapter has to start again) and after the PC resumes from sleep; **Reconnect automatically** on **Audio Devices** turns it off
+- **Auto-reconnect**: Reconnects after a lost link (3 attempts; 10 when the adapter has to start again) and after the PC resumes from sleep; turn it off with **Reconnect automatically** on **Audio Devices**
 - **Link quality and AFH**: Shows what is sent, the RSSI and the channels in use; tells the adapter which Wi-Fi channels to avoid (see [Usage](usage#link-quality))
-- **Headphone controls (AVRCP)**: Volume slider synced with the headphones and the Windows volume; their play/pause, next and previous buttons control playback on the PC (see [Usage](usage#headphone-buttons))
-- **Per-device settings**: a codec (with its own settings) and an output source for each audio device, side by side on Home and connectable from the tray
-- **Updates**: The installed version updates itself after the audio device disconnects (see [Usage](usage#updates))
+- **Headphone controls (AVRCP)**: Volume slider synced with the headphones and the Windows volume; the headphones' play/pause, next and previous buttons control playback on the PC (see [Usage](usage#headphone-buttons))
+- **Per-device settings**: each audio device has its own codec (with its settings) and output source, shown side by side on Home and connectable from the tray
+- **Updates**: The installed version updates automatically once the audio device disconnects (see [Usage](usage#updates))
 - **Localization**: English, Japanese, Simplified / Traditional Chinese, Korean, German, French, Spanish, Ukrainian and Russian
 - **Realtek firmware**: Guided firmware download for Realtek adapters
 - **Diagnostics**: connection flow, log, HCI capture, diagnostics for bug reports, peer receiver test against a Linux PC (see [Usage](usage#receiver))

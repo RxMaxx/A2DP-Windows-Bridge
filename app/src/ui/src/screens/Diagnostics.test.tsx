@@ -491,7 +491,7 @@ describe("Diagnostics", () => {
     expect(rows()[0]).toHaveTextContent(/home-5g\s*5 GHz\s*36/);
     fireEvent.click(screen.getByRole("radio", { name: "6 GHz" }));
     expect(rows()).toHaveLength(0);
-    expect(screen.getByText("No networks heard.")).toBeInTheDocument();
+    expect(screen.getByText("No networks found.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: "All" }));
     expect(rows()).toHaveLength(4);
     expect(view.container.querySelectorAll("path.band-ap")).toHaveLength(3);

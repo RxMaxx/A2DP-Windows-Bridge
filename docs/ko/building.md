@@ -19,12 +19,12 @@ nav_order: 3
 ## 요구 사항 {#requirements}
 
 - [rustup](https://rustup.rs/)으로 설치한 **Rust** (stable, 1.90 이상)
-- "C++를 사용한 데스크톱 개발" 워크로드가 설치된 **Visual Studio 2022 이상**(또는 Build Tools): C 라이브러리(BTstack, 코덱)는 MSVC로 컴파일합니다
-- UI용 **Node.js** 22와 **pnpm** (`corepack enable`로 pnpm을 사용할 수 있음)
+- "C++를 사용한 데스크톱 개발" 워크로드가 설치된 **Visual Studio 2022 이상**(또는 Build Tools). C 라이브러리(BTstack, 코덱)를 MSVC로 컴파일하기 때문입니다
+- UI 빌드용 **Node.js** 22와 **pnpm** (`corepack enable`로 pnpm을 쓸 수 있음)
 - **Git** (서브모듈용)
 - `build.ps1` / `build.bat`용 **PowerShell 7** (`pwsh`, `winget install Microsoft.PowerShell`)
 - 검사(`tools/check_lang.py`)와 [에뮬레이터 테스트](#emu)용 **Python 3.11 이상**
-- ARM64 빌드의 경우: Visual Studio 구성 요소 "MSVC v143 - VS 2022 C++ ARM64 build tools", x64 PC에서는 "C++ Clang Compiler for Windows"(rustls의 `ring`이 ARM64 코드를 clang으로 어셈블합니다. `installer/build-release.ps1`이 Visual Studio의 clang을 직접 찾습니다), 그리고 `rustup target add aarch64-pc-windows-msvc`
+- ARM64 빌드: Visual Studio 구성 요소 "MSVC v143 - VS 2022 C++ ARM64 build tools", x64 PC에서는 "C++ Clang Compiler for Windows"도 필요합니다(rustls의 `ring`이 ARM64 코드를 clang으로 어셈블하며, `installer/build-release.ps1`이 Visual Studio의 clang을 자동으로 찾습니다). 그리고 `rustup target add aarch64-pc-windows-msvc`를 실행하세요
 
 ## 빠른 빌드 {#quick-build}
 
@@ -34,11 +34,11 @@ cd BlueCaster
 pwsh ./build.ps1
 ```
 
-탐색기에서 `build.bat`을 더블클릭해도 됩니다. `build.ps1`을 실행하고 끝나면 키 입력을 기다립니다(`build.bat -Test`처럼 스위치도 전달됩니다). `build.ps1`은 먼저 Rust, Node.js, pnpm, 서브모듈이 있는지 확인하고, `node_modules`가 없으면 `pnpm install`을 실행하며, 창의 페이지를 빌드한 다음 세 프로그램을 `target/release/`에 생성합니다. `bluecaster-core.exe`(상주 코어: Bluetooth, 오디오, 트레이), `bluecaster.exe`(창), `bluecaster-driver.exe`(WinUSB 드라이버를 할당 / 복원하는, 관리자 권한으로 실행되는 도우미)입니다. 세 프로그램은 같은 폴더에 두십시오. `bluecaster-core.exe --cli`는 창 없이 스트리밍합니다.
+탐색기에서 `build.bat`을 더블클릭해도 됩니다. `build.bat`은 `build.ps1`을 실행하고, 끝나면 키 입력을 기다립니다(`build.bat -Test`처럼 스위치도 그대로 전달됩니다). `build.ps1`은 먼저 Rust, Node.js, pnpm, 서브모듈이 있는지 확인하고, `node_modules`가 없으면 `pnpm install`을 실행합니다. 그다음 창의 페이지를 빌드하고 세 프로그램을 `target/release/`에 만듭니다. `bluecaster-core.exe`(상주 코어: Bluetooth, 오디오, 트레이), `bluecaster.exe`(창), `bluecaster-driver.exe`(WinUSB 드라이버를 할당·복원하는, 관리자 권한으로 실행되는 도우미)입니다. 세 프로그램은 같은 폴더에 두세요. `bluecaster-core.exe --cli`를 쓰면 창 없이 스트리밍합니다.
 
-스위치: `-Debug`(개발 프로필, `target/debug/`), `-Test`(이어서 테스트 항목의 검사), `-Decoder`(디코더 도구도 빌드), `-Emu`([에뮬레이터 테스트](#emu)도 실행. `-Emu -Codecs sbc,ldac`는 지정한 코덱만 테스트), `-Release -Arch x64|arm64`(릴리스 스크립트만 실행, 릴리스 패키지 항목 참조).
+스위치: `-Debug`(개발 프로필, `target/debug/`), `-Test`(테스트 항목의 검사도 실행), `-Decoder`(디코더 도구도 빌드), `-Emu`([에뮬레이터 테스트](#emu)도 실행. `-Emu -Codecs sbc,ldac`는 지정한 코덱만 테스트), `-Release -Arch x64|arm64`(릴리스 스크립트만 실행, 릴리스 패키지 항목 참고).
 
-**단계별로 실행하는 경우** (`build.ps1`이 하는 일입니다. `bluecaster.exe`는 창의 페이지를 내장하므로 페이지를 먼저 빌드해야 합니다):
+**단계별로 빌드하려면** (`build.ps1`이 하는 일과 같습니다. `bluecaster.exe`에 창의 페이지가 포함되므로 페이지를 먼저 빌드해야 합니다):
 
 ```bash
 cargo build --release -p bluecaster-core-exe -p bluecaster-driver
@@ -55,7 +55,7 @@ cargo build --release -p bluecaster-ui
 git submodule update --init --recursive
 ```
 
-라이브러리를 업데이트하는 pull 뒤에도 다시 실행하세요. `extern/`의 라이브러리가 `extern/versions.txt`에 적힌 커밋이 아니면 빌드가 멈추고, 그래도 다른 버전으로 빌드하는 방법을 메시지로 알려 줍니다.
+pull로 라이브러리가 업데이트된 뒤에도 다시 실행하세요. `extern/`의 라이브러리가 `extern/versions.txt`에 적힌 커밋과 다르면 빌드가 멈춥니다. 그래도 다른 버전으로 빌드하려면 오류 메시지의 방법을 따르세요.
 
 ## 프로젝트 구조 {#project-structure}
 
@@ -104,7 +104,7 @@ python tools/check_lang.py
 pwsh installer/build-release.ps1 -Arch x64
 ```
 
-위 명령은 설치 프로그램(`BlueCaster-<version>-win64-setup.exe`), 포터블 zip, 심볼 zip(충돌 덤프용 `.pdb` 파일), 업데이터 매니페스트를 `target/dist`에 생성합니다. Inno Setup 7.1.0이 필요합니다(`winget install JRSoftware.InnoSetup.7 --version 7.1.0`). 앱 내 업데이트 서명과 기타 세부 사항은 `installer/README.md`를 참조하십시오.
+위 명령은 설치 프로그램(`BlueCaster-<version>-win64-setup.exe`), 포터블 zip, 심볼 zip(충돌 덤프용 `.pdb` 파일), 업데이터 매니페스트를 `target/dist`에 생성합니다. Inno Setup 7.1.0이 필요합니다(`winget install JRSoftware.InnoSetup.7 --version 7.1.0`). 앱 내 업데이트 서명 등 자세한 내용은 `installer/README.md`를 참고하세요.
 
 ## 하드웨어 없이 테스트 (tools/emu) {#emu}
 
@@ -120,41 +120,41 @@ python tools/emu/run_test.py                        # every codec and negotiatio
 
 작동 방식:
 
-- `emu_sink.py`는 프로세스 내부 링크에서 [Bumble](https://github.com/google/bumble) 가상 컨트롤러 두 개를 실행합니다. 하나는 BlueCaster를 위해 TCP(`127.0.0.1`)를 통한 H4로 제공됩니다. 다른 하나는 SBC(SBC XQ 가능), AAC, aptX, aptX HD, aptX LL, LDAC, LHDC V5, FastStream, Opus, Opus 05, aptX Adaptive를 제공하는 Bumble A2DP 싱크가 사용하며, 그 HCI 트래픽을 기록합니다.
-- `run_test.py`는 각 코덱에 대해 개발용 옵션과 함께 `bluecaster-core.exe --cli`를 실행합니다: `--hci-tcp`(WinUSB 대신 가상 컨트롤러), `--test-tone`(시스템 오디오 대신 왼쪽 1 kHz / 오른쪽 1.5 kHz), `--duration`, `--hci-capture`. 환경 변수 `BLUECASTER_CONFIG_DIR`로 BlueCaster가 별도의 설정 폴더를 사용하게 하므로, 가상 싱크와의 페어링이 실제 링크 키에 영향을 주지 않습니다.
+- `emu_sink.py`는 프로세스 내부 링크로 이어진 [Bumble](https://github.com/google/bumble) 가상 컨트롤러 두 개를 실행합니다. BlueCaster는 그중 하나에 TCP(`127.0.0.1`)를 통한 H4로 연결합니다. 다른 하나는 Bumble A2DP 싱크가 사용합니다. 이 싱크는 SBC(SBC XQ 가능), AAC, aptX, aptX HD, aptX LL, LDAC, LHDC V5, FastStream, Opus, Opus 05, aptX Adaptive를 제공하고, HCI 트래픽을 기록합니다.
+- `run_test.py`는 각 코덱에 대해 개발용 옵션과 함께 `bluecaster-core.exe --cli`를 실행합니다: `--hci-tcp`(WinUSB 대신 가상 컨트롤러), `--test-tone`(시스템 오디오 대신 왼쪽 1 kHz / 오른쪽 1.5 kHz), `--duration`, `--hci-capture`. 환경 변수 `BLUECASTER_CONFIG_DIR`로 BlueCaster가 별도의 설정 폴더를 쓰게 하므로, 가상 싱크와 페어링해도 실제 링크 키는 바뀌지 않습니다.
 - 그런 다음 두 HCI 캡처를 `bluecaster_decode`로 검사합니다(싱크 측은 `--received` 사용).
 
 다음 조건을 모두 충족하면 코덱이 통과합니다.
 
-- 요청한 코덱이 협상되었음
+- 요청한 코덱으로 협상됨
 - `bluecaster_decode`가 전송 측과 수신 측 모두에서 문제를 찾지 못함
-- BlueCaster가 보낸 모든 미디어 패킷과 프레임을 싱크가 수신했으며, 요청한 오디오 길이의 90% 이상이 전송됨
-- LDAC, LHDC V5, aptX Adaptive를 제외하고(오픈 소스 디코더 없음): 양쪽에서 디코딩한 오디오가 동일하며 테스트 톤임
+- BlueCaster가 보낸 미디어 패킷과 프레임을 싱크가 모두 받았고, 요청한 오디오 길이의 90% 이상이 전송됨
+- 양쪽에서 디코딩한 오디오가 똑같고 테스트 톤과 일치함(오픈 소스 디코더가 없는 LDAC, LHDC V5, aptX Adaptive는 제외)
 
 | 옵션 | 설명 |
 |:-----|:-----|
 | `--codecs sbc aac ...` | 지정한 코덱(`sbc sbcxq aac aptx aptxhd aptxll ldac lhdcv5 faststream opus opus05`)이나 협상 케이스(샘플링 속도, 낮은 비트풀, SBC 프레임 구성, aptX Adaptive, ...; `-h`로 목록 표시)만 테스트. 기본값: 전체 |
-| `--le-audio [case ...]` | 대신 LE 오디오 케이스를 실행 (기본값: 전체) |
-| `--scan [case ...]` | 대신 장치 검색 케이스를 실행 (`eir`, `name-request`) |
-| `--link [case ...]` | 대신 링크 케이스를 실행 (`disconnect`, `device-link`, `device-a2dp`, `device-stream`, `restart-on-link`) |
+| `--le-audio [case ...]` | 코덱 대신 LE Audio 케이스를 실행 (기본값: 전체) |
+| `--scan [case ...]` | 코덱 대신 장치 검색 케이스를 실행 (`eir`, `name-request`) |
+| `--link [case ...]` | 코덱 대신 링크 케이스를 실행 (`disconnect`, `device-link`, `device-a2dp`, `device-stream`, `restart-on-link`) |
 | `--duration <s>` | 코덱당 스트리밍 시간(초) (기본값 5) |
-| `--max-packet <bytes>` | BlueCaster에 전달 (최대 미디어 패킷 크기, [사용법](usage) 참조) |
+| `--max-packet <bytes>` | BlueCaster에 전달 (최대 미디어 패킷 크기, [사용법](usage) 참고) |
 | `--bluecaster <exe>` | 테스트할 코어 (기본값 `target/release/bluecaster-core.exe`) |
 | `--decoder <exe>` | 디코더 도구 (기본값 `<build-dir>/a2dp_decode/<config>/bluecaster_decode.exe`) |
 | `--build-dir <dir>`, `--config <cfg>` | 디코더 도구를 빌드한 위치 (기본값 `build`, `Release`) |
-| `--base-port <port>` | 첫 TCP 포트 (기본값 9101. LE 오디오 케이스는 +100 사용). 여러 테스트를 동시에 실행하려면 변경 |
+| `--base-port <port>` | 첫 TCP 포트 (기본값 9101. LE Audio 케이스는 +100 사용). 여러 테스트를 동시에 실행하려면 바꾸세요 |
 | `--out <dir>` | 출력 폴더 (기본값 `tools/emu/out`) |
 
 각 코덱의 `tools/emu/out/<codec>/`에는 캡처(`bluecaster.pklg`, `sink.pklg`), 로그, `bluecaster_decode` 보고서, 디코딩된 WAV 파일이 저장됩니다. 모든 코덱이 통과하면 종료 코드는 0입니다.
 
 {: .note }
-가상 링크에는 무선 구간이 없습니다. 인코딩, 패킷화, AVDTP / L2CAP 시그널링, 독립적인 Bluetooth 스택(Bumble)과의 상호 운용성은 확인하지만, 무선 환경, 실제 하드웨어에서의 타이밍, 실제 헤드폰의 재생 방식은 확인하지 않습니다. Bumble 패키지는 테스트 도구일 뿐 BlueCaster의 일부가 아닙니다(THIRD_PARTY_LICENSES.md 참조).
+가상 링크에는 무선 구간이 없습니다. 인코딩, 패킷화, AVDTP / L2CAP 시그널링, 독립적인 Bluetooth 스택(Bumble)과의 상호 운용성은 확인하지만, 무선 환경, 실제 하드웨어에서의 타이밍, 실제 헤드폰의 재생 상태는 확인하지 못합니다. Bumble 패키지는 테스트 도구일 뿐 BlueCaster에 포함되지 않습니다(THIRD_PARTY_LICENSES.md 참고).
 
-`emu_vhci.py`는 Linux Bluetooth 스택을 대상으로 같은 일을 합니다. Linux에서 `/dev/vhci`를 통해 BlueZ에 가상 어댑터를 연결하고, 측정용 수신기 `tools/linux_sink`가 이를 실제 어댑터처럼 사용합니다. 하드웨어 없이 테스트할 수 있으며, 선택적으로 미디어 패킷을 손실시키거나 지연시킬 수도 있습니다(`--drop`, `--stall`). `tools/linux_sink/README.md`를 참조하십시오.
+`emu_vhci.py`는 Linux Bluetooth 스택에서 같은 역할을 합니다. Linux에서 `/dev/vhci`로 BlueZ에 가상 어댑터를 연결하면, 측정용 수신기 `tools/linux_sink`가 이 어댑터를 실제 어댑터처럼 사용합니다. 이렇게 하드웨어 없이 수신기를 테스트할 수 있고, 미디어 패킷을 일부러 잃거나 늦출 수도 있습니다(`--drop`, `--stall`). `tools/linux_sink/README.md`를 참고하세요.
 
 ## 종속성 {#dependencies}
 
-C 라이브러리는 git 서브모듈이며, Rust 크레이트와 UI의 npm 패키지는 Cargo와 pnpm이 가져옵니다(버전은 `Cargo.lock`과 `app/src/ui/pnpm-lock.yaml`에 고정, `cargo deny check`로 라이선스 검사).
+C 라이브러리는 git 서브모듈로 가져오고, Rust 크레이트와 UI의 npm 패키지는 Cargo와 pnpm이 내려받습니다(버전은 `Cargo.lock`과 `app/src/ui/pnpm-lock.yaml`에 고정, 라이선스는 `cargo deny check`로 검사).
 
 | 라이브러리 | 방식 | 고정 버전 | 라이선스 |
 |:-----------|:-----|:----------|:---------|
@@ -171,6 +171,6 @@ C 라이브러리는 git 서브모듈이며, Rust 크레이트와 UI의 npm 패�
 | Tauri, SolidJS, Rust 크레이트 | Cargo / pnpm | `Cargo.lock`, `pnpm-lock.yaml` | MIT / Apache-2.0 등 (릴리스의 `licenses/third-party/rust-crates.txt`) |
 
 {: .warning }
-BTstack이 링크되어 있으므로, BlueCaster 소스 코드 자체는 Apache-2.0 또는 MIT 이중 라이선스이지만 직접 빌드한 BlueCaster도 개인적, 비상업적 목적으로만 사용 및 재배포할 수 있습니다.
+BlueCaster 소스 코드 자체는 Apache-2.0 또는 MIT 이중 라이선스입니다. 하지만 BTstack이 링크되므로 직접 빌드한 BlueCaster도 개인적·비상업적 목적으로만 사용하고 재배포할 수 있습니다.
 
-전체 라이선스 정보는 [THIRD_PARTY_LICENSES.md](https://github.com/SeiyaFunaokaJP/BlueCaster/blob/main/THIRD_PARTY_LICENSES.md)를 참조하십시오.
+전체 라이선스 정보는 [THIRD_PARTY_LICENSES.md](https://github.com/SeiyaFunaokaJP/BlueCaster/blob/main/THIRD_PARTY_LICENSES.md)를 참고하세요.

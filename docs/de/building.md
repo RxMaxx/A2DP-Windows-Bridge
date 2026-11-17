@@ -19,12 +19,12 @@ nav_order: 3
 ## Voraussetzungen {#requirements}
 
 - **Rust** (stable, 1.90 oder neuer) über [rustup](https://rustup.rs/)
-- **Visual Studio 2022 oder neuer** (oder dessen Build Tools) mit der Workload „Desktopentwicklung mit C++“: Die C-Bibliotheken (BTstack, die Codecs) werden mit MSVC kompiliert
+- **Visual Studio 2022 oder neuer** (oder dessen Build Tools) mit der Workload „Desktopentwicklung mit C++“, da MSVC die C-Bibliotheken (BTstack, die Codecs) kompiliert
 - **Node.js** 22 und **pnpm** für die Oberfläche (`corepack enable` stellt pnpm bereit)
 - **Git** (für die Submodule)
 - **PowerShell 7** (`pwsh`) für `build.ps1` / `build.bat` (`winget install Microsoft.PowerShell`)
 - **Python 3.11 oder neuer** für die Prüfungen (`tools/check_lang.py`) und den [Emulatortest](#emu)
-- Für ARM64-Builds: die Visual-Studio-Komponenten „MSVC v143 - VS 2022 C++ ARM64 build tools“ und, auf einem x64-PC, „C++ Clang Compiler for Windows“ (das `ring` von rustls assembliert seinen ARM64-Code mit clang; `installer/build-release.ps1` findet das clang von Visual Studio selbst), sowie `rustup target add aarch64-pc-windows-msvc`
+- Für ARM64-Builds: die Visual-Studio-Komponenten „MSVC v143 - VS 2022 C++ ARM64 build tools“ und, auf einem x64-PC, „C++ Clang Compiler for Windows“ (`ring` aus rustls assembliert seinen ARM64-Code mit clang; `installer/build-release.ps1` findet das clang von Visual Studio automatisch) sowie `rustup target add aarch64-pc-windows-msvc`
 
 ## Schnellstart {#quick-build}
 
@@ -34,11 +34,11 @@ cd BlueCaster
 pwsh ./build.ps1
 ```
 
-Oder doppelklicken Sie im Explorer auf `build.bat`: Es führt `build.ps1` aus und wartet am Ende auf eine Taste (`build.bat -Test` reicht die Schalter weiter). `build.ps1` prüft zuerst, ob Rust, Node.js, pnpm und die Submodule vorhanden sind, führt `pnpm install` aus, wenn `node_modules` fehlt, baut die Seite des Fensters und danach die drei Programme nach `target/release/`: `bluecaster-core.exe` (der residente Kern: Bluetooth, Audio, Infobereich), `bluecaster.exe` (das Fenster) und `bluecaster-driver.exe` (das Hilfsprogramm mit Administratorrechten, das den WinUSB-Treiber zuweist / wiederherstellt). Lassen Sie die drei in einem Ordner; `bluecaster-core.exe --cli` streamt ohne das Fenster.
+Oder doppelklicken Sie im Explorer auf `build.bat`. Die Datei führt `build.ps1` aus und wartet am Ende auf einen Tastendruck (`build.bat -Test` reicht Schalter weiter). `build.ps1` prüft zuerst, ob Rust, Node.js, pnpm und die Submodule vorhanden sind, und führt `pnpm install` aus, wenn `node_modules` fehlt. Danach baut es die Seite des Fensters und die drei Programme nach `target/release/`: `bluecaster-core.exe` (der residente Kern: Bluetooth, Audio, Infobereich), `bluecaster.exe` (das Fenster) und `bluecaster-driver.exe` (das Hilfsprogramm mit Administratorrechten, das den WinUSB-Treiber zuweist und wiederherstellt). Lassen Sie alle drei im selben Ordner. `bluecaster-core.exe --cli` streamt ohne das Fenster.
 
-Schalter: `-Debug` (Dev-Profil, `target/debug/`), `-Test` (danach die Prüfungen unter „Tests“), `-Decoder` (auch das Decoder-Werkzeug), `-Emu` (auch der [Emulatortest](#emu); `-Emu -Codecs sbc,ldac` testet nur diese Codecs), `-Release -Arch x64|arm64` (nur das Release-Skript, siehe „Release-Pakete“).
+Schalter: `-Debug` (Dev-Profil, `target/debug/`), `-Test` (führt zusätzlich die Prüfungen unter „Tests“ aus), `-Decoder` (baut zusätzlich das Decoder-Werkzeug), `-Emu` (führt zusätzlich den [Emulatortest](#emu) aus; `-Emu -Codecs sbc,ldac` testet nur diese Codecs), `-Release -Arch x64|arm64` (führt nur das Release-Skript aus, siehe „Release-Pakete“).
 
-**Schritt für Schritt** (was `build.ps1` tut; die Seite des Fensters muss vor `bluecaster.exe` gebaut werden, das sie einbettet):
+**Schritt für Schritt** (das macht `build.ps1`; die Seite des Fensters muss vor `bluecaster.exe` gebaut werden, weil `bluecaster.exe` sie einbettet):
 
 ```bash
 cargo build --release -p bluecaster-core-exe -p bluecaster-driver
@@ -55,7 +55,7 @@ cargo build --release -p bluecaster-ui
 git submodule update --init --recursive
 ```
 
-Führen Sie den Befehl auch nach einem Pull aus, der eine Bibliothek aktualisiert. Der Build bricht ab, wenn eine Bibliothek unter `extern/` nicht auf dem in `extern/versions.txt` eingetragenen Commit steht; die Meldung sagt, wie man trotzdem mit einer anderen Version baut.
+Führen Sie den Befehl auch nach einem Pull aus, der eine Bibliothek aktualisiert. Der Build bricht ab, wenn eine Bibliothek unter `extern/` nicht auf dem in `extern/versions.txt` eingetragenen Commit steht. Die Fehlermeldung erklärt, wie Sie trotzdem mit einer anderen Version bauen.
 
 ## Projektstruktur {#project-structure}
 
@@ -104,11 +104,11 @@ python tools/check_lang.py
 pwsh installer/build-release.ps1 -Arch x64
 ```
 
-schreibt das Installationsprogramm (`BlueCaster-<version>-win64-setup.exe`), das portable ZIP, das Symbol-ZIP (`.pdb`-Dateien, für Absturzabbilder) und das Updater-Manifest nach `target/dist`. Es braucht Inno Setup 7.1.0 (`winget install JRSoftware.InnoSetup.7 --version 7.1.0`). Das Signieren der In-App-Updates und die übrigen Einzelheiten stehen in `installer/README.md`.
+schreibt das Installationsprogramm (`BlueCaster-<version>-win64-setup.exe`), das portable ZIP, das Symbol-ZIP (`.pdb`-Dateien, für Absturzabbilder) und das Updater-Manifest nach `target/dist`. Dafür wird Inno Setup 7.1.0 benötigt (`winget install JRSoftware.InnoSetup.7 --version 7.1.0`). Das Signieren der In-App-Updates und weitere Details beschreibt `installer/README.md`.
 
 ## Test ohne Hardware (tools/emu) {#emu}
 
-`tools/emu` streamt jeden Codec von BlueCaster an eine virtuelle Bluetooth-Senke auf demselben PC, ohne Adapter oder Kopfhörer. Es läuft nur unter Windows und braucht **Python 3.11 oder neuer** sowie **CMake** (in Visual Studio enthalten) für das Decoder-Werkzeug.
+`tools/emu` streamt jeden Codec von BlueCaster an eine virtuelle Bluetooth-Senke auf demselben PC, ganz ohne Adapter oder Kopfhörer. Der Test läuft nur unter Windows und benötigt **Python 3.11 oder neuer** sowie **CMake** (in Visual Studio enthalten) für das Decoder-Werkzeug.
 
 ```bash
 python tools/emu/setup_env.py                       # once: creates tools/emu/.venv with pinned packages
@@ -120,16 +120,16 @@ python tools/emu/run_test.py                        # every codec and negotiatio
 
 Funktionsweise:
 
-- `emu_sink.py` betreibt zwei virtuelle [Bumble](https://github.com/google/bumble)-Controller an einer prozessinternen Verbindung. Einer wird für BlueCaster als H4 über TCP (`127.0.0.1`) bereitgestellt. Den anderen verwendet eine Bumble-A2DP-Senke, die SBC (SBC-XQ-fähig), AAC, aptX, aptX HD, aptX LL, LDAC, LHDC V5, FastStream, Opus, Opus 05 und aptX Adaptive anbietet und ihren HCI-Verkehr aufzeichnet.
-- `run_test.py` führt `bluecaster-core.exe --cli` für jeden Codec mit Entwickleroptionen aus: `--hci-tcp` (virtueller Controller statt WinUSB), `--test-tone` (1 kHz links / 1,5 kHz rechts statt des Systemaudios), `--duration`, `--hci-capture`. Die Umgebungsvariable `BLUECASTER_CONFIG_DIR` weist BlueCaster einen separaten Einstellungsordner zu, sodass die Kopplung mit der virtuellen Senke Ihre echten Link Keys nie berührt.
+- `emu_sink.py` betreibt zwei virtuelle [Bumble](https://github.com/google/bumble)-Controller, die prozessintern miteinander verbunden sind. BlueCaster verbindet sich mit dem einen als H4 über TCP (`127.0.0.1`). Den anderen verwendet eine Bumble-A2DP-Senke. Sie bietet SBC (SBC-XQ-fähig), AAC, aptX, aptX HD, aptX LL, LDAC, LHDC V5, FastStream, Opus, Opus 05 und aptX Adaptive an und zeichnet ihren HCI-Verkehr auf.
+- `run_test.py` führt `bluecaster-core.exe --cli` für jeden Codec mit Entwickleroptionen aus: `--hci-tcp` (virtueller Controller statt WinUSB), `--test-tone` (1 kHz links / 1,5 kHz rechts statt des Systemtons), `--duration`, `--hci-capture`. Die Umgebungsvariable `BLUECASTER_CONFIG_DIR` legt für BlueCaster einen separaten Einstellungsordner fest. So bleiben Ihre echten Link Keys von der Kopplung mit der virtuellen Senke unberührt.
 - Beide HCI-Aufzeichnungen werden anschließend mit `bluecaster_decode` geprüft (die Seite der Senke mit `--received`).
 
-Ein Codec besteht, wenn all dies zutrifft:
+Ein Codec gilt als bestanden, wenn alle folgenden Bedingungen erfüllt sind:
 
 - der angeforderte Codec wurde ausgehandelt
 - `bluecaster_decode` findet weder auf der Sende- noch auf der Empfangsseite ein Problem
 - die Senke hat jedes Medienpaket und jeden Frame empfangen, den BlueCaster gesendet hat, und mindestens 90 % der angeforderten Audiodauer wurden gesendet
-- außer bei LDAC, LHDC V5 und aptX Adaptive (kein Open-Source-Decoder): das dekodierte Audio ist auf beiden Seiten identisch und ist der Testton
+- das dekodierte Audio ist auf beiden Seiten identisch und entspricht dem Testton (außer bei LDAC, LHDC V5 und aptX Adaptive, für die es keinen Open-Source-Decoder gibt)
 
 | Option | Beschreibung |
 |:-------|:------------|
@@ -145,16 +145,16 @@ Ein Codec besteht, wenn all dies zutrifft:
 | `--base-port <port>` | Erster TCP-Port (Standard 9101; LE-Audio-Fälle verwenden +100); ändern, um mehrere Tests gleichzeitig auszuführen |
 | `--out <dir>` | Ausgabeordner (Standard `tools/emu/out`) |
 
-Für jeden Codec enthält `tools/emu/out/<codec>/` die Aufzeichnungen (`bluecaster.pklg`, `sink.pklg`), Protokolle, die Berichte von `bluecaster_decode` und die dekodierten WAV-Dateien. Der Exit-Code ist 0, wenn jeder Codec bestanden hat.
+Für jeden Codec enthält `tools/emu/out/<codec>/` die Aufzeichnungen (`bluecaster.pklg`, `sink.pklg`), Protokolle, die Berichte von `bluecaster_decode` und die dekodierten WAV-Dateien. Haben alle Codecs bestanden, ist der Exit-Code 0.
 
 {: .note }
-Die virtuelle Verbindung hat keinen Funk: Sie prüft Kodierung, Paketierung, AVDTP- / L2CAP-Signalisierung und die Interoperabilität mit einem unabhängigen Bluetooth-Stack (Bumble), aber nicht die Funkbedingungen, das Timing auf echter Hardware oder wie echte Kopfhörer das Audio wiedergeben. Die Bumble-Pakete sind reine Testwerkzeuge und nicht Teil von BlueCaster (siehe THIRD_PARTY_LICENSES.md).
+Die virtuelle Verbindung hat keinen Funk. Sie prüft Kodierung, Paketierung, AVDTP- / L2CAP-Signalisierung und das Zusammenspiel mit einem unabhängigen Bluetooth-Stack (Bumble). Nicht geprüft werden Funkbedingungen, das Timing auf echter Hardware und die Wiedergabe auf echten Kopfhörern. Die Bumble-Pakete sind reine Testwerkzeuge und nicht Teil von BlueCaster (siehe THIRD_PARTY_LICENSES.md).
 
-`emu_vhci.py` tut dasselbe gegenüber dem Bluetooth-Stack von Linux: Unter Linux hängt es über `/dev/vhci` einen virtuellen Adapter an BlueZ an, den der Messempfänger `tools/linux_sink` dann wie einen echten Adapter übernimmt – so lässt er sich ohne Hardware testen, wahlweise mit verlorenen oder zurückgehaltenen Medienpaketen (`--drop`, `--stall`). Siehe `tools/linux_sink/README.md`.
+`emu_vhci.py` macht dasselbe für den Bluetooth-Stack von Linux. Unter Linux verbindet es über `/dev/vhci` einen virtuellen Adapter mit BlueZ, den der Messempfänger `tools/linux_sink` dann wie einen echten Adapter verwendet. So lässt sich der Empfänger ohne Hardware testen, wahlweise mit verlorenen oder zurückgehaltenen Medienpaketen (`--drop`, `--stall`). Siehe `tools/linux_sink/README.md`.
 
 ## Abhängigkeiten {#dependencies}
 
-Die C-Bibliotheken sind Git-Submodule; Rust-Crates und die npm-Pakete der Oberfläche werden von Cargo und pnpm geholt (Versionen festgelegt in `Cargo.lock` und `app/src/ui/pnpm-lock.yaml`; `cargo deny check` prüft ihre Lizenzen).
+Die C-Bibliotheken sind Git-Submodule. Rust-Crates und die npm-Pakete der Oberfläche lädt Cargo bzw. pnpm herunter (Versionen festgelegt in `Cargo.lock` und `app/src/ui/pnpm-lock.yaml`; `cargo deny check` prüft ihre Lizenzen).
 
 | Bibliothek | Methode | Feste Version | Lizenz |
 |:--------|:-------|:---------------|:--------|
@@ -171,6 +171,6 @@ Die C-Bibliotheken sind Git-Submodule; Rust-Crates und die npm-Pakete der Oberfl
 | Tauri, SolidJS, Rust-Crates | Cargo / pnpm | `Cargo.lock`, `pnpm-lock.yaml` | MIT / Apache-2.0 und weitere (`licenses/third-party/rust-crates.txt` im Release) |
 
 {: .warning }
-Da BTstack eingebunden ist, darf jedes BlueCaster, das Sie bauen, nur für private, nicht kommerzielle Zwecke verwendet und weitergegeben werden, obwohl der Quellcode von BlueCaster selbst unter Apache-2.0 oder MIT doppelt lizenziert ist.
+Da BTstack eingebunden ist, darf jeder BlueCaster-Build, den Sie erstellen, nur für private, nicht kommerzielle Zwecke verwendet und weitergegeben werden. Das gilt, obwohl der Quellcode von BlueCaster selbst wahlweise unter Apache-2.0 oder MIT steht.
 
 Die vollständigen Lizenzangaben finden Sie in [THIRD_PARTY_LICENSES.md](https://github.com/SeiyaFunaokaJP/BlueCaster/blob/main/THIRD_PARTY_LICENSES.md).

@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn a_codec_stop_names_its_codec() {
         let m = Msg::codec_stop("error.codec_not_supported", codec::CodecKind::Ldac, CodecStopKind::Unsupported);
-        assert_eq!(m.english(), "Device does not support LDAC");
+        assert_eq!(m.english(), "The device does not support LDAC");
         assert_eq!(m.codec_stop, Some(CodecStop { codec: codec::CodecKind::Ldac, kind: CodecStopKind::Unsupported }));
         assert_eq!(Msg::new("error.codec_configure").codec_stop, None);
     }
