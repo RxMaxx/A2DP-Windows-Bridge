@@ -42,6 +42,8 @@ export const gateText = (db: number) => (db <= MIC_GATE_RANGE[0] ? t("ui.mic_gat
 
 function Slider(props: {
   label: string;
+  /** A line under the label: what the setting does */
+  hint?: string;
   min: number;
   max: number;
   value: number;
@@ -64,8 +66,15 @@ function Slider(props: {
   };
   return (
     <div class="row mic-slider">
-      <label class="row-label" for={id}>
-        {props.label}
+      <label class="row-text" for={id}>
+        <span class="row-label" id={`${id}-label`}>
+          {props.label}
+        </span>
+        <Show when={props.hint}>
+          <span class="hint" id={`${id}-hint`}>
+            {props.hint}
+          </span>
+        </Show>
       </label>
       <div class="volume">
         <input
@@ -77,6 +86,8 @@ function Slider(props: {
           value={shown()}
           disabled={props.disabled}
           aria-valuetext={props.text(shown())}
+          aria-labelledby={`${id}-label`}
+          aria-describedby={props.hint ? `${id}-hint` : undefined}
           style={{ "--fill": `${fill()}%` }}
           onInput={(e) => setHeld(e.currentTarget.valueAsNumber)}
           onChange={letGo}
@@ -125,6 +136,7 @@ export function MicProcessingControls(props: {
       </Show>
       <Slider
         label={t("ui.mic_gate")}
+        hint={t("ui.mic_gate_hint")}
         min={MIC_GATE_RANGE[0]}
         max={MIC_GATE_RANGE[1]}
         value={Math.max(props.value.gate_db, MIC_GATE_RANGE[0])}
