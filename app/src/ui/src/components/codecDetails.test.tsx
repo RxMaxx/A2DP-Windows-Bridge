@@ -166,7 +166,7 @@ describe("codec details", () => {
     expect(c).toHaveTextContent("1024 samples (23.22 ms)");
     expect(c).toHaveTextContent("CBR 256 kbps");
     expect(c).toHaveTextContent("Device's peak bit rateNot given");
-    expect(c).toHaveTextContent("Device takes VBRYes");
+    expect(c).toHaveTextContent("Device accepts VBRYes");
     expect(c.querySelector(".gauge")).toBeNull();
     const used = [...c.querySelectorAll(".cd-chip.cd-used")].map((e) => e.firstChild!.textContent);
     expect(used).toEqual(["MPEG-2 AAC-LC", "44.1 kHz", "2"]);

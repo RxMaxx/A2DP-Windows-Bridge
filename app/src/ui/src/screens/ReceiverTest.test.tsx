@@ -33,7 +33,7 @@ describe("receiver test", () => {
   it("finds the receiver, measures and compares", async () => {
     const { calls } = await open();
     // Looks for the receiver at once (the saved address is empty: the local network)
-    await screen.findByText("Ready. Start sends to the receiver's Bluetooth adapter.");
+    await screen.findByText("Ready. Click Start to stream to the receiver's Bluetooth adapter.");
     expect(calls.find((c) => c.method === "receiver.connect")?.params).toEqual({ target: "auto" });
     expect(screen.getByText("sink-pi (192.168.1.42), Bluetooth DC:A6:32:01:02:03, L2CAP MTU 895")).toBeInTheDocument();
     await waitFor(() => expect(steps()[1]).toHaveTextContent("OK"));
@@ -89,7 +89,7 @@ describe("receiver test", () => {
 
   it("disconnects, searches and connects to a receiver found", async () => {
     const { calls } = await open();
-    await screen.findByText("Ready. Start sends to the receiver's Bluetooth adapter.");
+    await screen.findByText("Ready. Click Start to stream to the receiver's Bluetooth adapter.");
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     await screen.findByText("Not connected to a receiver.");
     expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
@@ -99,7 +99,7 @@ describe("receiver test", () => {
     const found = await screen.findByRole("button", { name: "sink-pi (192.168.1.42), Bluetooth DC:A6:32:01:02:03, L2CAP MTU 895" });
     fireEvent.click(found);
     await waitFor(() => expect(calls.filter((c) => c.method === "receiver.connect").pop()?.params).toEqual({ target: "192.168.1.42" }));
-    await screen.findByText("Ready. Start sends to the receiver's Bluetooth adapter.");
+    await screen.findByText("Ready. Click Start to stream to the receiver's Bluetooth adapter.");
     expect(screen.getByRole("textbox", { name: "Receiver" })).toHaveValue("192.168.1.42");
   });
 

@@ -65,13 +65,13 @@ impl fmt::Display for Msg {
     }
 }
 
-/// Text of `key` in `lang` (en, ja, de, fr, es, ko, zh-CN, zh-TW), English
+/// Text of `key` in `lang` (en, ja, de, fr, es, ko, zh-CN, zh-TW, uk, ru), English
 /// when it has no translation, `default` when not even English has it. For
 /// the few texts the core shows itself (tray menu, notifications).
 pub fn translate(lang: &str, key: &str, default: &str) -> String {
     static LANGS: OnceLock<HashMap<&'static str, HashMap<String, String>>> = OnceLock::new();
     let langs = LANGS.get_or_init(|| {
-        let files: [(&str, &str); 7] = [
+        let files: [(&str, &str); 9] = [
             ("ja", include_str!("../../../../../app/lang/ja.json")),
             ("de", include_str!("../../../../../app/lang/de.json")),
             ("fr", include_str!("../../../../../app/lang/fr.json")),
@@ -79,6 +79,8 @@ pub fn translate(lang: &str, key: &str, default: &str) -> String {
             ("ko", include_str!("../../../../../app/lang/ko.json")),
             ("zh-CN", include_str!("../../../../../app/lang/zh-CN.json")),
             ("zh-TW", include_str!("../../../../../app/lang/zh-TW.json")),
+            ("uk", include_str!("../../../../../app/lang/uk.json")),
+            ("ru", include_str!("../../../../../app/lang/ru.json")),
         ];
         files.iter().map(|(l, text)| (*l, serde_json::from_str(text).unwrap_or_default())).collect()
     });
@@ -147,7 +149,7 @@ mod tests {
     #[test]
     fn a_codec_stop_names_its_codec() {
         let m = Msg::codec_stop("error.codec_not_supported", codec::CodecKind::Ldac, CodecStopKind::Unsupported);
-        assert_eq!(m.english(), "Device does not support LDAC");
+        assert_eq!(m.english(), "The device does not support LDAC");
         assert_eq!(m.codec_stop, Some(CodecStop { codec: codec::CodecKind::Ldac, kind: CodecStopKind::Unsupported }));
         assert_eq!(Msg::new("error.codec_configure").codec_stop, None);
     }

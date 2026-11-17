@@ -11,7 +11,7 @@
 import { createEffect, createMemo, createResource, createSignal, createUniqueId, on, onCleanup, onMount, Show } from "solid-js";
 import { createStore, unwrap } from "solid-js/store";
 import { onAudioDevicesChanged, useApp } from "../app/context";
-import { allAudioDevices, devicesSwitchShown } from "../app/settings";
+import { allAudioDevices, devicesSwitchShown, switchableSource } from "../app/settings";
 import { t } from "../i18n";
 import { codecSpec } from "../lib/codecs";
 import type { AudioApp, AudioDevice, Device, Profile, Snapshot } from "../ipc/types";
@@ -45,7 +45,18 @@ export function DeviceSettings(props: { device: Device }) {
   const leEntry = () => props.device.le_audio;
   // What is shown: the first profile's, until changed here
   const [f, setF] = createStore<DeviceFields>(deviceFields(newestBase(profiles())));
-  createEffect(on(profiles, (list) => list[0] && setF(deviceFields(list[0])), { defer: true }));
+  // Also when the core changes the profile itself (a cable that came or
+  // went, issue #86): the store changes it in place, the list stays the same
+  createEffect(
+    on(
+      () => {
+        const p = profiles()[0];
+        return p ? JSON.stringify(deviceFields(p)) : "";
+      },
+      (fields) => fields && setF(JSON.parse(fields) as DeviceFields),
+      { defer: true },
+    ),
+  );
   const [saving, setSaving] = createSignal(false);
   // What the capture source does, below it
   const aboutId = createUniqueId();
@@ -198,7 +209,7 @@ export function DeviceSettings(props: { device: Device }) {
       <Show when={f.capture_mode === "app" && appSupport() === "no"}>
         <Banner kind="warn">{t("ui.profile.app_capture_unsupported")}</Banner>
       </Show>
-      <Show when={f.capture_mode === "virtual" && devicesSwitchShown(snap().settings)}>
+      <Show when={switchableSource(f.capture_mode) && devicesSwitchShown(snap().settings)}>
         <Toggle
           label={t("capture.auto_switch")}
           checked={f.auto_switch_device}

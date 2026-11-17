@@ -21,10 +21,10 @@ nav_order: 4
 BlueCaster habilita el audio Bluetooth LHDC V5, LDAC, aptX Adaptive, aptX HD,
 aptX Low Latency, aptX, Opus, AAC, SBC XQ y SBC en Windows
 (y LC3 sobre LE Audio, experimental). La pila Bluetooth propia de Windows solo admite
-SBC, aptX clásico y (solo en Windows 11) AAC para A2DP; esta herramienta añade los
-demás sin necesidad de un controlador de kernel.
+SBC, aptX clásico y (solo en Windows 11) AAC para A2DP; BlueCaster añade los
+demás sin un controlador de kernel.
 
-Usa **BTstack + WinUSB**: todo en modo de usuario, sin necesidad de firmar controladores.
+Usa **BTstack + WinUSB**: todo se ejecuta en modo de usuario, así que no hace falta firmar controladores.
 
 BlueCaster 2.0 está escrito en Rust. Las bibliotecas en C que no se pueden sustituir
 (BTstack y los codificadores de los códecs) se compilan desde el código fuente y se llaman a través
@@ -38,7 +38,7 @@ BlueCaster se ejecuta como hasta tres programas:
 |:--------|:-----|:-----|
 | `bluecaster-core.exe` | Mientras BlueCaster está en ejecución (lo inician la ventana, el menú Inicio o **Iniciar con Windows**) | Bluetooth, captura y codificación del audio, perfiles y configuración, el icono de la bandeja y su menú, el servidor IPC. `--cli` ejecuta el mismo núcleo desde una consola |
 | `bluecaster.exe` | Solo mientras hay una ventana abierta (se cierra 3 minutos después de cerrar la última) | La ventana principal y el panel desplegable de la bandeja (Tauri 2, SolidJS + TypeScript). No guarda ningún estado propio |
-| `bluecaster-driver.exe` | Para un único cambio de controlador o una importación de claves, con derechos de administrador (UAC) | Asigna WinUSB a un adaptador o restaura su controlador anterior, o lee las claves de enlace que el Bluetooth de Windows guarda para un adaptador (`windows-keys`), y se cierra |
+| `bluecaster-driver.exe` | Brevemente, con derechos de administrador (UAC), para un cambio de controlador o una importación de claves | Asigna WinUSB a un adaptador, restaura el controlador anterior del adaptador o lee las claves de enlace que el Bluetooth de Windows guarda para un adaptador (`windows-keys`), y se cierra |
 
 ```mermaid
 ---
@@ -65,23 +65,23 @@ flowchart TB
 
 - **El núcleo no es un servicio de Windows.** Es un proceso normal del
   usuario que ha iniciado sesión, porque el loopback de WASAPI captura el audio de la sesión de ese usuario.
-  Un mutex por sesión lo limita a una sola instancia; iniciarlo de nuevo abre la
+  Un mutex por sesión permite una sola instancia; si se vuelve a iniciar el núcleo, se abre la
   ventana.
-- **La bandeja pertenece al núcleo.** Su menú de clic derecho (abrir, los 10 primeros
+- **La bandeja pertenece al núcleo.** El menú contextual del icono de la bandeja (abrir, los 10 primeros
   dispositivos, desconectar, salir) se abre al instante, sin iniciar la ventana. Un
-  clic izquierdo inicia el panel desplegable de la ventana (o la ventana
+  clic izquierdo abre el panel desplegable (o la ventana
   principal, según la Configuración).
-- **La ventana solo muestra.** Recibe una instantánea del estado del núcleo
-  y después los cambios; cerrarla, o que la ventana se bloquee, no detiene
-  el audio. Cerrar una ventana solo la oculta, así que volver a abrirla desde la bandeja
+- **La ventana solo muestra el estado.** Recibe una instantánea del estado del núcleo
+  y después cada cambio. Cerrar la ventana, o que la ventana se bloquee, no detiene
+  el audio. Cerrar la ventana solo la oculta, así que volver a abrirla desde la bandeja
   es instantáneo.
 - **La línea de comandos usa el mismo núcleo.** `bluecaster-core.exe --cli` ejecuta el
-  servicio del núcleo sin bandeja ni IPC; la prueba con el emulador se ejecuta así.
+  servicio del núcleo sin bandeja ni IPC; la prueba con el emulador usa este modo.
 
 ## Transporte: BTstack + WinUSB
 
-Omite por completo la pila Bluetooth de Windows comunicándose directamente con un
-adaptador Bluetooth USB mediante WinUSB (controlador USB genérico firmado por Microsoft). BTstack,
+BlueCaster prescinde por completo de la pila Bluetooth de Windows y se comunica directamente con un
+adaptador Bluetooth USB mediante WinUSB (el controlador USB genérico firmado por Microsoft). BTstack,
 una pila Bluetooth de código disponible (licencia no comercial), implementa HCI, L2CAP, AVDTP y A2DP en
 modo de usuario.
 
@@ -96,16 +96,16 @@ modo de usuario.
   de Windows)
 - Mientras WinUSB lo controla, el adaptador no está disponible para el Bluetooth
   normal de Windows
-- La dirección del dispositivo se escribe a mano o se encuentra con una búsqueda (GAP inquiry) con
-  el adaptador USB
+- Los dispositivos se encuentran con una búsqueda (GAP inquiry) con el adaptador USB, o
+  se escribe su dirección a mano
 
 **Cómo funciona**:
-1. Se asigna WinUSB a un adaptador Bluetooth USB, desde la aplicación (**Adaptador >
+1. El usuario asigna WinUSB a un adaptador Bluetooth USB, desde la aplicación (**Adaptador >
    Reemplazar por el controlador WinUSB**, consulte [Asignación del controlador](#driver-assignment)) o con Zadig
 2. El crate `hci-transport` abre el adaptador a través de WinUSB con `nusb`
    y lo conecta a BTstack como su transporte HCI
 3. BTstack envía comandos HCI para inicializar el controlador Bluetooth
-4. (Adaptadores Realtek, Intel y Broadcom) Se carga el firmware si es necesario
+4. En los adaptadores Realtek, Intel y Broadcom, BlueCaster carga el firmware si es necesario
 5. BTstack establece una conexión ACL y abre canales L2CAP (PSM 0x0019)
 6. La señalización AVDTP descubre los SEP remotos y negocia los códecs
 7. El audio codificado se envía como paquetes multimedia AVDTP sobre L2CAP
@@ -131,23 +131,23 @@ sequenceDiagram
 ```
 
 El transporte USB conserva los pasos de recuperación que necesitaron los adaptadores reales en
-la v1: las canalizaciones de eventos y ACL se restablecen al abrir el adaptador, una lectura
-de eventos fallida se reintenta, los comandos HCI tienen tiempo de espera y al cerrar el adaptador se envía
-HCI Reset (no a un controlador que sigue en su bootloader), de modo que la siguiente
+la v1: restablece las canalizaciones de eventos y ACL al abrir el adaptador, reintenta una lectura
+de eventos fallida, aplica un tiempo de espera a los comandos HCI y envía HCI Reset al cerrar el adaptador
+(salvo a un controlador que sigue en su bootloader), de modo que la siguiente
 sesión encuentra un controlador inactivo.
 
 ## Estructura de crates {#crate-structure}
 
-Un único workspace de Cargo (`Cargo.toml` en la raíz del repositorio) en cinco capas;
+El código es un único workspace de Cargo (`Cargo.toml` en la raíz del repositorio) en cinco capas;
 cada capa depende solo de las capas inferiores. Las bibliotecas están en
-`app/src/crates/`, los programas en `app/src/core`, `app/src/ui` y
-`app/src/driver`; el `aptx-adaptive` incluido en el repositorio es una dependencia por ruta de
-`codec`, fuera del workspace. Solo los crates `*-sys` y `win-sys` pueden contener código `unsafe`;
+`app/src/crates/`, y los programas, en `app/src/core`, `app/src/ui` y
+`app/src/driver`. El crate `aptx-adaptive`, incluido en el repositorio, es una dependencia por ruta de
+`codec` y queda fuera del workspace. Solo los crates `*-sys` y `win-sys` pueden contener código `unsafe`;
 todos los demás crates tienen `#![forbid(unsafe_code)]`.
 
 | Capa | Crate | Función |
 |:------|:------|:-----|
-| 1. FFI | `btstack-sys` | Compila BTstack con `cc` (MSVC), declaraciones FFI escritas a mano y envoltorios seguros, `btstack_config.h`. BTstack solo puede llamarse en el hilo de su bucle de ejecución: el token `!Send` `Stack` lo garantiza |
+| 1. FFI | `btstack-sys` | Compila BTstack con `cc` (MSVC), declaraciones FFI escritas a mano y envoltorios seguros, `btstack_config.h`. BTstack solo puede llamarse en el hilo de su bucle de ejecución, algo que garantiza el token `!Send` `Stack` |
 | 1. FFI | `ldac-sys`, `openaptx-sys`, `fdkaac-sys`, `lhdcv5-sys`, `opus-sys`, `lc3-sys` | Compilan los codificadores en C y los exponen; un crate por biblioteca, para que cada licencia quede separada |
 | 1. FFI | `win-sys` | API de Win32 sin biblioteca de Rust: MMCSS, el dispositivo de audio predeterminado (IPolicyConfig), la API WLAN (AFH), las notificaciones de energía, la clave Run, las teclas multimedia, la DACL de la canalización, la elevación, la asignación del controlador WinUSB (SetupAPI) y el Bluetooth propio de Windows (sus radios, dispositivos emparejados y claves de enlace) |
 | 2. Componentes | `hci-transport` | HCI sobre USB («H2») con `nusb`, y H4 sobre TCP hacia un controlador virtual (`tools/emu`) |
@@ -185,14 +185,14 @@ flowchart TD
 | Hilo | Prioridad | Trabajo |
 |:-------|:---------|:-----|
 | capture | MMCSS "Audio" | Lee WASAPI; rellena con silencio los tramos sin sonido |
-| encode | MMCSS "Pro Audio" | Convierte al formato que admite el codificador, codifica bloques completos del codificador (el resto espera a la siguiente ronda) y empaqueta las tramas en cargas útiles multimedia, en rondas de unos 10 ms para que los paquetes salgan de forma regular |
-| bt-runloop | -- | El bucle de ejecución de BTstack; envía un paquete en cola cada vez que L2CAP puede enviar. La cola de envío (64 paquetes) descarta un paquete que lleva 350 ms esperando, del más antiguo al más reciente, cada vez que se pone un paquete en cola |
+| encode | MMCSS "Pro Audio" | Convierte el PCM al formato de entrada del codificador, codifica bloques completos del codificador (el resto espera a la siguiente ronda) y empaqueta las tramas en cargas útiles multimedia, en rondas de unos 10 ms para que los paquetes salgan de forma regular |
+| bt-runloop | -- | El bucle de ejecución de BTstack; envía un paquete en cola cada vez que L2CAP puede enviar. Cada vez que se pone un paquete en cola, la cola de envío (64 paquetes) descarta los paquetes que llevan 350 ms esperando, empezando por el más antiguo |
 | USB | -- | Transferencias WinUSB: tres lecturas en curso en cada canalización IN (eventos, datos ACL), un escritor para los comandos y otro para los datos ACL (hasta 8 transferencias en curso) |
 | core | Normal | Máquina de estados, IPC (tokio; las colas del paso directo RFCOMM, por conexión), configuración, estadísticas (4 Hz), búsqueda de actualizaciones |
 
 Una vez que la transmisión está en marcha, la ruta del audio no asigna memoria ni toma ningún bloqueo.
 Las estadísticas son contadores atómicos que el núcleo lee cuatro veces por segundo.
-BTstack no es seguro entre hilos: los demás hilos le envían comandos, que se ejecutan en
+BTstack no es seguro entre hilos, así que los demás hilos le envían comandos que se ejecutan en
 el hilo bt-runloop.
 
 ## Núcleo e IPC {#core-and-ipc}
@@ -208,21 +208,21 @@ tramas JSON precedidas de su longitud:
    del protocolo (`rfcomm`).
 2. El núcleo envía un `snapshot`: todo su estado (adaptador, dispositivos,
    transmisión, perfiles, configuración, actualización) y un número de revisión.
-3. A partir de ahí, el núcleo envía `event`s con los cambios. Si falta una revisión,
-   la ventana obtiene una instantánea nueva.
+3. A partir de ahí, el núcleo envía `event`s con los cambios. Si a la ventana le falta una revisión,
+   pide una instantánea nueva.
 4. Las acciones son `request { id, method, params }` con una `response { id,
    result | error }`. Los grupos de métodos son `state.*`, `stream.*`,
    `device.*`, `profile.*`, `settings.*`, `adapter.*`, `audio.*`, `diag.*`,
    `receiver.*`, `rfcomm.*` y `app.*`.
 
-Otros programas usan la misma canalización; lo que necesitan está en
+Otros programas usan la misma canalización; consulte
 [Integración (IPC)](integration). Las versiones anteriores a la 3.0.0 llamaban a la canalización
-`\\.\pipe\a2dpwb-<user SID>`; el núcleo también atiende ese nombre, durante al menos 6
+`\\.\pipe\a2dpwb-<user SID>`; el núcleo también atiende ese nombre durante al menos 6
 meses después de la 3.0.0.
 
 Los errores son códigos con parámetros (por ejemplo `adapter.driver_missing`), no
-textos; la ventana los traduce y ofrece la solución junto al mensaje.
-Los datos de alta frecuencia (calidad del enlace, el registro) solo se envían mientras una pantalla
+textos; la ventana los traduce y muestra la solución junto al mensaje.
+El núcleo solo envía los datos de alta frecuencia (calidad del enlace, el registro) mientras una pantalla
 está suscrita a ellos.
 
 La máquina de estados de la conexión:
@@ -241,7 +241,7 @@ stateDiagram-v2
     Error --> Connecting: Iniciar de nuevo
 ```
 
-Una conexión fallida se intenta hasta 3 veces. Un enlace perdido se reconecta hasta
+El núcleo intenta una conexión fallida hasta 3 veces. Un enlace perdido lo reconecta hasta
 3 veces, o hasta 10 veces después de reiniciar la pila (suspensión, un adaptador
 que dejó de funcionar). Cuando el PC entra en suspensión, el núcleo detiene BTstack sin contar
 el enlace perdido como un fallo y vuelve a conectar cuando el PC se reanuda.
@@ -262,13 +262,13 @@ controlador > Elegir en una lista > WinUsb Device» del Administrador de disposi
 4. **Restaurar**: quita el dispositivo (`DiUninstallDevice`) y lo vuelve a enumerar;
    Windows elige entonces de nuevo su controlador mejor clasificado (normalmente `BthUSB` o el
    del fabricante). El controlador que tenía antes el adaptador se registra en la
-   carpeta de configuración (`driver\`) y se compara tras la restauración.
+   carpeta de configuración (`driver\`) y se compara con el resultado tras la restauración.
    `restore --records <folder>` restaura todos los adaptadores registrados en una sola
-   ejecución elevada; el desinstalador lo usa después de preguntar.
+   ejecución elevada; el desinstalador lo usa después de preguntar al usuario.
 
-El núcleo nunca se ejecuta como administrador: para una asignación o una restauración inicia
-el auxiliar con una solicitud de UAC (`ShellExecuteEx` "runas") y lee su resultado
-JSON. Enumerar los adaptadores y su controlador no requiere elevación.
+El núcleo nunca se ejecuta como administrador: para una asignación o una restauración, inicia
+el auxiliar con una solicitud de UAC (`ShellExecuteEx` "runas") y lee el resultado
+JSON del auxiliar. Enumerar los adaptadores y sus controladores no requiere elevación.
 
 ```mermaid
 sequenceDiagram
@@ -294,30 +294,34 @@ sequenceDiagram
   códecs de fabricante, incluido aptX LL con ambos Vendor ID y aptX Adaptive
   (receptores R1 y R2; solo utilizable con 48 kHz estéreo)
 - Elige el códec: Automático toma el códec de mayor calidad de sonido que ofrece el
-  remoto; un códec solicitado que el remoto no ofrece se sustituye por el mismo códec
+  remoto. Si el remoto no ofrece un códec solicitado, se sustituye por el códec
   que tomaría Automático (siempre para un perfil, desde el issue #86; en la
-  línea de comandos solo con `--fallback`), y en caso contrario es un error
-- Transmite cada perfil A2DP como Automático, con los ajustes predeterminados de Automático, mientras
-  el ajuste `auto_codec` está activado (Códecs > Seleccionar automáticamente el códec compatible de mayor
-  calidad, un único ajuste para todos los dispositivos desde el esquema 5); el códec
-  elegido para el dispositivo se conserva en su perfil para cuando esté desactivado
-- Sigue el orden de códecs del dispositivo tal como el usuario arrastró sus tarjetas
+  línea de comandos solo con `--fallback`); si no, es un error. Un códec
+  elegido en su tarjeta cuando el remoto no lo ofrecía (el `codec_forced`
+  del perfil) se pide igualmente, sin alternativa (`RemoteCaps::forcing`).
+  Un códec cuya tarjeta ofrece más de lo que anuncia el remoto
+  (`unlisted_options`) se configura a partir de `RemoteCaps::unlisted`
+- Mientras el ajuste `auto_codec` está activado (Códecs > Seleccionar automáticamente el códec compatible de mayor
+  calidad; un único ajuste para todos los dispositivos desde el esquema 5), transmite cada perfil A2DP
+  como Automático, con los ajustes predeterminados de Automático. El códec
+  elegido para el dispositivo se conserva en su perfil para cuando el ajuste esté desactivado
+- Sigue el orden de códecs que el usuario fijó arrastrando las tarjetas del dispositivo
   (el `codec_order` del perfil; `codec::AutoOrder`, vacío
-  para mayor calidad de sonido primero), para la elección de Automático y para la alternativa de
+  para mayor calidad de sonido primero), tanto para la elección de Automático como para la alternativa de
   un códec elegido, también con la selección automática. FastStream y Opus
   05 nunca son la elección de Automático ni una alternativa. (Las betas de 2.0.2 tenían un orden para
   todos los dispositivos, el `auto_order` de settings.json, que ahora se ignora.)
 - Elige la frecuencia de muestreo de la familia aptX (44.1 / 48 kHz entre las que
   anuncia el remoto; WASAPI remuestrea la captura); aptX Adaptive usa 48 kHz, o
   96 kHz cuando se eligen 96 kHz, la calidad es Alta y el receptor es R2 y
-  anuncia 96 kHz. Una frecuencia en Automático (también con la selección automática) pide 48 kHz, y el
-  selector de cada códec toma la mejor que anuncia el receptor si no la tiene (issue #86: no
+  anuncia 96 kHz. Una frecuencia en Automático (también con la selección automática) pide 48 kHz; si el
+  receptor no la anuncia, el selector de cada códec toma la mejor que anuncia el receptor (issue #86: no
   la frecuencia más alta que anuncia ni la frecuencia de mezcla de Windows)
 - Asigna la calidad del perfil a las que ofrece el códec
   (`Quality::for_codec`, issue #86): LDAC y LHDC V5 Alta / Media
   (`sq`) / Baja (`mq`), LHDC V5 también Media-alta (`mhq`), aptX Adaptive
   Alta / Baja latencia, todos los demás códecs Alta (la tasa de bits más alta que acepta el
-  dispositivo); una calidad que el códec ya no tiene (Estándar /
+  dispositivo). Una calidad que el códec ya no tiene (Estándar /
   Móvil de aptX Adaptive, los niveles inferiores de AAC) funciona como Alta
 - Registra lo que anuncia cada códec que ofreció el dispositivo (`KnownCodecs.caps`:
   frecuencias de muestreo, profundidades de bits, tasa de bits máxima; `RemoteCaps::listed_*`), para que
@@ -344,13 +348,13 @@ sequenceDiagram
   de calidad del enlace
 - Carga de firmware: Realtek y Broadcom mediante los controladores de chipset de BTstack,
   Intel (bootloaders heredado y TLV) en Rust sobre la interfaz común de cargadores de chips
-  (`bringup`), cuyo progreso muestra la pantalla Adaptador mientras se inicia el
+  (`bringup`); la pantalla Adaptador muestra el progreso de la carga mientras se inicia el
   adaptador
 - Modo de desarrollador: la lectura de datos del chip (lo que un adaptador responde a comandos de lectura
   estándar, un informe JSON en `logs\probe\`), los scripts de chip (solicitudes escritas
   como texto, ejecutadas en un adaptador con WinUSB) y los servicios SDP que anuncia un
   dispositivo conectado
-- Captura HCI (`.pklg`), incluido el establecimiento de la conexión si empieza con la conexión ya en curso
+- Captura HCI (`.pklg`), incluido el establecimiento de la conexión cuando la captura empieza con la conexión ya en curso
 
 **API clave de BTstack utilizadas**:
 - `a2dp_source_create_stream_endpoint()` — Registrar los extremos de códec
@@ -370,52 +374,52 @@ Captura el audio en tiempo real mediante Windows Audio Session API.
   secundarios (Windows 10 compilación 19041 o posterior)
 - Entrega el formato de mezcla del modo compartido del dispositivo (normalmente float32; el
   pipeline lo convierte para el codificador)
-- En el modo Aplicación, espera a la aplicación y la vuelve a captar cuando
-  se reinicia
+- En el modo Aplicación, espera a que se inicie la aplicación y vuelve a capturarla
+  tras un reinicio
 - Ajusta el volumen y el silencio de una aplicación en la salida predeterminada, como hace el mezclador
-  de volumen de Windows (`mixer`): el volumen de una sesión llega a la captura loopback, también
+  de volumen de Windows (`mixer`): el volumen de una sesión se aplica a la captura loopback, incluso
   mientras el núcleo silencia esa salida durante una transmisión con Loopback del sistema
   (`bluecaster-core::mute_output`)
 
 ### Protocolos de fabricante (`bluecaster-core::vendor`)
 
-Algunos auriculares solo ofrecen un códec o una tasa de bits después de que su propia app
-cambie un modo a través de su propio servicio RFCOMM. Un módulo por fabricante lo hace a través del
-enlace que tiene BlueCaster, para los auriculares que se distinguen por el nombre que indican:
+Algunos auriculares solo ofrecen un códec o una tasa de bits después de que la app del fabricante
+cambie un modo a través del servicio RFCOMM propio de los auriculares. Un módulo por fabricante lo hace a través del
+enlace de BlueCaster y reconoce los auriculares por su nombre:
 
-- **Huawei / Honor**: un perfil que pide LDAC a unos auriculares que no lo
-  anuncian activa su modo «prioridad a la calidad de sonido» y vuelve a conectar;
-  a los auriculares que tenían el modo desactivado se les devuelve así cuando no se obtuvo LDAC. Nunca
+- **Huawei / Honor**: cuando un perfil pide LDAC y los auriculares no lo
+  anuncian, el módulo activa su modo «prioridad a la calidad de sonido» y se reconecta;
+  si así no se obtiene LDAC, vuelve a desactivar el modo en los auriculares que lo tenían desactivado. Nunca
   con Automático
-- **OPPO**: cuando LHDC V5 transmite (elegido o por Automático), se pide Hi-Res a los
-  auriculares una vez, con una sola conexión nueva para leer lo que anuncian entonces; el
-  registro de ello se guarda con los códecs del dispositivo (`device_codecs.json`) hasta que
+- **OPPO**: cuando LHDC V5 transmite (elegido o por Automático), el módulo pide Hi-Res a los
+  auriculares una vez y se reconecta una vez para leer lo que anuncian entonces; esto
+  se registra con los códecs del dispositivo (`device_codecs.json`) hasta que
   `device.forget_codecs` lo borra
 
-La pestaña Fabricantes del modo de desarrollador cambia cuándo se usa cada uno (Automático por nombre,
+La pestaña Fabricantes del modo de desarrollador fija cuándo se ejecuta cada módulo (Automático por nombre,
 Siempre, Nunca) y ofrece las opciones propias del fabricante.
 
 ### Emparejamientos (`link_keys`, `win-sys::bt_keys`)
 
-Las claves de enlace se guardan en `link_keys.txt`. Donde se añaden dispositivos, el núcleo puede
-adoptar las claves que el Bluetooth de Windows guardó para el adaptador que BlueCaster usa ahora:
-`bluecaster-driver.exe windows-keys` las lee (una solicitud de UAC), una clave que BlueCaster
-ya tiene se conserva, y los dispositivos de audio entre ellas se guardan con los
+Las claves de enlace se guardan en `link_keys.txt`. Al añadir dispositivos, el núcleo puede
+importar las claves que el Bluetooth de Windows guardó para el adaptador que BlueCaster usa ahora:
+`bluecaster-driver.exe windows-keys` las lee (una solicitud de UAC). Las claves que BlueCaster
+ya tiene se conservan, y los dispositivos de audio entre las importadas se guardan con sus
 nombres de Windows. El modo de desarrollador muestra la clave de enlace de un dispositivo y los servicios
 SDP que anuncia.
 
 Los archivos de claves de `pairing\` (claves de enlace, vínculos LE, conjuntos
 coordinados, claves LE tomadas de Windows, claves de Windows reemplazadas) se
 cifran con DPAPI para el usuario de Windows (`win-sys::dpapi`); otros
-usuarios, y los mismos archivos copiados a otro PC, no pueden leerlos. Los
+usuarios no pueden leerlos, ni tampoco otro PC al que se copien. Los
 archivos en texto plano de versiones anteriores se leen y se reescriben
 cifrados. Un archivo que no se puede descifrar se conserva como
 `<nombre>.undecryptable` y sus dispositivos se emparejan de nuevo. BlueCaster
-guarda él mismo el TLV LE de BTstack (el `TlvStore` de `btstack-sys`, con el
+guarda por su cuenta el TLV LE de BTstack (el `TlvStore` de `btstack-sys`, con el
 contenido que escribía `btstack_tlv_windows`). `keys_for_windows.json`, que el
-asistente con permisos de administrador lee al restaurar, sigue en texto plano
-(el asistente puede ejecutarse como otro administrador) y se borra cuando
-termina.
+auxiliar elevado lee durante una restauración, sigue en texto plano
+(el auxiliar puede ejecutarse como otro administrador) y se borra cuando
+el auxiliar termina.
 
 ### Codificadores de audio {#audio-encoders}
 
@@ -434,7 +438,7 @@ termina.
 | FastStream | el mismo codificador SBC | 198/216 kbps (44.1/48 kHz) | Códec de fabricante de CSR, solo en la dirección de música (sin canal de retorno de voz): SBC joint stereo con bitpool 29, tramas rellenadas hasta 72 bytes, 3 por paquete, sin encabezado de carga útil multimedia ni encabezado RTP (como PipeWire); Automático nunca lo elige |
 
 Todos los codificadores implementan el trait `codec::Encoder`: indican el formato PCM
-y el número de tramas que consume una llamada, y devuelven tramas del códec.
+y cuántas tramas consume una llamada, y devuelven tramas del códec.
 
 libopenaptx espera grupos de 4 muestras estéreo como PCM de 24 bits empaquetado
 little-endian; los envoltorios de aptX convierten las muestras de 16 o 32 bits a ese formato,
@@ -501,16 +505,15 @@ tras el encabezado RTP de 12 bytes propio de BlueCaster (BTstack no añade ningu
 número de secuencia +1 por paquete, marca de tiempo = las muestras por canal del
 paquete (no un reloj), SSRC = el modo de latencia del receptor (0x000000A3 HQ,
 0x000000A1 LL). La carga útil lleva los bytes intercambiados en palabras de 16 bits. Los paquetes HQ tienen
-656 bytes (12 ms) y los LL 348 bytes (10 ms). Automático lo prefiere a
-aptX clásico, Opus y AAC (el orden del issue #86), por debajo de LHDC V5 y LDAC.
+656 bytes (12 ms) y los LL 348 bytes (10 ms). Automático lo coloca por encima de
+aptX clásico, Opus y AAC y por debajo de LHDC V5 y LDAC (el orden del issue #86).
 
 ## Configuración y archivos {#settings-and-files}
 
 Todo se guarda en la carpeta de configuración, `%APPDATA%\BlueCaster` (o la
-carpeta indicada por la variable de entorno `BLUECASTER_CONFIG_DIR`); los archivos que tenían
-la v1 y la 2.0.x conservan sus formatos (la 2.0.x usaba `%APPDATA%\A2DPWB`; la 3.0.0
-cambia el nombre de esa carpeta en su primer inicio y ordena los archivos en las carpetas
-de abajo):
+carpeta indicada por la variable de entorno `BLUECASTER_CONFIG_DIR`). Los archivos de
+la v1 y la 2.0.x conservan sus formatos; la 2.0.x usaba `%APPDATA%\A2DPWB`; en su primer inicio, la 3.0.0
+cambia el nombre de esa carpeta y ordena los archivos en estas carpetas:
 
 | Ruta | Contenido |
 |:-----|:---------|
@@ -547,20 +550,20 @@ desinstalador y `licenses\` (`licenses\README.txt`, `licenses\bluecaster\LICENSE
   Tauri la incrusta en `bluecaster.exe`
 - Los tipos de TypeScript del protocolo IPC se generan a partir de los tipos de Rust
   (`cargo test -p ipc export_bindings`)
-- Los archivos de idioma (`app/lang/*.json`) los usan la ventana y el menú de la bandeja
-  del núcleo
+- La ventana y el menú de la bandeja del núcleo usan los mismos archivos de idioma
+  (`app/lang/*.json`)
 - `installer/build-release.ps1` genera el instalador (Inno Setup, `installer/BlueCaster.iss`),
   el zip portable y el manifiesto del actualizador. Consulte [Compilación](building)
 
 ## Consideraciones importantes {#important-considerations}
 
 - **Compatibilidad de adaptadores**: Realtek (los más probados), CSR, Intel, Broadcom, MediaTek
-  y otros ([Hardware verificado](hardware)). Los adaptadores Realtek necesitan cargar el firmware al iniciar,
-  y también los Intel en modo bootloader
-- **Emparejamiento**: usa SSP Just Works con General Bonding. Las claves de enlace se guardan
-  en un archivo local, o se adoptan del Bluetooth de Windows para el adaptador
+  y otros ([Hardware verificado](hardware)). Los adaptadores Realtek, y los Intel en modo bootloader,
+  necesitan cargar el firmware al iniciar
+- **Emparejamiento**: BlueCaster usa SSP Just Works con General Bonding. Las claves de enlace se guardan
+  en un archivo local o se importan del Bluetooth de Windows para el adaptador
 - **Se recomienda un segundo adaptador**: mantenga el Bluetooth integrado para Windows y use
   un adaptador USB dedicado para BlueCaster
 - El firmware de algunos adaptadores Bluetooth limita la tasa de bits alcanzable
 - Por lo general, los adaptadores USB Bluetooth 5.0+ funcionan bien con LDAC
-- Prioridad de la selección automática de códec (por calidad de sonido, issue #86): LHDC V5 > LDAC > aptX Adaptive > Opus > aptX HD > aptX > aptX LL > AAC > SBC XQ > SBC (FastStream y Opus 05 solo si se eligen); un códec elegido que el dispositivo no ofrece pasa al primero del orden del dispositivo que este ofrezca
+- Prioridad de la selección automática de códec (por calidad de sonido, issue #86): LHDC V5 > LDAC > aptX Adaptive > Opus > aptX HD > aptX > aptX LL > AAC > SBC XQ > SBC (FastStream y Opus 05 solo si se eligen); un códec elegido que el dispositivo ya no ofrece se sustituye por el primer códec del orden del dispositivo que el dispositivo ofrezca; uno elegido en su tarjeta cuando el dispositivo no lo ofrecía se pide igualmente (`codec_forced`, sin alternativa)

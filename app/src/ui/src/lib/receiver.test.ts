@@ -209,7 +209,7 @@ describe("receiver steps", () => {
     stopMeasurement(m);
     run(m, arriving, IDLE, 4000);
     expect(m.measuring).toBe(false);
-    expect(statusText(m, state(), IDLE).lines[1]).toBe("Ready. Start sends to the receiver's Bluetooth adapter.");
+    expect(statusText(m, state(), IDLE).lines[1]).toBe("Ready. Click Start to stream to the receiver's Bluetooth adapter.");
   });
 
   it("the receiver does not confirm the settings", () => {
@@ -232,7 +232,7 @@ describe("receiver steps", () => {
     expect(m.steps.configure).toMatchObject({ state: "ok", detail: "MTU 895, 150 ms" });
   });
 
-  it("nothing arrives at the receiver", () => {
+  it("nothing is arriving at the receiver", () => {
     const m = newModel();
     const r = state();
     startMeasurement(m, { receiver: r, mtu: 0, bufferMs: 0, now: 0 });
@@ -241,7 +241,7 @@ describe("receiver steps", () => {
     run(m, r, STREAMING, 1000 + AUDIO_TIMEOUT_MS);
     expect(m.steps.audio.state).toBe("running");
     const log = run(m, r, STREAMING, 1001 + AUDIO_TIMEOUT_MS);
-    expect(m.steps.audio).toMatchObject({ state: "failed", detail: "nothing arrives at the receiver" });
+    expect(m.steps.audio).toMatchObject({ state: "failed", detail: "nothing is arriving at the receiver" });
     expect(m.steps.codec.state).toBe("failed");
     expect(log).toHaveLength(2);
   });
@@ -266,7 +266,7 @@ describe("receiver steps", () => {
     run(m2, r, STREAMING, 100);
     const lost = run(m2, r, stream("reconnecting", null, "status.connection_lost"), 200);
     expect(m2.steps.link.state).toBe("running");
-    expect(lost).toContain("Bluetooth connection lost, BlueCaster reconnects");
+    expect(lost).toContain("Bluetooth connection lost, reconnecting");
     run(m2, r, STREAMING, 300);
     expect(m2.steps.link.state).toBe("ok");
   });

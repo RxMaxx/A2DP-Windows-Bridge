@@ -765,6 +765,9 @@ pub struct DevOverrides {
     pub encode_at_send: bool,
     /// A link slow after a call keeps the full bit rate (not lowered)
     pub keep_bitrate_on_slow_link: bool,
+    /// The microphone's Auto looks for recording apps on the session's
+    /// tick, not with its own watcher
+    pub auto_mic_tick_poll: bool,
 }
 
 /// Developer mode's override of one vendor's protocol
@@ -1974,6 +1977,9 @@ pub struct AudioDevice {
     pub adapter_name: Option<String>,
     pub is_default: bool,
     pub is_virtual: bool,
+    /// A monitor's or TV's audio (HDMI, DisplayPort)
+    #[serde(default)]
+    pub is_display: bool,
     /// Windows' shared-mode mix format: what capturing it delivers without
     /// resampling (None: not known)
     #[serde(default)]

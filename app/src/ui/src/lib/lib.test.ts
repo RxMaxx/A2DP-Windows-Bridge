@@ -46,7 +46,7 @@ import {
 import { FlowTracker, stepDetail } from "./flow";
 import { knowAdapters, maskIdentifiers, parseAddress } from "./format";
 import { bugReportUrl, thirdPartyUrl } from "./links";
-import { deviceProfile, followedName, keptFor, ownDefaultOutput, validateProfile, vbCable, withCodec } from "./profile";
+import { deviceProfile, followedName, keptFor, ownDefaultOutput, setupAudio, validateProfile, vbCable, withCodec } from "./profile";
 
 const line = (time_ms: number, message: string, level: LogLine["level"] = "info"): LogLine => ({
   time_ms,
@@ -553,7 +553,7 @@ describe("profiles", () => {
 });
 
 describe("VB-Cable", () => {
-  const device = (name: string, is_virtual = true) => ({ id: name, name, is_virtual, is_default: false, mix_rate: null, mix_channels: null, mix_bits: null, capture_name: null, capture_rate: null });
+  const device = (name: string, is_virtual = true) => ({ id: name, name, is_virtual, is_display: false, is_default: false, mix_rate: null, mix_channels: null, mix_bits: null, capture_name: null, capture_rate: null });
   it("prefers the standard cable to the 16-channel one", () => {
     const list = [device("Speakers", false), device("CABLE In 16ch (VB-Audio Virtual Cable)"), device("CABLE Input (VB-Audio Virtual Cable)")];
     expect(vbCable(list)?.name).toBe("CABLE Input (VB-Audio Virtual Cable)");
@@ -574,6 +574,54 @@ describe("VB-Cable", () => {
     expect(ownDefaultOutput(list, snap("streaming"))).toBe("");
     expect(ownDefaultOutput(list, snap("idle"))).toBe(list[1].id);
     expect(ownDefaultOutput(list, snap("streaming", { ...earfun, capture_mode: "loopback" }))).toBe(list[1].id);
+  });
+});
+
+describe("the first-run setup's sound and microphone (issue #86)", () => {
+  const device = (name: string, is_virtual = true, is_default = false) => ({ id: name, name, is_virtual, is_display: false, is_default, mix_rate: null, mix_channels: null, mix_bits: null, capture_name: null, capture_rate: null });
+  const speakers = device("Speakers (Realtek(R) Audio)", false, true);
+  const hdmi = { ...device("LG TV (NVIDIA High Definition Audio)", false), is_display: true };
+  const vb = device("CABLE Input (VB-Audio Virtual Cable)");
+  const hifi = device("Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)");
+  const names = (list: ReturnType<typeof device>[]) => {
+    const a = setupAudio(list);
+    return { sound: a.sound?.name ?? null, mic: a.mic?.name ?? null };
+  };
+  it("both cables: the Hi-Fi Cable for the sound, VB-Cable for the microphone", () => {
+    expect(names([speakers, vb, hifi])).toEqual({ sound: hifi.name, mic: vb.name });
+  });
+  it("one cable: the microphone, the sound from the sound card or HDMI, whichever is Windows' default", () => {
+    expect(names([speakers, vb])).toEqual({ sound: speakers.name, mic: vb.name });
+    expect(names([speakers, hifi])).toEqual({ sound: speakers.name, mic: hifi.name });
+    expect(names([{ ...hdmi, is_default: true }, vb])).toEqual({ sound: hdmi.name, mic: vb.name });
+    // The #86 reports: VB-Cable the default, a monitor's HDMI, no sound card
+    const list = [device("CABLE In 16ch (VB-Audio Virtual Cable)"), { ...vb, is_default: true }, hdmi];
+    expect(names(list)).toEqual({ sound: hdmi.name, mic: vb.name });
+    expect(names([{ ...speakers, is_default: false }, { ...hifi, is_default: true }])).toEqual({ sound: speakers.name, mic: hifi.name });
+  });
+  it("no cable, a sound card and HDMI: the sound from HDMI, the microphone into the sound card", () => {
+    expect(names([speakers, hdmi])).toEqual({ sound: hdmi.name, mic: speakers.name });
+    expect(names([{ ...speakers, is_default: false }, { ...hdmi, is_default: true }])).toEqual({ sound: hdmi.name, mic: speakers.name });
+    // One of them alone: Windows default, no microphone
+    expect(names([speakers])).toEqual({ sound: null, mic: null });
+    expect(names([{ ...hdmi, is_default: true }])).toEqual({ sound: null, mic: null });
+  });
+  it("one cable, a sound card and HDMI: the sound from HDMI", () => {
+    expect(names([speakers, hdmi, vb])).toEqual({ sound: hdmi.name, mic: vb.name });
+    // Several: the one that is Windows' default output, else the first
+    const monitor = { ...device("M28U (NVIDIA High Definition Audio)", false), is_display: true };
+    expect(names([speakers, hdmi, monitor, vb])).toEqual({ sound: hdmi.name, mic: vb.name });
+    expect(names([{ ...speakers, is_default: false }, hdmi, { ...monitor, is_default: true }, vb])).toEqual({ sound: monitor.name, mic: vb.name });
+    // No HDMI: Windows' default output before the first one
+    const usb = device("Speakers (USB Audio)", false);
+    expect(names([usb, speakers, vb])).toEqual({ sound: speakers.name, mic: vb.name });
+    expect(names([usb, { ...speakers, is_default: false }, { ...vb, is_default: true }])).toEqual({ sound: usb.name, mic: vb.name });
+  });
+  it("one cable that is Windows' default output and no real one: the sound, no microphone (it would loop)", () => {
+    expect(names([{ ...vb, is_default: true }])).toEqual({ sound: vb.name, mic: null });
+  });
+  it("no cable and no HDMI: System Loopback, no microphone", () => {
+    expect(names([speakers, device("CABLE In 16ch (VB-Audio Virtual Cable)")])).toEqual({ sound: null, mic: null });
   });
 });
 

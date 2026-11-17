@@ -7,20 +7,21 @@ english_only: true
 
 # Headset microphone (developer note)
 
-Status: user-facing since `feat/headset-mic-for-all` (developer mode no
-longer needed; it was before). Classic HFP (mSBC, Auto) verified on real
-hardware; LE Audio on the emulator only (see "Verified" and the hardware
+Status: available to all users since `feat/headset-mic-for-all` (it used to
+require developer mode). Classic HFP (mSBC, Auto) is verified on real
+hardware; LE Audio only on the emulator (see "Verified" and the hardware
 checklist at the end).
 
 The feature was written in parallel parts (W1 transport and HFP AG, W2
 voice-link, W3 classic session, W4 LE Audio, W5 UI and settings, W6
-integration). The first sections are the contract between them, as the API
-stands now; "As implemented" collects what each part does beyond it.
+integration). The first sections describe the contract between the parts as
+the API stands now; "As implemented" covers what each part does beyond that
+contract.
 
 ## What the feature is
 
-"Headset mode" lets the headphones' microphone reach Windows, and sends the
-PC's audio to the headphones over the same voice link:
+"Headset mode" makes the headphones' microphone available to Windows and sends
+the PC's audio to the headphones over the same voice link:
 
 - **Classic devices (HFP):** the A2DP stream is suspended, an HFP audio
   connection (eSCO/SCO) is opened on the existing service level connection,
@@ -29,14 +30,13 @@ PC's audio to the headphones over the same voice link:
   call quality while headset mode is on; this is inherent to HFP.
 - **LE Audio devices:** the unicast stream becomes bidirectional (a
   conversational configuration): the sink ASEs keep playing LC3 at the media
-  preset, and a source ASE sends the microphone to the PC on the same CIS
-  (or on its own CIS). Playback quality does not change.
+  preset, and a source ASE sends the microphone to the PC on the same CIS (or
+  on a separate CIS). Playback quality does not change.
 
 The microphone audio is **rendered** to a Windows output device the user picks
 (a virtual audio cable such as VB-CABLE's "CABLE Input"); applications then
 see the cable's capture side ("CABLE Output") as a microphone. BlueCaster has
-no audio driver of its own, so this is the only way without a signed kernel
-driver.
+no audio driver, and without a signed kernel driver this is the only option.
 
 ## Settings and IPC (crate `ipc`, core `state.rs`, UI)
 
@@ -48,7 +48,7 @@ Per device, in `Profile` (`app/src/crates/ipc/src/protocol.rs`), all with
 | `headset_mic` | `String` | Headset mode for this device: `"off"` (default), `"on"`, `"auto"` (see "Auto mode"); anything else reads as off. |
 | `mic_device_id` | `String` | Render endpoint id that receives the microphone. Empty = none chosen (headset mode stays off and the UI says so). |
 | `mic_device_name` | `String` | Friendly name, for display when the device is missing. |
-| `mic_muted` | `bool` | Muted from the chip: no voice link, as with `"off"`; `headset_mic` is kept for unmuting (`Profile::headset_mic_mode` reads Off). Choosing a mode under Input Source (Audio Devices) unmutes. |
+| `mic_muted` | `bool` | Muted from the chip: no voice link, as with `"off"`, but `headset_mic` is kept for unmuting (`Profile::headset_mic_mode` reads Off). Choosing a mode under Input Source (Audio Devices) unmutes. |
 
 In `StreamStatus`: `voice: Option<VoiceStatus>` (`#[serde(default)]
 #[ts(optional = nullable)]`), where
@@ -68,58 +68,60 @@ pub struct VoiceStatus {
 
 `voice` is `Some` only while a voice link carries audio (classic: the HFP
 audio connection is up and armed; LE: the microphone path runs). The core
-clears it on Idle / Error / Reconnecting like the battery.
+clears it on Idle / Error / Reconnecting, as it does the battery level.
 
 The core's `bt_host::HeadsetMic` (re-exported as
 `bluecaster_core::HeadsetMic`: `Off`, `On`, `Auto`, `parse(&str)`,
-`as_str()`, `is_on()`) carries the mode from there on. The core's stored
-profile (`profiles.json`) keeps the string, written only when not off; a
-`true` / `false` saved by the first development builds reads as on / off,
-and the IPC value is normalized on saving (anything else is stored as
+`as_str()`, `is_on()`) carries the mode from that point on. The core's stored
+profile (`profiles.json`) keeps the string and writes it only when it is not
+off; a `true` / `false` saved by the first development builds is read as on /
+off, and the IPC value is normalized when saved (anything else is stored as
 off).
 
 Headset mode is **in force** (`state.rs` `headset_mic_in_force`) when the
-profile's mode is not off, it is not muted (`mic_muted`) and
-`mic_device_id` is not empty; developer mode is not needed (it was until
+profile's mode is not off, the microphone is not muted (`mic_muted`) and
+`mic_device_id` is not empty; developer mode is no longer required (it was
+until
 `feat/headset-mic-for-all`). `state.rs`
 `start_profile` then sets `StreamRequest::headset_mic` (the mode) /
 `mic_output = Some(mic_device_id)` and, for an LE Audio entry, the same in
 `LeRequest::headset_mic` / `mic_output` (`set_headset_mic`; never for a
 broadcast). LE Audio treats Auto as On: its conversational stream keeps the
-media preset, so there is no quality to win back while nobody records. The
+media preset, so there is no quality to regain while no app is recording. The
 stack offers voice (`voice_wanted`) for On and Auto alike.
 
 `profile.save` of the profile in use that changes only `headset_mic` /
 `mic_device_*` (`headset_change`):
 
-- `Unused` (the output changed while headset mode is off): the stream is not touched.
-- `InPlace` (a classic stream streaming): `Service::set_headset_mic(mode,
-  mic_output) -> bool` (`VoiceChange { mode, mic_output }`); false (no
-  classic stream streaming, or a stack started without voice when turning
-  on or to auto) restarts the profile as for any other change.
+- `Unused` (the output changed while headset mode is off): the stream is left unchanged.
+- `InPlace` (a classic stream is streaming): `Service::set_headset_mic(mode,
+  mic_output) -> bool` (`VoiceChange { mode, mic_output }`); `false` (no
+  classic stream is streaming, or the stack was started without voice and the
+  mode turns on or to auto) restarts the profile, as any other change does.
 - `Restart` (LE Audio entries, or a stream still connecting): the stream
-  starts again.
+  restarts.
 
 Feedback loop check (pure, `profiles.rs`): `mic_output_conflicts(source,
 mic_id, default_output_id) -> Option<&'static str>` returns
 `"error.headset_mic_loop"` when the microphone's render endpoint is the
 captured virtual / output device, or the default output while System
 Loopback is captured; `Profile::mic_device_conflicts` calls it with the
-profile's source. Both sessions call it through `voice::mic_conflict` with
-the source they really capture. The app (`state.rs` `drop_mic_note`)
-takes a microphone note (this one, `status.headset_mic_failed`,
-`status.headset_mic_output_failed`) off the stream's message once the
-voice link opens or an in-place headset change is accepted, restoring the
-message it replaced (a codec fallback reason); the session says it again
-if the new output still fails.
+profile's source. Both sessions call it through `voice::mic_conflict` with the
+source they actually capture. The app (`state.rs` `drop_mic_note`)
+removes a microphone note (this one, `status.headset_mic_failed`,
+`status.headset_mic_output_failed`) from the stream's message once the voice
+link opens or an in-place headset change is accepted, and restores the message
+the note replaced (a codec fallback reason); the session reports the note
+again if the new output still fails.
 
 CLI (`app/src/core/src/cli.rs`, "Headset microphone"):
-`--headset-mic [on|auto]` (headset mode once streaming, alone: on; on an
-`--le-audio` run, the conversational configuration), `--mic-output <name|path.wav>` (a render
-device by id or part of its friendly name, default the Windows default
-output, or a WAV file to write), `--voice-codec <cvsd|msbc|lc3_swb>` and
-`--mic-rate <hz>` (the microphone's codec chosen, below). Development / testing: `--headset-mic-toggle <on_s>,<off_s>`
-switches headset mode on and off at those seconds of a classic stream
+`--headset-mic [on|auto]` (headset mode once streaming; without a value, on;
+in an `--le-audio` run, the conversational configuration), `--mic-output <name|path.wav>` (a
+render device by id or part of its friendly name, or a WAV file to write;
+defaults to the Windows default output), `--voice-codec <cvsd|msbc|lc3_swb>` and
+`--mic-rate <hz>` (see "Choosing the microphone's codec" below). Development /
+testing: `--headset-mic-toggle <on_s>,<off_s>`
+turns headset mode on and off at those times (in seconds) during a classic stream
 through `Service::set_headset_mic` (`Service::set_voice_offered` makes the
 stack offer voice from the start).
 
@@ -133,11 +135,11 @@ devices), `ui.headset_mic_no_output` (no output device chosen),
 `status.headset_mic_failed`, `status.headset_mic_output_failed`. Hints stay
 under 120 characters.
 
-## The microphone's codec chosen (issue #86)
+## Choosing the microphone's codec (issue #86)
 
-With Auto-select (`Settings.auto_codec`) off the user chooses the
-microphone's codec on the Codecs screen; under Auto-select the choice stays
-in the profile and is not used (as the A2DP codec). Profile fields, both
+With Auto-select (`Settings.auto_codec`) off, the user chooses the
+microphone's codec on the Codecs screen; with Auto-select on, the choice stays
+in the profile but is not used (as with the A2DP codec). Profile fields, both
 `#[serde(default)]` and written only when set:
 
 | Field | Meaning |
@@ -146,100 +148,110 @@ in the profile and is not used (as the A2DP codec). Profile fields, both
 | `mic_rate` | LE Audio: the microphone's sampling rate in Hz; 0 = none chosen (Auto). |
 
 - **HFP** (`Profile::voice_codec_in_force` -> `StreamRequest::voice_codec`):
-  the session tells the stack once at its start
+  the session passes it to the stack once at startup
   (`HeadsetMode::offer_codecs` -> `BtHost::voice_codec(Some(hfp_id))`), and
   `Voice::start` applies it again before each audio connection.
-  `bt_host::voice::ag_codecs(max)` keeps the AG's codecs at or below the one
-  chosen (ids are the quality order: LC3-SWB 3 > mSBC 2 > CVSD 1), set with
+  `bt_host::voice::ag_codecs(max)` limits the AG's codecs to the chosen one
+  and those below it (ids are the quality order: LC3-SWB 3 > mSBC 2 > CVSD 1), set with
   `hfp_ag_init_codecs` through `bluecaster_hfp_ag_set_codecs`. BTstack then
-  suggests (+BCS) the best of those the headphones listed and CVSD when none
-  is: a codec the headphones lack falls back to the next lower one. A codec
+  suggests (+BCS) the best of these that the headphones listed, or CVSD if
+  there is none; if the headphones lack a codec, the next lower one is used. A codec
   negotiated earlier on the same service level connection would be reused
   (`hfp_ag_setup_audio_connection` skips +BCS once `HFP_CODECS_EXCHANGED`),
-  so the shim sets `HFP_CODECS_RECEIVED_LIST` on an idle connection to
-  negotiate again. The SDP record keeps listing every codec. A stack without
-  voice (battery only) is not touched.
+  so the shim sets `HFP_CODECS_RECEIVED_LIST` on an idle connection to force a
+  new negotiation. The SDP record keeps listing every codec. A stack without
+  voice (battery only) is left unchanged.
 - A save that changes only the call codec takes the in-place path of headset
   mode (`only_headset_mic_differs`, `Service::set_headset_mic(mode, output,
-  voice_codec)`): the session offers the new codecs and, when a link is up
-  (or opening) with another codec, closes it; the next tick opens it again
-  (A2DP plays in between). Auto-select turned on or off does the same for
+  voice_codec)`): the session offers the new codecs and closes any link that
+  is up (or opening) with a different codec; the next tick reopens it (A2DP
+  plays in between). Turning Auto-select on or off does the same for
   the profile in use (`mic_choice_matters`).
 - **LE Audio** (`Profile::mic_rate_in_force` -> `LeRequest::mic_rate` ->
-  `le_audio::plan::StreamRequest::source_rate`): `plan_source` takes the
-  first fitting source preset at that rate, the first fitting one when none
-  is (logged). `SourcePlan::rates` lists the rates of the fitting presets in
+  `le_audio::plan::StreamRequest::source_rate`): `plan_source` takes the first
+  fitting source preset at that rate, or the first fitting preset at any rate
+  if there is none (logged). `SourcePlan::rates` lists the rates of the fitting presets in
   the order they are tried (Auto's first); the session reports them as
-  `StreamStatus.mic_rates` (`ServiceEvent::MicRates`). A change sets the
-  stream up again (`HeadsetChange::Restart`), as for Auto-select toggled with
-  a rate chosen. The microphone stays mono: no channel choice.
-- UI (`Codecs.tsx`): the call codec cards (while the call link is open)
-  are chosen like the A2DP cards with Auto-select off, and offer to turn it
-  off under Auto-select; the card shown chosen is the codec in use. An LE
-  Audio device whose microphone runs gets a **Microphone** heading and an
-  LC3 card whose "..." chooses the rate among `mic_rates` (Auto with the
-  first one's rate), Mono read only; under Auto-select the rate in use.
+  `StreamStatus.mic_rates` (`ServiceEvent::MicRates`). A change sets up the
+  stream again (`HeadsetChange::Restart`), as does toggling Auto-select while
+  a rate is chosen. The microphone is always mono; there is no channel choice.
+- UI (`Codecs.tsx`): the call codec cards (shown while the call link is open)
+  work like the A2DP cards: with Auto-select off the user picks one, and with
+  it on they offer to turn Auto-select off; the card marked as chosen is the
+  codec in use. An LE Audio device with an active microphone gets a
+  **Microphone** heading and an LC3 card whose "..." picks the rate from
+  `mic_rates` (Auto uses the first rate), with Mono read-only; with
+  Auto-select on, the card shows the rate in use.
 - CLI: `--voice-codec`, `--mic-rate`; emulator: `run_test.py --voice
   lc3swb-msbc` (the HF offers LC3-SWB, mSBC is chosen) and `--le-audio
   mic-rate-16k` (16 kHz chosen from 16 / 32 kHz).
 
 ## Auto mode
 
-`"auto"` gives classic devices the voice link only while an application
-records the microphone, and full-quality A2DP otherwise.
+`"auto"` opens the voice link on classic devices only while an application is
+recording from the microphone, and uses full-quality A2DP otherwise.
 
 - **What pairs** (`win_sys::audio_policy::capture_sessions_active(render_id)
   -> windows::core::Result<Option<bool>>`, through
   `audio_capture::mic_capture_active(id) -> Result<Option<bool>,
   CaptureError>`, which initialises COM itself): the active capture
   endpoints in the microphone output's container (`PKEY_Device_ContainerId`,
-  e.g. a USB headset's own microphone); when none is, those of the same
+  e.g. a USB headset's own microphone); when there are none, those of the same
   adapter (`PKEY_DeviceInterface_FriendlyName`: "VB-Audio Virtual Cable" for
   both "CABLE Input" and "CABLE Output"). The null container
   `{00000000-0000-0000-ffff-ffffffffffff}` (internal and software devices
-  share it) and an all-zero one pair nothing, or every built-in microphone
-  would pair with the cable. `Some(true)`: an audio session on one of them
-  is `AudioSessionStateActive` (an app has its capture started), this
-  process's own left out; `None`: no capture endpoint pairs (logged once as
-  a warning, counted as nobody recording); an error (the output is gone)
-  counts as nobody too, logged once.
+  share it) and an all-zero one match nothing; otherwise every built-in
+  microphone would pair with the cable. `Some(true)`: an audio session on one of them
+  is `AudioSessionStateActive` (an app has started capturing), excluding this
+  process's own sessions; `None`: no capture endpoint pairs (logged once as a
+  warning and treated as nobody recording); an error (the output is gone) is
+  also treated as nobody recording and logged once.
 - **Who records**: when Auto turns on, the log names each recording
   session's executable (file name only) and capture endpoint
   (`audio_capture::mic_recorders` over
-  `audio_policy::capture_session_recorders`), to tell an app from a
+  `audio_policy::capture_session_recorders`), to distinguish an app from a
   Windows meter or "Listen to this device".
-- **The poll** (`voice.rs` `AutoWatch`): on every session tick (200 ms;
-  `AUTO_POLL`, about 2 ms a poll), so little of a recording's start is
-  lost. Windows reports a recording's start and end at once (measured with
-  the `watch_capture` win-sys example), so the poll and the hysteresis
-  below are all the delay there is. The output is resolved once per mode
-  or output change, not on every poll. A WAV `mic_output` counts as always
-  recorded from (the CLI's test path).
+- **The watcher** (`voice.rs` `Watcher`, the default): a dedicated thread
+  checks every 50 ms (`AUTO_WATCH_EVERY`) through
+  `audio_policy::CaptureSessions` (the paired capture endpoints and their
+  session managers are looked up once, so a check takes ~0.5 ms instead of
+  ~1.2 ms), applies the hysteresis below and wakes the session on each change.
+  On hardware (XM4, 5 cycles) Auto detected a recording 52-76 ms after it
+  started (150-190 ms with the tick).
+- **The poll** (Developer > Codec settings > Microphone "Auto: look for
+  recording apps only every 200 ms", `DevOverrides::auto_mic_tick_poll`):
+  checks on every session tick (200 ms; `AUTO_POLL`, a full look-up each
+  time), as BlueCaster did before the watcher. Windows reports a recording's
+  start and end immediately (measured with the `watch_capture` win-sys
+  example), so the only delay comes from the check and the hysteresis below.
+  The output is resolved
+  once per mode or output change, not on every poll. A WAV `mic_output` always
+  counts as being recorded (the CLI's test path).
 - **Hysteresis**: the first poll that sees a recording turns the voice link
-  on; it goes back to A2DP only after the polls have seen nobody for
-  500 ms (`AUTO_IDLE`; 2 s, then 1 s, before issue #86 asked for a way
-  back as fast as the way to the microphone), so an app that opens the
-  device again does not bounce the
-  link. The link going down by Auto leaves the plain Streaming status (no
-  message); `StreamStatus.voice` is None while Auto is idle.
+  on; the stream returns to A2DP only after the polls have seen no recording
+  for 500 ms (`AUTO_IDLE`; previously 2 s, then 1 s, until issue #86 asked for
+  switching back to be as fast as switching to the microphone), so an app that
+  reopens the device does not bounce the link. When Auto closes the link, the
+  status returns to plain Streaming (no message); `StreamStatus.voice` is None
+  while Auto is idle.
 - **A slow stream after a voice link** (`bt_host::esco_watch`): the bit
   rate is lowered (`StreamStatus.slow_link`, the warning under the codec)
-  and stays lowered until the next voice link or another stream setting
-  chosen by hand. There are no timed tries of the full bit rate and no
-  voice link of our own to put it right any more.
-- `held_off` (after a failure or a refusal) is not cleared by Auto's own on
-  and off, only by a mode or output change. The headphones hanging up in
-  Auto keep the link closed until nobody has recorded (then the next
-  recording opens it again); in On they end headset mode for the request as
+  and stays lowered until the next voice link or until the user changes
+  another stream setting. BlueCaster no longer retries the full bit rate on a
+  timer or opens its own voice link to fix it.
+- `held_off` (after a failure or a refusal) is cleared only by a mode or
+  output change, not by Auto switching on and off. If the headphones hang up
+  in Auto, the link stays closed until recording stops (the next recording
+  then reopens it); in On, hanging up ends headset mode for the request, as
   before.
 - **The emulator** cannot test the detection (no Windows capture sessions
   there): `run_test.py --voice cvsd-auto` runs `--headset-mic auto` with a
-  WAV output and checks Auto's "an application records" log line plus
-  cvsd's checks. The pairing rule is unit-tested
-  (`capture_endpoints_pair_by_container_then_adapter`), the hysteresis too
-  (`auto_turns_on_at_once_and_off_after_two_idle_seconds`); the ignored
-  `win-sys` test `print_capture_sessions` prints every output's pairing and
-  answer on a real PC (record "CABLE Output" to see `Some(true)`).
+  WAV output and checks Auto's "an application records" log line in addition
+  to the cvsd checks. The pairing rule and the hysteresis are unit-tested
+  (`capture_endpoints_pair_by_container_then_adapter`,
+  `auto_turns_on_at_once_and_off_after_two_idle_seconds`); the ignored
+  `win-sys` test `print_capture_sessions` prints each output's pairing and
+  result on a real PC (record "CABLE Output" to see `Some(true)`).
 
 ## Voice audio plumbing (crate `app/src/crates/voice-link`)
 
@@ -327,9 +339,9 @@ impl MicOutput {
 }
 ```
 
-The classic session opens it at the HFP codec's rate when the audio
-connection is up; the LE session at the microphone's LC3 rate when the
-stream starts (`le_stream::LeMicPath`, the le-decode thread's `PcmOut` is a
+The classic session opens the output at the HFP codec's rate once the audio
+connection is up; the LE session opens it at the microphone's LC3 rate when
+the stream starts (`le_stream::LeMicPath`; the le-decode thread's `PcmOut` is a
 small adapter around the `PcmProducer`).
 
 ## SCO transport (crates `hci-transport`, `win-sys`, `btstack-sys`)
@@ -337,18 +349,19 @@ small adapter around the `PcmProducer`).
 `btstack_config.h` has `ENABLE_SCO_OVER_HCI`, `ENABLE_HFP_WIDE_BAND_SPEECH`,
 `ENABLE_HFP_SUPER_WIDE_BAND_SPEECH`.
 
-`ENABLE_SCO_OVER_HCI` is not inert: BTstack's HCI init then sends Write
+`ENABLE_SCO_OVER_HCI` is not harmless: with it, BTstack's HCI init sends Write
 Synchronous Flow Control Enable and Write Default Erroneous Data Reporting to
 every controller that lists them (hci.c, the init step
 `HCI_INIT_WRITE_SYNCHRONOUS_FLOW_CONTROL_ENABLE` and the one after it), and
 BCM Write SCO PCM Int (SCO routed
-over HCI) to Broadcom controllers. BTstack has no switch for it at run time.
-**SCO hidden** (`btstack-sys/src/transport.rs`, the default of every run):
+over HCI) to Broadcom controllers. BTstack has no run-time switch for this.
+**SCO hidden** (`btstack-sys/src/transport.rs`, the default for every run):
 the transport clears those two supported-commands bits (octet 10 bit 4,
 octet 18 bit 3) in the controller's Read Local Supported Commands answer
-before BTstack sees it, as LE hidden does for LE, so a stack without voice
-initializes as before the feature. `Stack::set_sco_hidden(false)` (bt-host,
-before HCI init, when `HostConfig::voice`) shows them. extern/btstack is not
+before BTstack sees it, just as LE hidden does for LE, so a stack without
+voice initializes exactly as it did before this feature.
+`Stack::set_sco_hidden(false)` (bt-host, before HCI init, when
+`HostConfig::voice`) reveals them. extern/btstack is not
 patched. The Broadcom command depends only on the manufacturer and is still
 sent (see the hardware checklist).
 
@@ -368,25 +381,25 @@ fn sco_ready(&self) -> bool { true }
 
 USB is an H2 transport **only when the stack offers voice**:
 `UsbTransport::with_sco(HostConfig::voice)` (bt-host `backend()`); without
-it interface 1 is not claimed and the backend is a plain async one, as
-before the feature. `Stack::transport_is_h2()`, `Stack::sco_ready()` expose
-both to bt-host.
+voice, interface 1 is not claimed and the backend is a plain async one, as
+before this feature. `Stack::transport_is_h2()` and `Stack::sco_ready()`
+expose both values to bt-host.
 
 shim.c keeps `transport_sync` / `transport_async` for non-H2 backends and adds
-`transport_h2` (`"H2_BLUECASTER"`), chosen by `is_h2()` at install; it
-registers a SCO packet handler before any SCO can-send request, which
-forwards to Rust as `SOURCE_SCO`. The TCP backend carries packet type 3 both
+`transport_h2` (`"H2_BLUECASTER"`), chosen by `is_h2()` at install. Before any
+SCO can-send request, it registers a SCO packet handler that forwards to Rust
+as `SOURCE_SCO`. The TCP backend carries packet type 3 both
 ways.
 
 Rust API (`btstack-sys/src/stack.rs`): `hfp_ag_init(voice)` (voice: codec
 negotiation, eSCO S4; false: the battery-only AG), `sco_send`,
 `sco_request_can_send_now`, `sco_packet_length`, `hfp_ag_audio_connect`,
 `hfp_ag_audio_release`. `sco_send` copies into HCI's outgoing buffer; call
-it only on `HCI_EVENT_SCO_CAN_SEND_NOW`. The SDP record of the voice AG gets
-its wide band speech / LC3-SWB bits although
+it only on `HCI_EVENT_SCO_CAN_SEND_NOW`. The voice AG's SDP record gets its
+wide band speech / LC3-SWB bits even though
 `hfp_ag_create_sdp_record_with_codecs` tests the HF's codec negotiation bit
-(7) instead of the AG's (9): shim.c adds bit 7 to the features it passes to
-the record builder only.
+(7) instead of the AG's (9): shim.c adds bit 7 only to the features it passes
+to the record builder.
 
 ## HFP audio (crate `bt-host`)
 
@@ -424,21 +437,21 @@ while the headphones' own audio connection is open, `Refused(0xFF)`
 can-send-now (TCP / emulator: 60; USB H2: 48 / 24), `VoiceRx::packet` every
 received payload. `Released` comes after `voice_stop`, a release by the
 headphones, the SCO link's HCI Disconnection Complete, or the service level
-connection going down (once: whichever comes first).
+connection going down (once, whichever comes first).
 
-**Frames start on a frame boundary of the link (#86).** Over USB a
-transparent SCO packet carries 24 bytes and an mSBC / LC3-SWB frame is 60,
-and the session arms the encoder some packets after the link is up, so the
-first frame used to start 0, 12, 24, 36 or 48 bytes into a frame's length,
-another place on every link. `ShellTx` (core `voice.rs`) counts the bytes
+**Frames start on a frame boundary of the link (#86).** Over USB, a
+transparent SCO packet carries 24 bytes while an mSBC / LC3-SWB frame is 60,
+and the session arms the encoder a few packets after the link is up, so the
+first frame used to start 0, 12, 24, 36 or 48 bytes into a frame, at a
+different offset on every link. `ShellTx` (core `voice.rs`) counts the bytes
 sent since the link's first one and sends zeros up to the next multiple of
 60 before the encoder's first byte, and again after zeros for a busy slot
 or a packet that was not sent (`VoiceTx::unsent`). The link's last log line
-says where the stream was when the frames started, how often they were put
-on a boundary and how many packets of zeros went out while the slot was
-busy; "SCO link: ..." has the interval and retransmission window of
-Synchronous Connection Complete. The emulator sends 60 bytes a packet, so
-its frames always start on a boundary: the 24-byte case is a unit test.
+reports the stream offset when the frames started, how often they were
+realigned to a boundary, and how many packets of zeros were sent while the
+slot was busy; "SCO link: ..." has the interval and retransmission window of
+Synchronous Connection Complete. The emulator sends 60 bytes per packet, so
+its frames always start on a boundary; a unit test covers the 24-byte case.
 
 **The SCO path is checked before BTstack sizes a packet.** On an H2
 transport `hci_get_sco_packet_length_for_connection` asserts that the
@@ -452,22 +465,22 @@ Buffer Size answer (`btstack_sys::events::read_buffer_size`, seen by
 - `voice_start` / `voice_check`: `Refused(NO_SCO_PATH)` when no codec fits
   (length below 24, 0, or Read Buffer Size not seen) on H2; HeadsetMode
   gives up with `status.headset_mic_failed`.
-- `Established` of ours: when the negotiated codec does not fit, or
+- Our own `Established`: when the negotiated codec does not fit, or
   `sco_ready()` is false (the pipes did not start), the audio connection is
-  released and `Failed { status: NO_SCO_PATH }` sent; `sco_packet_length`
+  released and `Failed { status: NO_SCO_PATH }` is sent; `sco_packet_length`
   and `sco_send` are never called for it.
-- `Established` of the headphones' own: reported as before but marked not
-  usable: nothing is sent, `voice_attach` answers `Refused`.
+- The headphones' own `Established`: reported as before but marked unusable;
+  nothing is sent and `voice_attach` answers `Refused`.
 - Ten failed `sco_send`s in a row (or a packet length of 3 or less):
   `Failed { status }` once and no more can-send-now requests; the caller
-  closes it (HeadsetMode: back to A2DP).
-- `voice_stop` whose release BTstack refuses (status != 0): no RELEASED
-  would follow, so the state is cleared and `Released` sent at once (also
-  for the release on the A2DP signaling release).
+  closes the link (HeadsetMode: back to A2DP).
+- A `voice_stop` whose release BTstack refuses (status != 0): no RELEASED
+  would follow, so the state is cleared and `Released` is sent immediately
+  (the same applies to the release triggered by the A2DP signaling release).
 
-Not covered: the USB SCO thread stopping later (unplug, I/O errors) stops
-the transport's send tokens without a failed send; the link then stays
-silent until it is switched off or the adapter fails as a whole.
+Not covered: if the USB SCO thread stops later (unplug, I/O errors), the
+transport stops issuing send tokens without any send failing; the link then
+stays silent until it is switched off or the whole adapter fails.
 
 ## LE Audio source ASEs (crates `le-audio`, `bt-host/src/le`, `pipeline`, core `le_stream.rs`)
 
@@ -480,23 +493,23 @@ silent until it is switched off or the adapter fails as a whole.
   `StreamPlan::source: Option<SourcePlan>` and `source_note` (why a
   requested microphone is missing: the stream then plays without it).
 - Source presets: `32_2_1, 32_1_1, 24_2_1, 24_1_1, 16_2_1, 16_1_1`, those
-  with the sink preset's frame duration first; next to a high-reliability
-  sink preset (`48_6_2` etc.) the `_2` twin of the same rate and octets
-  (`32_2_2`), so the CIG keeps one latency class (a 10 ms microphone made
+  with the sink preset's frame duration first; with a high-reliability sink
+  preset (`48_6_2` etc.), the `_2` twin with the same rate and octets
+  (`32_2_2`) is used, so the CIG keeps a single latency class (a 10 ms microphone made
   the controller pick a 10 ms ISO interval, and EarFun refused the second
   CIS, #86); GMAP (UGTs with the Source
   feature) puts `32_1_gs, 32_2_gs, 48_1_gs, 48_2_gs` first. Contexts:
-  Conversational (GMAP: Game + Conversational) on the source ASEs, and next
-  to Media on the sink ASEs where available.
+  Conversational (GMAP: Game + Conversational) on the source ASEs, and
+  alongside Media on the sink ASEs where available.
 - CIG: `max_sdu_p_to_c`, `rtn_p_to_c`, `phy_p_to_c`, the P->C SDU interval.
   Both directions ask for the larger of the two presets' max transport
   latency (each still capped by its ASEs' preference): with 95 ms for
-  `32_2_2` next to 100 ms for `48_6_2`, a MediaTek MT7925 left the 30 ms
-  ISO interval it uses for media (98 ms transport latency) for 10 ms, and
+  `32_2_2` next to 100 ms for `48_6_2`, a MediaTek MT7925 switched from the 30
+  ms ISO interval it uses for media (98 ms transport latency) to 10 ms, and
   EarFun earbuds refused the second CIS (#86).
-- A stream with the microphone that fails is set up again without it on a
-  new link (`le_stream.rs`): on the same link the EarFun earbuds left ASE 2
-  in Enabling after the refused CIS.
+- If a stream with the microphone fails, it is set up again without the
+  microphone on a new link (`le_stream.rs`): on the same link, the EarFun
+  earbuds left ASE 2 in Enabling after refusing the CIS.
   Source ASEs go through Config Codec / QoS / Enable; the client writes
   Receiver Start Ready once all CIS are up and Receiver Stop Ready on
   Disable. `IsoSender` gets only CIS with a C->P direction.
@@ -505,9 +518,9 @@ silent until it is switched off or the adapter fails as a whole.
   holds the consumer, the streams and the LC3 parameters.
   `pipeline::le_rx` ("le-decode" thread): per source CIS a sequence-number
   jitter buffer (prefill two SDU intervals), one LC3 decoder per channel
-  with PLC, a mono mix, one frame per call into a `PcmOut`, data driven (no
-  clock of its own).
-- TMAS claims Call Gateway + UMS (0x0005) and GMAS UGG Features 0x07 always
+  with PLC, a mono mix, one frame per call into a `PcmOut`, data-driven (it
+  has no clock).
+- TMAS always claims Call Gateway + UMS (0x0005) and GMAS UGG Features 0x07
   (static GATT values).
 
 ## As implemented
@@ -525,8 +538,8 @@ Compile-tested only. `UsbTransport` is an H2 transport and ports BTstack's
   8 isochronous reads of 3 ms in flight (`WinUsb_ReadIsochPipeAsap`,
   continuing the stream) and reassembles the IN byte stream into SCO
   packets; each outgoing SCO packet is one `WinUsb_WriteIsochPipeAsap`, up to
-  20 queued or in flight (60 ms); `HCI_EVENT_SCO_CAN_SEND_NOW` is handed out
-  while there is room; with no link left the thread stops and alternate
+  20 queued or in flight (60 ms); `HCI_EVENT_SCO_CAN_SEND_NOW` is issued while
+  there is room; with no link left the thread stops and alternate
   setting 0 is selected;
 - the WinUSB calls are in `win-sys/src/usb_isoch.rs`; their OVERLAPPEDs set
   the low bit of `hEvent`, so nusb's completion port never sees them;
@@ -534,7 +547,7 @@ Compile-tested only. `UsbTransport` is an H2 transport and ports BTstack's
   read at install, before open) and claims interface 1; without a
   claimable interface 1, SCO is refused (`can_send`) and dropped (`send`,
   still reported as sent so BTstack's buffer is freed), and `sco_ready()`
-  is false, so bt-host gives the audio connection up at Established
+  is false, so bt-host gives up the audio connection at Established
   instead of letting it stall without send tokens;
 - high speed adapters: one packet per 2^(bInterval-1) microframes, rounded
   to whole 1 ms frames (bInterval 1: 24 packets per 3 ms read); full speed
@@ -552,13 +565,13 @@ for both speeds.
 - Drift control (`drift.rs`, renderer and uplink alike): the trough of the
   queue level over 200 ms against the prefill, ± the tolerance (renderer:
   one device period; uplink: 10 ms), at most 0.25 % correction per window.
-  A trough more than twice the tolerance below primes again once
-  (`Adjust::Reprime`). The first window after (re)priming moves the level
+  A trough more than twice the tolerance below the prefill triggers one
+  re-prime (`Adjust::Reprime`). The first window after (re)priming moves the level
   to the prefill plus half the tolerance in one step (at most a tolerance's
-  worth): a late input block only lowers the trough, so the level keeps its
-  room below and a loaded machine no longer causes small corrective steps
-  (on the emulator the CVSD uplink repeated 4 samples every 200 ms after
-  the start before the one-step move, audible as clicks).
+  worth): a late input block then only lowers the trough, so the level keeps
+  headroom below the target and a loaded machine no longer causes small
+  corrective steps (before the one-step move, the CVSD uplink on the emulator
+  repeated 4 samples every 200 ms after the start, audible as clicks).
 - `UplinkConsumer` sends zeros until 30 ms are queued (at the start and
   after an underrun). `queued()`, `stats() -> UplinkStats`, `rate()`.
 - `voice_link::h2`: `H2Framer`, `H2Sync` (a port of BTstack's
@@ -573,66 +586,66 @@ for both speeds.
   polled like `take_source_change()`. The session emits
   `ServiceEvent::Voice(Option<ipc::VoiceStatus>)`; `on_service_event` sets
   `StreamStatus.voice` from it.
-- On (each tick of a link that is fine, until it works or is given up):
-  `host.voice_check()` first: NotConnected is retried for up to 20 s (the
+- On (on each tick while the link is healthy, until it works or BlueCaster
+  gives up): first `host.voice_check()`: NotConnected is retried for up to 20 s (the
   service level connection comes after A2DP), Busy waits for the headphones'
   own Established, anything else (NotEnabled, Refused: no SCO path) gives
-  up with `status.headset_mic_failed`; only then resolve the output (a
-  device enumeration, not on every tick of the wait) and refuse with
-  `error.headset_mic_loop` (a Streaming status message, the stream goes
-  on) when `mic_conflict` says so; then stop the capture and the encode
+  up with `status.headset_mic_failed`; only then resolve the output (a device
+  enumeration, not on every tick of the wait) and refuse with
+  `error.headset_mic_loop` (a Streaming status message; the stream continues)
+  if `mic_conflict` reports a loop; then stop the capture and the encode
   thread, `host.stop_stream()` (AVDTP Suspend, link kept),
   `host.voice_start(tx, rx)`.
-- tx / rx are shells around `Arc<Mutex<Option<..>>>` slots: silence /
-  dropped packets until armed. On `Established{codec}` the session thread
+- tx / rx are shells around `Arc<Mutex<Option<..>>>` slots: they send silence
+  and drop packets until armed. On `Established{codec}` the session thread
   opens the `MicOutput` at the codec rate, a capture of the current source
   at `preferred_rate = codec rate` into an `UplinkSink` (200 ms), and
-  installs encoder + uplink and decoder + producer under the lock. The
-  BTstack thread only `try_lock`s (contended only while arming / disarming:
-  one packet of silence), and the armed path allocates nothing.
-- Off, `Released`, `Failed` (before Established: bt-host closed it
-  already; after Established, SCO stopped flowing: `voice_stop`), no
+  installs encoder + uplink and decoder + producer under the lock. The BTstack
+  thread only uses `try_lock` (contention happens only while arming /
+  disarming and costs one packet of silence), and the armed path allocates nothing.
+- Off, `Released`, `Failed` (before Established, bt-host has already closed
+  the link; after Established, SCO stopped flowing: `voice_stop`), no
   Established within 10 s, the render device ending, an output that does
   not open: `voice_stop` (when asked for),
   disarm, then `host.start_stream()` + a fresh encoder and pipeline + the
-  A2DP capture again (`A2dpSide::resume`, the steps a reconnect takes). A
-  resume that fails ends the session with its error. Failures give
-  `status.headset_mic_failed` / `status.headset_mic_output_failed` and hold
+  A2DP capture again (`A2dpSide::resume`, the steps a reconnect takes). If the
+  resume fails, the session ends with its error. Failures report
+  `status.headset_mic_failed` / `status.headset_mic_output_failed` and keep
   headset mode off until the next change.
 - Released by the headphones while on: back to A2DP and the request is
   cleared (as if switched off), so a headset that hangs up is not reopened
-  in a loop; saving the setting again or a new stream opens it again.
-- The headphones open the audio connection themselves (a voice assistant
-  or call button): with headset mode on (and no conflict) it is taken over
-  (`voice_attach`) and armed. Otherwise the decision depends on the stack:
+  in a loop; saving the setting again or starting a new stream reopens it.
+- If the headphones open the audio connection themselves (a voice assistant or
+  call button) while headset mode is on (with no conflict), BlueCaster takes
+  it over (`voice_attach`) and arms it. Otherwise the decision depends on the stack:
   - started **with voice** (headset mode in force, `host.voice_enabled()`):
-    `voice_stop` closes it, as nothing would carry it;
+    `voice_stop` closes it, since nothing would use it;
   - started **without voice** (headset mode off, or muted): it is **left alone** and logged once
     per session ("no headset mode, left alone"). Before this branch BTstack
     accepted such links and BlueCaster ignored them; closing them would
     break the headphones' own button for every user. Without voice the
     transport is not H2, so BTstack's SCO length assert cannot fire for it.
-- Link loss while on: the voice link is dropped, the A2DP capture started
-  again and the normal reconnect builds the pipeline; headset mode stays
+- Link loss while on: the voice link is dropped, the A2DP capture is restarted
+  and the normal reconnect rebuilds the pipeline; headset mode stays
   requested, so the reconnected stream opens the voice link again (stale
   voice events are dropped after the reconnect). Session end: `voice_stop`,
   no resume.
 - While on, a source change restarts only the uplink capture, a bitpool
   change only updates the encoder config A2DP resumes with, and the A2DP
   capture's reopen / app-attach logic is paused. An Application source
-  that was not running when the link came up, or exited since (its process
-  gone or the capture ended), is looked for at most once a second
-  (`app_recheck_due`) and the uplink captures it again once it runs
+  that was not running when the link came up, or has exited since (its process
+  is gone or the capture ended), is checked for at most once a second
+  (`app_recheck_due`), and the uplink captures it again once it is running
   (silence until then; a process whose capture failed is not retried).
-- `Service::set_headset_mic` waits for the service's `control` lock (a
-  short holder, such as another in-place change, no longer turns the save
-  into a profile restart); without a stream streaming it answers false at
-  once, so a start or stop under way, which holds `control` until the old
-  session ended, is waited for only when it begins between that check and
-  the lock (the session thread itself never takes `control`, so there is
+- `Service::set_headset_mic` waits for the service's `control` lock (so a
+  brief holder, such as another in-place change, no longer turns the save into
+  a profile restart); when no stream is streaming it returns false
+  immediately, so a start or stop in progress (which holds `control` until the
+  old session has ended) is waited for only if it begins between that check
+  and taking the lock (the session thread itself never takes `control`, so there is
   no deadlock with it). Off clears `voice_wanted`: the running
   stack keeps offering voice (`ensure_host` restarts only when voice is
-  wanted and missing), a stack started later goes without it.
+  wanted and missing), but a stack started later does not.
 - Logs: "voice: ..." (switching, codec, "A2DP suspended / resumed", a 10 s
   summary, "voice: <codec> link down after N s: ..."), plus voice-link's
   own summaries.
@@ -640,20 +653,20 @@ for both speeds.
 ### LE Audio microphone (W4, W6; `crates/core/src/le_stream.rs`)
 
 - Before the stream is set up, `le_mic_target(headset_mic, mic_output,
-  source)` resolves the output and runs the feedback-loop check: no output
-  device (`status.headset_mic_output_failed`) or a conflict
-  (`error.headset_mic_loop`) streams without the microphone (no
-  conversational configuration asked for) and shows that message as the
+  source)` resolves the output and runs the feedback-loop check: with no
+  output device (`status.headset_mic_output_failed`) or a conflict
+  (`error.headset_mic_loop`), the stream runs without the microphone (no
+  conversational configuration is requested) and shows that message as the
   Streaming status.
 - After each (re)start, `start_mic` opens the output at the microphone's
   rate (`MicTarget::nth`: a stream set up again writes `x-2.wav`, ...) and
   starts the le-decode thread into it; the session reports
   `VoiceStatus { codec: "lc3", link: "le", rate, mic_device_id }` and None
   when the microphone stops (link loss, session end). An output that does
-  not open, or a render device that goes away later, stops only the
-  microphone (`status.headset_mic_output_failed`); the stream goes on.
-- Stopping: the decode thread first (what arrived is decoded), then the
-  output (a WAV file is finished).
+  not open, or a render device that goes away later, stops only the microphone
+  (`status.headset_mic_output_failed`); the stream continues.
+- Stopping: the decode thread first (so everything received is decoded), then
+  the output (so a WAV file is finalized).
 - The CLI's LE flow (`cli.rs` `le_run`) uses the same `le_mic_target` /
   `start_mic` and prints "Microphone: LC3 at N Hz -> <target>".
 
@@ -662,7 +675,7 @@ for both speeds.
 HFP: `emu_sink.py --hfp [cvsd|msbc|lc3swb]` adds an HF role (`hfp_audio.py`:
 `HfpEmuController`, `HfSide`; Bumble `HfProtocol`, HF SDP record, codec
 list), accepts the AG's audio connection, sinks SCO and sends a 1.5 kHz
-tone back (mSBC / LC3-SWB: four frames of it from BlueCaster's own encoders,
+tone back (for mSBC / LC3-SWB, four frames of that tone from BlueCaster's own encoders,
 `tools/emu/voice_frames.py`, generated by `cargo run -p voice-link --example
 emu_voice_frames`, checked by `voice-link/tests/emu_frames.rs`).
 
@@ -689,7 +702,7 @@ runs `--headset-mic --mic-output <out>/mic.wav` and checks the negotiated
 codec in both logs, SCO both ways in both captures, "Voice: <codec> at
 <rate> Hz" in BlueCaster's output, the sink's verdict on what BlueCaster
 sent (cvsd: the test tone mixed to mono in 90 % of the 20 ms blocks of the
-last 3 s; msbc / lc3swb: H2 frames in sequence), and that mic.wav holds the
+last 3 s; msbc / lc3swb: H2 frames in sequence), and that mic.wav contains the
 HF's 1.5 kHz tone. `cvsd-roundtrip` runs `--headset-mic-toggle 3,6` and
 also checks "voice: A2DP resumed", A2DP media for at least 2 s after the
 last SCO packet and the test tone in the last second the sink decoded.
@@ -719,7 +732,7 @@ control (a late capture block every 250 ms needs no step after priming).
 - `--le-audio`: 44/44 (41 in the full run, `mcp-control`,
   `mcp-unsupported`, `gmap-media-context` failed with late SDUs only on
   the playback path under load and passed on their retry). The `mic-*`
-  cases write through voice-link's `WavSink` now: 515 SDUs from the
+  cases now write through voice-link's `WavSink`: 515 SDUs from the
   headset, mic.wav 5.11 s with the 1 kHz tone, no gaps.
 - default codec set: 90/90 (88 in the full run; `oppo-hi-res-on` and
   `oppo-drop` showed RTP timestamp steps once and passed on their retry);
@@ -768,7 +781,7 @@ The first real run, with `bluecaster-core --cli -u 2357:0604 -d <XM4> -c sbc
   recording starting (mSBC, open in 89 / 71 ms), went back to A2DP 2.3 s
   after it ended, twice in a row; A2DP resumed at SBC 357 kbps each time.
 
-Two fixes came out of it:
+The run led to two fixes:
 
 1. **The codec negotiation raced the headphones' own commands.** Right
    after the service level connection the XM4 sends `AT+NREC=0`,
@@ -782,12 +795,36 @@ Two fixes came out of it:
    (1 s) old **and** no HFP event came for `HF_QUIET` (500 ms); the core
    waits for the next tick. The `AT+IPHONEACCEV` after `+XAPL` still gets
    an `ERROR` (as in beta.3: BTstack's answer to XAPL keeps OK pending);
-   the XM4 repeats its battery level later.
+   the XM4 sends its battery level again later.
 2. **SetCurrentAlternateSetting answered ERROR_BUSY (170) once** when the
    SCO came up 4 s into A2DP streaming (`run8.log`; an HCI command, a
    control transfer on the same device, was probably in flight).
-   `select_alt` tries up to 10 times 10 ms apart (`SCO_ALT_TRIES`,
-   `SCO_ALT_RETRY`); the next runs did not hit it.
+   `select_alt` now tries up to 10 times, 10 ms apart (`SCO_ALT_TRIES`,
+   `SCO_ALT_RETRY`); later runs did not hit the error.
+
+### The first second of the microphone (2026-11-13, issue #86)
+
+"Switching is fast, but right after it the microphone does not come
+through for about a second." Measured with Auto, UB500 + WH-1000XM4, mSBC,
+recording CABLE Output with the `level_capture` win-sys example (the level of
+each 50 ms) and the link-down summary's `first sound after ...` (the decoder's
+first non-zero sample, and the packets by HCI status until then), over 3
+cycles with identical results:
+
+| From the recording's start | What |
+|---|---|
+| ~0.15 s | Auto detects it (session tick; ~0.06 s with the watcher added since) |
+| ~0.26 s | eSCO up, microphone rendered to the cable |
+| +0.54 s | ~180 packets with status 2 (no data received): the headphones send nothing |
+| +0.27 s | ~90 good packets of digital silence |
+| ~1.1–1.2 s | the microphone's sound reaches the cable |
+
+About 0.8 s of this is the headphones' microphone starting up after the audio
+connection opens; BlueCaster's share (detection, link, render) is about 0.25 s.
+Neither "call active" (`+CIEV: 2,1` before the audio connection) nor
+voice recognition (`+BVRA: 1`) made them start sooner: the same ~180-210
+packets of status 2 and ~0.27 s of silence, 3 cycles each (tried with a
+temporary result-code call in the shim, not kept).
 
 ## Not verified / hardware checklist
 
@@ -799,21 +836,21 @@ Still open, in this order:
 HCI init (every user, `ENABLE_SCO_OVER_HCI` is compiled in):
 
 0. The user's adapters still initialize and stream A2DP, each **without**
-   developer headset mode (SCO hidden: the init must be the one of
-   3.0.0-beta.3, no Write Synchronous Flow Control Enable / Write Default
-   Erroneous Data Reporting in the HCI capture) and **with** it (both
+   developer headset mode (SCO hidden: the init must match 3.0.0-beta.3,
+   no Write Synchronous Flow Control Enable / Write Default Erroneous Data
+   Reporting in the HCI capture) and **with** it (both
    commands sent if listed; a Command Complete with an error is fine, a
    controller that does not answer stalls init): RTL8761BU, Intel,
    MediaTek. A Broadcom adapter gets BCM Write SCO PCM Int (0xFC1C) in
-   both cases: check one still initializes. Headphones that open an
+   both cases: check that one still initializes. Headphones that open an
    audio connection themselves (a voice assistant button) with headset mode
-   off: BlueCaster does not close it (logs "left alone" once), the button
-   works as with 3.0.0-beta.3.
+   off: BlueCaster does not close the connection (it logs "left alone" once),
+   and the button works as in 3.0.0-beta.3.
 
 USB SCO (`hci-transport/src/usb.rs`):
 
 1. Interface 1 can be claimed (debug line "interface 1 claimed for SCO");
-   adapters whose WinUSB sits on a usbccgp child are unknown.
+   adapters with WinUSB on a usbccgp child are untested.
 2. SetCurrentAlternateSetting(1/2) and RegisterIsochBuffer after it succeed
    ("USB: SCO on interface 1 alt N" with the pipe sizes); WinUSB's
    MaximumBytesPerInterval is 9 / 17.
@@ -831,10 +868,10 @@ USB SCO (`hci-transport/src/usb.rs`):
    (WinUSB may reject writes that are not whole frames).
 7. Unplug during SCO ends the thread cleanly.
 8. The controller's SCO buffer length ("controller buffers: ... SCO N x L
-   bytes" debug line): L >= 48 for CVSD, >= 24 for mSBC / LC3-SWB, or
-   headset mode is refused / the link given up (`NO_SCO_PATH`) instead of
+   bytes" debug line): L >= 48 for CVSD, >= 24 for mSBC / LC3-SWB, otherwise
+   headset mode is refused / the link is given up (`NO_SCO_PATH`) instead of
    BTstack's H2 assert aborting the process.
-9. Latency of the 20-slot OUT ring (60 ms); lower `SCO_OUT_SLOTS` if too
+9. Latency of the 20-slot OUT ring (60 ms); lower `SCO_OUT_SLOTS` if it is too
    high.
 10. Whether controllers align SCO IN to 3-packet boundaries (how fast the
     reassembly recovers after a lost packet).
@@ -859,7 +896,7 @@ Render and capture (both paths):
 15. The feedback-loop refusal with the cable captured (Virtual Device
     source) and with System Loopback while the cable is the default output.
 16. The render device removed while in use (the classic session goes back
-    to A2DP, the LE stream plays on without the microphone, both with
+    to A2DP, the LE stream continues without the microphone, both with
     `status.headset_mic_output_failed`).
 17. The uplink capture of every source kind at 8 / 16 / 32 kHz (Windows'
     conversion).
@@ -883,31 +920,31 @@ UI:
   1, one mSBC link); high speed adapters, CVSD (alt 2 / 48-byte packets),
   two links and the Intel / MediaTek loaders with voice are not.
 - The AG opens HFP audio with `hfp_ag_establish_audio_connection` and no
-  call state; the WH-1000XM4 accepts it silently, other headphones may
-  refuse or show a call UI, and would need a call state from the AG.
+  call state; the WH-1000XM4 accepts it silently, other headphones may refuse
+  or show a call UI, and those would need a call state from the AG.
 - The LE conversational stream does not follow CCP's call state.
-- An LE headset's clock is absorbed only by the renderer's drift control
-  (the le-decode thread has no clock of its own); a WAV file has no drift
-  control at all (it records what arrives).
+- An LE headset's clock difference is absorbed only by the renderer's drift
+  control (the le-decode thread has no clock); a WAV file has no drift control
+  at all (it records whatever arrives).
 
 ## UI: Off / Auto / On and the mute chip
 
 - Audio Devices, each device's Input Source (`components/InputSource.tsx`,
-  issue #86 round 35; it was on Codecs): a `Segmented` Off / Auto / On on
+  issue #86 round 35; previously on Codecs): a `Segmented` Off / Auto / On on
   the right of its label saves `headset_mic` (and `mic_muted: false`); the
-  picker below is always there (disabled for Off) so switching moves
-  nothing. It names each render endpoint by its paired capture endpoint
+  picker below is always shown (disabled for Off), so switching does not shift
+  the layout. It names each render endpoint by its paired capture endpoint
   (`AudioDevice.capture_name`, `audio_policy::paired_capture_names`: "CABLE
-  Output"), lists only virtual ones with a capture side and not the 16-ch
-  cable outside developer mode, and disables the output source's own
-  device (the loop). A classic device without a profile shows Auto with
-  VB-CABLE, what the core's `default_mic_output` gives a new profile.
+  Output"), lists only virtual endpoints with a capture side (not the 16-ch
+  cable outside developer mode), and disables the output source's own device
+  (to prevent a loop). A classic device without a profile shows Auto with
+  VB-CABLE, which is what the core's `default_mic_output` assigns to a new profile.
 - Home's device card and the flyout's state line (`HeadsetChip` in
-  `screens/Home.tsx`): a mute toggle, for a profile with `mic_device_id`
-  and Auto / On, an icon alone of one size (round 35: its text made the
-  card jump). Accent outline, or `mic_off` while muted; a click saves
+  `screens/Home.tsx`): a mute toggle for a profile with `mic_device_id` and
+  Auto / On, shown as an icon only, at a fixed size (round 35: its text made
+  the card jump). Accent outline, or `mic_off` while muted; a click saves
   `mic_muted`. Dashed while Auto has no voice link (`waiting`), `linked`
-  while `StreamStatus.voice` is up for that profile, its tooltip then
+  while `StreamStatus.voice` is up for that profile, with its tooltip then
   naming the voice codec (`CodecBadge voice={false}` there; the sidebar
   keeps `VoiceCodec`). A stream message in `MIC_NOTES` (loop, refused,
   output failed) shows as `warn` with the text as tooltip, and
@@ -915,17 +952,17 @@ UI:
   to A2DP quality) through the same `headset_change` path as Off.
 - Both save through `saveHeadsetMic` (`screens/Codecs.tsx`), i.e.
   `profile.save` of the device's profile. The mock opens no voice link for
-  Auto (no app records from the cable there).
+  Auto (no app records from the cable in the mock).
 - Keys: `capture.input_source`, `ui.headset_mic_off` / `_auto` / `_on`,
   `ui.mic_output` (the picker's name),
   `ui.headset_mic_mute` / `_unmute` (the chip's name and tooltip).
 
 ## Volume on the voice link (bt-host `app.rs`, `voice.rs`)
 
-Headphones play the voice link at their HFP speaker gain (0..15), which the
-AVRCP absolute volume of A2DP does not reach: before this, a classic device
-played the call link at whatever gain it last had (often low), and the
-volume keys did nothing to it. Now, while an audio connection is open
+Headphones play the voice link at their HFP speaker gain (0..15), which A2DP's
+AVRCP absolute volume does not affect: before this change, a classic device
+played the call link at whatever gain it last had (often low), and the volume
+keys had no effect on it. Now, while an audio connection is open
 (`Voice::audio_acl`):
 
 - `HostApp::sync_speaker_gain` sends `+VGS` (`hfp_ag_set_speaker_gain`,
@@ -935,13 +972,13 @@ volume keys did nothing to it. Now, while an audio connection is open
   through volume sync) and on every AVRCP volume change. The mapping is
   `voice::speaker_gain` (0..127 to 0..15, rounded) and back
   `voice::gain_volume`; one round trip gives the same gain (unit test).
-  BTstack sends `+VGS` only when the gain differs from the last one either
-  side gave.
+  BTstack sends `+VGS` only when the gain differs from the last gain either
+  side sent.
 - `AT+VGS` from the headphones (`HFP_SUBEVENT_SPEAKER_VOLUME`, their
-  buttons) becomes the volume: `controls.volume`, `HostEvent::Volume`
+  buttons) sets the volume: `controls.volume`, `HostEvent::Volume`
   (Windows follows through volume sync) and an AVRCP absolute volume, so
-  A2DP comes back at the same level. A gain that matches the current volume
-  already is ignored; one without an audio connection only logged (the
+  A2DP comes back at the same level. A gain that already matches the current
+  volume is ignored; one received without an audio connection is only logged (the
   XM4 sends one right after the service level connection).
 
 Not verified on hardware yet: whether a device applies `+VGS` while it
@@ -955,45 +992,45 @@ mix is what loopback captures. BlueCaster does not change that setting.
 
 ## Microphone test (Diagnostics > Microphone)
 
-Records up to 10 s (`mic_test::MAX_MS`) of the headset microphone of the
-classic stream and plays it back to the headphones.
+Records up to 10 s (`mic_test::MAX_MS`) from the classic stream's headset
+microphone and plays it back to the headphones.
 
 - **IPC** (`ipc::Method`): `mic_test.record` / `stop` / `play` / `status`
   -> `MicTestState { phase, level, recorded_ms, max_ms, played_ms, error }`,
   `mic_test.end` -> null. `phase`: idle, starting (the voice link opens),
   recording, recorded, playing. `level` is the peak (0..1) since the last
-  answer: the microphone, or the recording while it plays. Errors of
+  response: of the microphone, or of the recording during playback. Errors of
   `record`: `mic_test.not_streaming`, `mic_test.le_audio` (keys
-  `error.mic_test_*`). `error` carries why a running test ended (the same
+  `error.mic_test_*`). `error` gives the reason a running test ended (the same
   status keys as headset mode: `status.headset_mic_failed`, ...).
 - **Core** (`crates/core/src/mic_test.rs`, `MicTest` in `Inner`): the phase
   machine; `wanted()` makes the classic session's `HeadsetMode` hold the
   voice link (`wanted() = mode_wanted() || test`). Without headset mode the
   link opens to `MicTarget::Test` (`MicOutput::Test`: a queue nobody reads,
-  no render device); with it, to its own output as always. A test link that
-  headset mode then wants switches to the mode's output
+  no render device); with it, to its own output as always. If headset mode
+  then wants the test link, the link switches to the mode's output
   (`change_output`). Every tick reports `link_up(rate)` / `link_down`; the
   first `link_up` while starting begins the recording; a link lost while
   recording, recorded or playing ends the test with an error. `give_up` and
   `leave` with a message also end it (`MicTest::fail`).
 - A stack without voice: `Service::mic_test_record` answers `Ok(true)`,
-  `MicTest::needs_voice` makes `host_config` / `ensure_host` give the next
-  stack voice, and `state.rs` restarts the profile in use (the test waits
-  in starting, up to 45 s). After the test the running stack keeps voice,
-  the next one goes without.
-- **Keepalive**: the window asks `mic_test.status` every 70 ms while a test
-  runs; a test nobody asked about for 5 s ends (window closed). The tab
+  `MicTest::needs_voice` makes `host_config` / `ensure_host` start the next
+  stack with voice, and `state.rs` restarts the profile in use (the test waits
+  in the starting phase for up to 45 s). After the test, the running stack
+  keeps voice; the next one starts without it.
+- **Keepalive**: the window polls `mic_test.status` every 70 ms while a test
+  runs; a test that is not polled for 5 s ends (the window was closed). The tab
   sends `mic_test.end` when it closes.
 - **Tap** (`voice_link::MicTap`): `PcmProducer::set_tap` feeds it every
   decoded microphone sample (atomic peak, recording `try_lock`ed so the
   BTstack thread never waits); `UplinkConsumer::set_tap` lets a playback
   replace the uplink's samples after the capture's own pop (its queue stays
   primed). The playback is mono at the voice rate, so it plays at call
-  quality, as the headphones would hear a call.
+  quality, just as a call would sound on the headphones.
 - **UI** (`screens/diagnostics/MicPanel.tsx`): Record / Stop, Play / Stop,
   a 48-segment bar on a dB scale (floor -54 dBFS, peak hold), accent while
-  recording, green while playing; `quality.not_streaming` and Record
-  disabled without a stream. The mock simulates the phases
+  recording, green while playing; without a stream, `quality.not_streaming`
+  shows and Record is disabled. The mock simulates the phases
   (`MockCore.micState`).
 - **Not covered**: LE Audio entries (their microphone path would need its
   own tap and a playback into the LC3 encoder); the emulator run of the

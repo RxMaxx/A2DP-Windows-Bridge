@@ -101,7 +101,7 @@ Up to 2.0.x the app was A2DP Windows Bridge (A2DPWB). BlueCaster 3.0.0 has a new
 Inno Setup AppId (`{C7A109ED-…}`), a new folder and a new Apps entry; the setup uninstalls the
 earlier versions first, and the app takes their settings over at its first start.
 
-- Installs for the current user (no administrator rights), in 8 languages, into
+- Installs for the current user (no administrator rights), in 10 languages, into
   `%LOCALAPPDATA%\BlueCaster`, with the WebView2 bootstrapper embedded (it runs only
   where WebView2 is missing). Every run writes a log, `%TEMP%\Setup Log <date> #<n>.txt`.
 - A new installation asks for the language (preselected from the one chosen for 2.0.x, else from
@@ -167,10 +167,15 @@ earlier versions first, and the app takes their settings over at its first start
       {87459874-1236-4469}`, normally `C:\Program Files\VB\CABLE\VBCABLE_Setup_x64.exe`) with
       `-u -h` (the counterpart of `-i -h`, which the app installs it with). Removed = that entry
       has gone.
-    - Hi-Fi Cable (installed when `%WINDIR%\System32\drivers\vbaudio_hfvaio*.sys` exists): its own
-      setup (`VB:VBHIFI` entry, else `C:\Program Files\VB\CABLEHiFi\VBCABLE_Setup_x64.exe`, else
-      the copy in ASIO Bridge's folder) with `-h -u -H`, the arguments ASIO Bridge's setup removes
-      it with. Removed = the driver file has gone. ASIO Bridge itself and its Apps entry stay.
+    - Hi-Fi Cable (installed when `%WINDIR%\System32\drivers\vbaudio_hfvaio*.sys` exists): the
+      setup of the package it came in (ASIO Bridge's Uninstall entry, 32-bit view:
+      `HiFiCableAsioBridgeSetup.exe`) with `-r -h -u`, which removes the cable, ASIO Bridge and
+      their Apps entries, as uninstalling "ASIO Bridge and Hi-Fi Cable" in Windows does. Without
+      that entry, the cable's own setup (`VB:VBHIFI` entry, else
+      `C:\Program Files\VB\CABLEHiFi\VBCABLE_Setup_x64.exe`) with `-h -u -H`, the arguments ASIO
+      Bridge's setup removes it with. Removed = the driver file has gone. The cable's own setup
+      leaves its Apps entry (`VB:VBHIFI`), which then only opens the setup again: the helper
+      deletes it once the driver file has gone.
 
     When one is still there afterwards, the uninstaller says so (close the apps using it, remove it
     in Settings > Apps, restart). After a removal it offers to restart Windows, as VB-Audio's setup

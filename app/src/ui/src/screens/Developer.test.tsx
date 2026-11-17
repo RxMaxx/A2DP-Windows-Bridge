@@ -446,7 +446,7 @@ describe("chip tools", () => {
     fireEvent.input(box, { target: { value: "hci fc00 01\n" } });
     expect(
       await screen.findByText(
-        "These lines could change the chip for good and never run",
+        "These lines could permanently change the chip and will not run",
       ),
     ).toBeInTheDocument();
     expect(run).toBeDisabled();

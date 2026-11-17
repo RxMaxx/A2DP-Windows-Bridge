@@ -497,6 +497,11 @@ impl Inner {
     }
 
     /// Sleeps up to `d`, returning early on a stop
+    /// Ends a session's [`Inner::wait_tick`] now
+    pub(crate) fn wake_tick(&self) {
+        self.tick.1.notify_all();
+    }
+
     pub fn wait_tick(&self, d: Duration) {
         let guard = self.tick.0.lock().unwrap_or_else(|e| e.into_inner());
         if !self.stop_requested() {
@@ -1805,6 +1810,7 @@ impl Service {
         } else {
             (Vec::new(), Vec::new())
         };
+        let saved = crate::devices::load(&self.inner.opts.config_dir);
         self.inner.notify(StreamState::Idle, Msg::new("status.scanning_devices"));
         let classic = host.scan_with(seconds, &mut |found| {
             let mut list: Vec<ScannedDevice> = found.iter().map(ScannedDevice::classic).collect();
@@ -1813,11 +1819,17 @@ impl Service {
                 let known: Vec<(String, String)> = list
                     .iter()
                     .map(|d| (d.address.clone(), d.name.clone()))
+                    .chain(saved.iter().map(|d| (d.address.clone(), d.name.clone())))
                     .chain(saved_le.iter().map(|d| (d.address.clone(), d.name.clone())))
                     .collect();
                 fill_le_names(&mut le, &known);
                 list.extend(le);
             }
+            // A device is listed once its name is known: most follow within
+            // seconds (name request, scan response), and "Unknown" turning
+            // into the name looked like a second device (issue #86). Those
+            // still nameless are in the scan's result.
+            list.retain(|d| !d.name.trim().is_empty());
             on_found(&list);
         });
         let mut list: Vec<ScannedDevice> = classic.iter().map(ScannedDevice::classic).collect();
@@ -1861,11 +1873,10 @@ impl Service {
             );
             // A classic device's LE side without an LE Audio service: what
             // tells "LE Audio is off on the device" from a missed one
-            let saved = crate::devices::load(&self.inner.opts.config_dir);
             let known: Vec<(String, String)> = list
                 .iter()
                 .map(|d| (d.address.clone(), d.name.clone()))
-                .chain(saved.into_iter().map(|d| (d.address, d.name)))
+                .chain(saved.iter().map(|d| (d.address.clone(), d.name.clone())))
                 .chain(saved_le.iter().map(|d| (d.address.clone(), d.name.clone())))
                 .collect();
             fill_le_names(&mut entries, &known);

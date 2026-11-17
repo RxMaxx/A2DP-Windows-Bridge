@@ -775,7 +775,7 @@ describe("setup device step", () => {
     expect(core.state.snap!.settings).toMatchObject({ start_with_windows: true, start_minimized: true });
   });
 
-  it("without VB-Cable a new device captures System Loopback, and the step says why it is wanted (issue #86)", async () => {
+  it("without VB-Cable a new device captures the monitor's audio, its microphone off on the sound card, and the step says why a cable is wanted (issue #86)", async () => {
     const { calls, core, mock: m } = start("#/setup");
     m.noVirtual = true;
     await screen.findByRole("heading", { level: 1, name: "Setup Wizard" });
@@ -786,13 +786,16 @@ describe("setup device step", () => {
     }
     expect(await screen.findByText(t("cables.recommended"))).toBeInTheDocument();
     await connectNew(calls, "Galaxy Buds2 Pro");
-    expect(core.state.snap!.profiles.find((p) => p.name === "Galaxy Buds2 Pro | Auto")).toMatchObject({
-      capture_mode: "loopback",
-      audio_device_id: "",
+    const made = core.state.snap!.profiles.find((p) => p.name === "Galaxy Buds2 Pro | Auto")!;
+    expect(made).toMatchObject({
+      capture_mode: "output",
+      audio_device_name: "M28U (NVIDIA High Definition Audio)",
+      headset_mic: "off",
     });
+    expect(made.mic_device_name).toMatch(/^Speakers/);
   });
 
-  it("scans until a device is added, then lists it no more; VB-Cable captures it (issue #86)", async () => {
+  it("scans until a device is added, then lists it no more; VB-Cable takes its microphone (issue #86)", async () => {
     const { calls, core } = await toDeviceStep({ scenario: "normal" });
     await waitFor(() => expect(calls.some((c) => c.method === "audio.devices")).toBe(true));
     expect(screen.queryByText(t("cables.recommended"))).toBeNull();
@@ -809,14 +812,16 @@ describe("setup device step", () => {
     const scans = calls.filter((c) => c.method === "device.scan").length;
     await new Promise((r) => setTimeout(r, 50));
     expect(calls.filter((c) => c.method === "device.scan").length).toBe(scans);
+    // One cable: the microphone; the sound from the monitor's audio
     expect(core.state.snap!.profiles.find((p) => p.name === "Galaxy Buds2 Pro | Auto")).toMatchObject({
-      capture_mode: "virtual",
-      audio_device_name: "CABLE Input (VB-Audio Virtual Cable)",
-      auto_switch_device: true,
+      capture_mode: "output",
+      audio_device_name: "M28U (NVIDIA High Definition Audio)",
+      headset_mic: "auto",
+      mic_device_name: "CABLE Input (VB-Audio Virtual Cable)",
     });
   });
 
-  it("captures the Hi-Fi Cable for a new device where it is installed", async () => {
+  it("captures the Hi-Fi Cable for a new device where it is installed, VB-Cable taking the microphone", async () => {
     const { calls, core, mock: m } = start("#/setup");
     m.hifiCable = true;
     await screen.findByRole("heading", { level: 1, name: "Setup Wizard" });
@@ -831,6 +836,28 @@ describe("setup device step", () => {
     expect(core.state.snap!.profiles.find((p) => p.name === "Galaxy Buds2 Pro | Auto")).toMatchObject({
       capture_mode: "virtual",
       audio_device_name: "Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)",
+      auto_switch_device: true,
+      headset_mic: "auto",
+      mic_device_name: "CABLE Input (VB-Audio Virtual Cable)",
+    });
+  });
+
+  it("VB-Cable as Windows' default output: the sound from the monitor's audio all the same, VB-Cable the microphone (issue #86)", async () => {
+    const { calls, core, mock: m } = start("#/setup");
+    m.defaultOutput = "{0.0.0.00000000}.{cable}";
+    await screen.findByRole("heading", { level: 1, name: "Setup Wizard" });
+    for (let i = 0; i < 2; i++) {
+      const next = screen.getByRole("button", { name: "Next" });
+      await waitFor(() => expect(next).not.toBeDisabled());
+      fireEvent.click(next);
+    }
+    await connectNew(calls, "Galaxy Buds2 Pro");
+    expect(core.state.snap!.profiles.find((p) => p.name === "Galaxy Buds2 Pro | Auto")).toMatchObject({
+      capture_mode: "output",
+      audio_device_name: "M28U (NVIDIA High Definition Audio)",
+      auto_switch_device: true,
+      headset_mic: "auto",
+      mic_device_name: "CABLE Input (VB-Audio Virtual Cable)",
     });
   });
 });

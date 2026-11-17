@@ -122,7 +122,13 @@ fn main() -> Result<(), CaptureError> {
             "  {}{} {}  [{}]
       mix rate {:?}, loopback format {:?}, recording side {:?} at {:?} Hz",
             if d.is_default { "*" } else { " " },
-            if d.is_virtual { "v" } else { " " },
+            if d.is_virtual {
+                "v"
+            } else if d.is_display {
+                "d"
+            } else {
+                " "
+            },
             d.name,
             d.id,
             audio_capture::mix_rate(Some(&d.id)),

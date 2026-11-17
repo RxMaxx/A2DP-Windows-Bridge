@@ -382,7 +382,60 @@ export function ownDefaultOutput(
   const id = devices.find((d) => d.is_default)?.id ?? "";
   const running = ["connecting", "streaming", "reconnecting"].includes(snap.stream.state);
   const streaming = running ? snap.profiles.find((p) => p.name === snap.stream.profile) : undefined;
-  return id && streaming?.capture_mode === "virtual" && streaming.audio_device_id === id ? "" : id;
+  const switches = streaming?.capture_mode === "virtual" || streaming?.capture_mode === "output";
+  return id && switches && streaming?.audio_device_id === id ? "" : id;
+}
+
+/**
+ * The real output the sound is captured from beside the one cable, which
+ * is the microphone's (issue #86): a monitor's or TV's audio (nothing plays
+ * aloud beside the headphones on most; of several, the one that is Windows'
+ * default output), else Windows' default output, else the first, virtual
+ * devices aside. As the core's real_output.
+ */
+export function realOutput(devices: readonly AudioDevice[]): AudioDevice | null {
+  const real = devices.filter((d) => !d.is_virtual);
+  const display = real.filter((d) => d.is_display);
+  return display.find((d) => d.is_default) ?? display[0] ?? real.find((d) => d.is_default) ?? real[0] ?? null;
+}
+
+/** The sound card the microphone plays into where there is no cable: an
+ *  output that is neither a display's nor virtual, Windows' default output
+ *  before the first. As the core's sound_card. */
+export function soundCard(devices: readonly AudioDevice[]): AudioDevice | null {
+  const cards = devices.filter((d) => !d.is_virtual && !d.is_display);
+  return cards.find((d) => d.is_default) ?? cards[0] ?? null;
+}
+
+/**
+ * What a new device gets (issue #86): neither left empty where a cable
+ * allows, and the same whatever Windows' default output is (the source is
+ * made the default while the device is connected). Both cables: the Hi-Fi
+ * Cable for the sound, VB-Cable for the microphone. One: the microphone,
+ * and the sound a real output ([realOutput]), or the cable itself with no
+ * microphone where there is none. None: a monitor's or TV's audio for the
+ * sound and the sound card for the microphone (turned off: Auto cannot tell
+ * who listens to a sound card) where Windows has both. As the core's
+ * Cables::sound_for and Bare.
+ * `sound`: a cable captured as a virtual device, a real output as an
+ * Output Device; `null`: System Loopback / no microphone.
+ */
+export interface SetupAudio {
+  sound: AudioDevice | null;
+  mic: AudioDevice | null;
+}
+
+export function setupAudio(devices: readonly AudioDevice[]): SetupAudio {
+  const hifi = hifiCable(devices);
+  const vb = vbCable(devices.filter((d) => !multichannelCable(d)));
+  if (hifi && vb) return { sound: hifi, mic: vb };
+  const cable = hifi ?? vb;
+  const real = realOutput(devices);
+  if (!cable) {
+    const card = soundCard(devices);
+    return real?.is_display && card ? { sound: real, mic: card } : { sound: null, mic: null };
+  }
+  return real ? { sound: real, mic: cable } : { sound: cable, mic: null };
 }
 
 /** A 16-channel cable ("CABLE In 16ch"): no use as a source or a

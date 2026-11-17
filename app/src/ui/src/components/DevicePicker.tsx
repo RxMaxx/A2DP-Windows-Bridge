@@ -11,7 +11,7 @@
 import { createEffect, createMemo, createSignal, createUniqueId, For, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { useApp, type AppContext } from "../app/context";
 import { t } from "../i18n";
-import type { AudioDevice, Device } from "../ipc/types";
+import type { Device } from "../ipc/types";
 import { parseAddress } from "../lib/format";
 import {
   defaultProfileName,
@@ -22,8 +22,10 @@ import {
   listedDevices,
   newProfile,
   normalizeProfile,
+  setupAudio,
   twinOf,
   validDeviceName,
+  type SetupAudio,
 } from "../lib/profile";
 import { Button, Dialog, Field, IconButton } from "./controls";
 import { Icon } from "./Icon";
@@ -59,14 +61,15 @@ function freeName(app: AppContext, base: string): string {
  * A dual-mode device is saved with both sides, each with its profile
  * (issue #86: one device, one Add; "Use LE Audio when available" decides
  * which connects). The profile of the side added, or null when saving
- * failed. `cable`: a new classic profile captures that virtual device.
+ * failed. `audio`: the source and microphone for a new classic profile
+ * ([setupAudio]).
  */
 export async function saveWithProfile(
   app: AppContext,
   address: string,
   name: string,
   leAudio: boolean,
-  cable?: AudioDevice | null,
+  audio?: SetupAudio | null,
 ): Promise<string | null> {
   const snap = () => app.core.state.snap!;
   const twin = twinOf(snap().devices, { address, le_audio: leAudio });
@@ -78,7 +81,7 @@ export async function saveWithProfile(
     savedAs(le)?.name === saved ||
     (await app.run(() => app.core.request("device.rename", { address, name: saved, ...(le ? { le_audio: true } : {}) })));
   if (!(await save(leAudio)) || (twin && !(await save(!leAudio)))) return null;
-  const classic = !leAudio || twin ? await classicProfile(app, address, saved, cable) : null;
+  const classic = !leAudio || twin ? await classicProfile(app, address, saved, audio) : null;
   if (!leAudio) return classic;
   // The LE Audio side's own, with the device settings of the classic one
   const own = deviceProfile(snap(), address, true);
@@ -95,15 +98,34 @@ async function classicProfile(
   app: AppContext,
   address: string,
   saved: string,
-  cable?: AudioDevice | null,
+  audio?: SetupAudio | null,
 ): Promise<string | null> {
   const own = deviceProfile(app.core.state.snap!, address, false);
   if (own) return own.name;
   const profileName = freeName(app, defaultProfileName(saved, address, false, t("codec.auto")));
   // Captured by System Loopback, as every new device (issue #86), unless
-  // the setup found a virtual cable
-  const capture = cable ? { capture_mode: "virtual", audio_device_id: cable.id, audio_device_name: cable.name } : {};
-  const profile = normalizeProfile({ ...newProfile(), ...capture, name: profileName, device_address: address, device_name: saved });
+  // the setup gives it a cable or an output; its microphone on Auto where
+  // it gives a cable, off on a sound card
+  const sound = audio?.sound;
+  const mic = audio?.mic;
+  const capture = sound
+    ? {
+        capture_mode: sound.is_virtual ? "virtual" : "output",
+        audio_device_id: sound.id,
+        audio_device_name: sound.name,
+      }
+    : {};
+  const headset = mic
+    ? { headset_mic: mic.is_virtual ? "auto" : "off", mic_device_id: mic.id, mic_device_name: mic.name }
+    : {};
+  const profile = normalizeProfile({
+    ...newProfile(),
+    ...capture,
+    ...headset,
+    name: profileName,
+    device_address: address,
+    device_name: saved,
+  });
   const made = await app.run(() => app.core.request("profile.save", { profile, original_name: null }));
   return made ? profileName : null;
 }
@@ -268,7 +290,9 @@ export function DevicePicker(props: {
     if (busy()) return;
     setBusy(true);
     const had = snap().profiles.some((p) => p.device_address.toUpperCase() === address.toUpperCase());
-    const profileName = await saveWithProfile(app, address, name, leAudio);
+    // Its source and microphone as the first-run setup gives them (issue #86)
+    const audio = had ? null : await app.core.request("audio.devices").then(setupAudio, () => null);
+    const profileName = await saveWithProfile(app, address, name, leAudio, audio);
     const state = snap().stream.state;
     if (profileName && !had && !app.setupActive() && (state === "idle" || state === "error")) {
       await app.run(() => app.core.request("stream.start", { profile: profileName }));

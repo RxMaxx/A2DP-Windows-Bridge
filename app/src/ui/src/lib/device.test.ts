@@ -39,6 +39,7 @@ const audio = (id: string, is_default: boolean, mix_rate: number | null, mix_bit
   name: id,
   is_default,
   is_virtual: !is_default,
+  is_display: false,
   mix_rate,
   mix_channels: 2,
   mix_bits,
@@ -53,6 +54,7 @@ describe("Windows default output's name", () => {
     short_name: short,
     adapter_name: adapter,
     is_virtual,
+    is_display: false,
   });
   const hifi = out("hifi", "Hi-Fi Cable Input", "VB-Audio Hi-Fi Cable", true);
   const cable = out("cable", "CABLE Input", "VB-Audio Virtual Cable", true);

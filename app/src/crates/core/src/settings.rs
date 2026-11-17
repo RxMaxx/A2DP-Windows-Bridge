@@ -22,7 +22,7 @@ fn v1_schema() -> u32 {
     1
 }
 /// The languages of app/lang
-pub const LANGUAGES: [&str; 8] = ["en", "ja", "de", "fr", "es", "ko", "zh-CN", "zh-TW"];
+pub const LANGUAGES: [&str; 10] = ["en", "ja", "de", "fr", "es", "ko", "zh-CN", "zh-TW", "uk", "ru"];
 
 /// One of LANGUAGES for a BCP 47 name ("ja-JP", "zh-Hant-HK", "pt-BR"):
 /// None when the app has no strings for it
@@ -520,10 +520,13 @@ impl Settings {
     /// A profile's source with the default output switch in force
     /// ([`Settings::default_device_switch`])
     pub fn source_in_force(&self, source: crate::stream::SourceRequest) -> crate::stream::SourceRequest {
-        use crate::stream::SourceRequest::VirtualDevice;
+        use crate::stream::SourceRequest::{OutputDevice, VirtualDevice};
         match source {
             VirtualDevice { id, name, auto_switch } => {
                 VirtualDevice { id, name, auto_switch: self.default_device_switch(auto_switch) }
+            }
+            OutputDevice { id, name, auto_switch } => {
+                OutputDevice { id, name, auto_switch: self.default_device_switch(auto_switch) }
             }
             other => other,
         }
@@ -562,6 +565,8 @@ mod tests {
         assert_eq!(app_language_for("zh-TW"), Some("zh-TW"));
         assert_eq!(app_language_for("zh-HK"), Some("zh-TW"));
         assert_eq!(app_language_for("zh-Hant-TW"), Some("zh-TW"));
+        assert_eq!(app_language_for("uk-UA"), Some("uk"));
+        assert_eq!(app_language_for("ru-RU"), Some("ru"));
         assert_eq!(app_language_for("pt-BR"), None);
         assert_eq!(app_language_for(""), None);
         let tags = |t: &[&str]| t.iter().map(|s| s.to_string()).collect::<Vec<_>>();
@@ -600,14 +605,18 @@ mod tests {
     fn default_device_switch_counts_only_in_developer_mode() {
         use crate::stream::SourceRequest;
         let off = || SourceRequest::VirtualDevice { id: "{x}".into(), name: "CABLE".into(), auto_switch: false };
+        let out_off =
+            || SourceRequest::OutputDevice { id: "{spk}".into(), name: "Speakers".into(), auto_switch: false };
         let mut s = Settings::default();
         assert!(s.default_device_switch(false));
         assert_eq!(s.source_in_force(off()).default_switch(), Some("{x}"));
+        assert_eq!(s.source_in_force(out_off()).default_switch(), Some("{spk}"));
         assert_eq!(s.source_in_force(SourceRequest::SystemLoopback), SourceRequest::SystemLoopback);
         s.debug_mode = true;
         assert!(!s.default_device_switch(false));
         assert!(s.default_device_switch(true));
         assert_eq!(s.source_in_force(off()), off());
+        assert_eq!(s.source_in_force(out_off()), out_off());
     }
 
     #[test]

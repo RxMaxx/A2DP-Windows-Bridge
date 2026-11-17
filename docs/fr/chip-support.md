@@ -7,9 +7,9 @@ nav_order: 3.5
 
 # Ajouter la prise en charge d'une puce
 
-BlueCaster pilote lui-même l'adaptateur Bluetooth (WinUSB) : il doit donc faire ce que fait le pilote Windows du fabricant avant que l'adaptateur fonctionne, c'est-à-dire, pour de nombreuses puces, y charger un firmware à chaque démarrage. Les adaptateurs Realtek, Intel, Broadcom et CSR fonctionnent déjà, tout comme les MediaTek MT7925, MT7927, MT7922, MT7921 et MT7902 et les Qualcomm QCA61x4, QCA9377 et WCN6855 (le MT7927, le MT7922, le MT7902 et les puces Qualcomm ne sont pas encore testés sur le matériel) ; les autres puces MediaTek (les plus anciennes) et Qualcomm (QCA6290, WCN785x) non, car personne n'a encore écrit leur chargeur. `app/src/crates/bt-host/src/mediatek.rs` (celui des MT79xx) est un vrai chargeur sur lequel s'appuyer pour une autre puce MediaTek.
+BlueCaster pilote directement l'adaptateur Bluetooth (WinUSB) : il doit donc faire lui-même ce que fait le pilote Windows du fabricant pour rendre l'adaptateur opérationnel. Pour de nombreuses puces, cela signifie charger un firmware à chaque démarrage. Les adaptateurs Realtek, Intel, Broadcom et CSR fonctionnent déjà, de même que les MediaTek MT7925, MT7927, MT7922, MT7921 et MT7902 et les Qualcomm QCA61x4, QCA9377 et WCN6855 (le MT7927, le MT7922, le MT7902 et les puces Qualcomm ne sont pas encore testés sur le matériel). Les autres puces MediaTek (plus anciennes) et Qualcomm (QCA6290, WCN785x) ne fonctionnent pas encore, car personne n'a écrit leur chargeur. Pour une autre puce MediaTek, partez du chargeur des MT79xx dans `app/src/crates/bt-host/src/mediatek.rs`.
 
-Cette page décrit la marche à suivre pour en ajouter un. Il vous faut un adaptateur équipé de cette puce ; les mainteneurs n'en ont pas. Même sans écrire de code, vous pouvez aider : les étapes 1 et 2 produisent le rapport dont un contributeur a besoin.
+Cette page explique comment ajouter un chargeur. Il vous faut un adaptateur équipé de cette puce ; les mainteneurs n'en ont pas. Même sans écrire de code, vous pouvez aider : les étapes 1 et 2 produisent le rapport dont un contributeur a besoin.
 
 {: .note }
 La conception qui sous-tend tout cela, et ce qui reste ouvert, se trouvent dans la [note pour les développeurs](../chip-bringup-dev).
@@ -26,32 +26,32 @@ La conception qui sous-tend tout cela, et ce qui reste ouvert, se trouvent dans 
 
 - L'adaptateur, branché sur un PC sous Windows 10 / 11
 - BlueCaster 2.0.2 ou ultérieur (les étapes ci-dessous ne demandent que l'application)
-- Pour écrire le chargeur : un environnement de compilation comme dans [Building](building), et [USBPcap](https://desowin.org/usbpcap/) avec [Wireshark](https://www.wireshark.org/) pour enregistrer ce que fait le pilote de Windows
+- Pour écrire le chargeur : un environnement de compilation comme décrit dans [Compilation](building), et [USBPcap](https://desowin.org/usbpcap/) avec [Wireshark](https://www.wireshark.org/) pour enregistrer ce que fait le pilote de Windows
 
 ## Étape 1 : confier l'adaptateur à BlueCaster
 
 1. **Paramètres > Mode développeur** : activé
-2. **Adaptateur** : sur la carte de l'adaptateur, **Remplacer par le pilote WinUSB** (Windows demande l'autorisation de l'administrateur). Pour une puce qu'BlueCaster ne sait pas encore utiliser, ce bouton n'est actif qu'en mode développeur
+2. **Adaptateur** : sur la carte de l'adaptateur, **Remplacer par le pilote WinUSB** (Windows demande l'autorisation de l'administrateur). Pour une puce que BlueCaster ne sait pas encore utiliser, ce bouton n'est actif qu'en mode développeur
 3. Si la carte indique **Rebranchez ou redémarrez Windows**, faites-le
 
-Tant que l'adaptateur a WinUSB, le Bluetooth de Windows ne peut pas l'utiliser. Sur un portable dont le seul Bluetooth est cette puce, les claviers, souris et casques connectés via Windows cessent de fonctionner jusqu'à ce que vous remettiez le pilote : **Restaurer le pilote d'origine** sur la même carte.
+Tant que l'adaptateur utilise WinUSB, le Bluetooth de Windows ne peut pas s'en servir. Sur un portable dont le seul Bluetooth est cette puce, les claviers, souris et casques connectés via Windows cessent de fonctionner jusqu'à ce que vous restauriez le pilote avec **Restaurer le pilote d'origine**, sur la même carte.
 
 ## Étape 2 : lire ce que dit la puce (sonde de la puce)
 
-Sur la carte de l'adaptateur, partie **Firmware** : **Lire les infos de la puce**. La pile Bluetooth s'arrête un instant, la sonde s'exécute et l'Explorateur s'ouvre sur le rapport, `probe-<date>_<time>.json` dans `logs\probe\` du dossier des paramètres (`%APPDATA%\BlueCaster`). Les 10 plus récents sont conservés.
+Dans la section **Firmware** de la carte de l'adaptateur, cliquez sur **Lire les infos de la puce**. La pile Bluetooth s'arrête un instant, la sonde s'exécute, puis l'Explorateur affiche le rapport `probe-<date>_<time>.json`, dans le dossier `logs\probe\` du dossier des paramètres (`%APPDATA%\BlueCaster`). Les 10 plus récents sont conservés.
 
 La sonde ne fait que lire. Elle n'envoie ni HCI Reset ni commande constructeur :
 
 | Requête | Ce qu'elle indique |
 |:--|:--|
 | Read Local Version Information | Version HCI / LMP, le fabricant (company ID), la sous-version LMP : souvent la version de la ROM ou du firmware |
-| Read BD_ADDR | L'adresse de l'adaptateur (zéro ou une valeur provisoire sur certaines puces tant que leur firmware ne tourne pas) |
+| Read BD_ADDR | L'adresse de l'adaptateur (zéro ou une valeur provisoire sur certaines puces tant que leur firmware n'est pas lancé) |
 | Read Local Supported Commands / Features, Read Buffer Size | Ce que propose le code en cours d'exécution : une ROM propose souvent bien moins que le firmware |
-| Read Local Name | Certaines ROM donnent leur propre nom |
+| Read Local Name | Certaines ROM indiquent leur nom |
 | LE Read Local Supported Features, LE Read Buffer Size | La même chose pour LE |
 | Descripteur de périphérique USB, chaînes du fabricant et du produit | Requêtes USB standard sur le canal par défaut |
 
-Elle enregistre aussi la configuration USB que rapporte Windows (interfaces, points de terminaison) et tout événement envoyé spontanément par la puce. Une requête restée sans réponse est enregistrée elle aussi : une puce qui ne répond à rien tant que son firmware n'est pas chargé est déjà un résultat en soi.
+La sonde enregistre aussi la configuration USB indiquée par Windows (interfaces, points de terminaison) et tout événement que la puce envoie spontanément. Les requêtes restées sans réponse sont enregistrées elles aussi : une puce qui ne répond à rien tant que son firmware n'est pas chargé, c'est déjà une information.
 
 En ligne de commande, avec le VID:PID ou l'ID d'instance de l'adaptateur (la carte de l'adaptateur les affiche) :
 
@@ -59,15 +59,15 @@ En ligne de commande, avec le VID:PID ou l'ID d'instance de l'adaptateur (la car
 "%LOCALAPPDATA%\BlueCaster\bluecaster-core.exe" --cli -u 0e8d:7961 --probe
 ```
 
-Quittez d'abord BlueCaster depuis la zone de notification, car les deux ne peuvent pas utiliser l'adaptateur en même temps.
+Quittez d'abord BlueCaster depuis la zone de notification, car un seul programme à la fois peut utiliser l'adaptateur.
 
-**Envoyer un rapport** : après **Lire les infos de la puce**, la carte de l'adaptateur affiche ce qui a été lu et un bouton **Signaler sur GitHub**. Il ouvre une nouvelle issue préremplie avec la version, l'adaptateur, ce résumé et votre build de Windows, et montre le fichier du rapport dans l'Explorateur : faites-le glisser dans l'issue, et indiquez la provenance de l'adaptateur (intégré à un portable : son modèle). Le rapport contient l'adresse Bluetooth et le nom de l'adaptateur ; il ne contient rien sur votre casque. Un **Paquet de diagnostic** (écran **Diagnostic**) avec **Inclure les captures HCI** contient aussi les rapports de sonde, sous `probe/`.
+**Envoyer un rapport** : après **Lire les infos de la puce**, la carte de l'adaptateur affiche ce qui a été lu et un bouton **Signaler sur GitHub**. Ce bouton ouvre une nouvelle issue préremplie avec la version, l'adaptateur, ce résumé et votre build de Windows, et affiche le fichier du rapport dans l'Explorateur. Faites glisser le fichier dans l'issue et indiquez la provenance de l'adaptateur (pour un adaptateur intégré, le modèle du portable). Le rapport contient l'adresse Bluetooth et le nom de l'adaptateur ; il ne contient rien sur votre casque. Un **Paquet de diagnostic** (écran **Diagnostic**) avec **Inclure les captures HCI** contient aussi les rapports de sonde, sous `probe/`.
 
 ## Étape 3 : enregistrer ce que fait le pilote de Windows
 
-Une sonde montre l'état de la puce, pas comment le changer. Le pilote Windows du fabricant, lui, le sait : enregistrez-le une fois et le chargeur reproduira ce qu'il fait.
+Une sonde montre l'état de la puce, mais pas comment le modifier. Le pilote Windows du fabricant, lui, sait le faire : enregistrez ce qu'il fait une fois, et le chargeur pourra répéter les mêmes étapes.
 
-1. **Restaurer le pilote d'origine** sur la carte de l'adaptateur, pour que le pilote de Windows le prenne de nouveau en charge
+1. Cliquez sur **Restaurer le pilote d'origine** sur la carte de l'adaptateur, pour que le pilote de Windows reprenne l'adaptateur
 2. Installez USBPcap et Wireshark ; lancez Wireshark en administrateur et capturez l'interface USBPcap sur laquelle se trouve l'adaptateur. `USBPcapCMD.exe` (dans le dossier d'USBPcap) liste les périphériques de chaque concentrateur racine ; l'adaptateur intégré d'un portable se trouve sur un concentrateur interne, souvent listé seulement comme « USB Composite Device » ou par son VID:PID. En cas de doute, capturez toutes les interfaces USBPcap à la fois
 3. Faites charger le firmware par le pilote : débranchez et rebranchez l'adaptateur ; pour un adaptateur intégré, **Désactiver l'appareil** puis **Activer l'appareil** dans le Gestionnaire de périphériques. Un firmware qui survit à un redémarrage à chaud peut ne se charger qu'après un arrêt complet
 4. Arrêtez la capture dès que l'adaptateur apparaît dans les paramètres Bluetooth de Windows. Repérez le descripteur de périphérique de l'adaptateur (son VID:PID) parmi les premiers paquets, filtrez sur son adresse (`usb.bus_id == <bus> && usb.device_address == <address>`) et enregistrez la capture
@@ -75,21 +75,21 @@ Une sonde montre l'état de la puce, pas comment le changer. Le pilote Windows d
 Ce qu'il faut chercher, dans l'ordre :
 
 - Les **transferts de contrôle** avant toute commande HCI : `bmRequestType` 0x40 / 0xC0 (constructeur, OUT / IN) avec leurs `bRequest`, `wValue`, `wIndex`. Ils lisent souvent un ID de puce ou réinitialisent une partie de la puce
-- Les **commandes HCI** (requêtes de classe, `bmRequestType` 0x20) avec des opcodes de 0xFC00 à 0xFFFF : les commandes constructeur. Une longue suite du même opcode avec de gros paramètres, c'est le firmware qui est envoyé ; leurs réponses indiquent comment chaque partie est acquittée
+- Les **commandes HCI** (requêtes de classe, `bmRequestType` 0x20) avec des opcodes de 0xFC00 à 0xFFFF : les commandes constructeur. Une longue suite du même opcode avec de gros paramètres correspond à l'envoi du firmware ; les réponses montrent comment chaque partie est acquittée
 - Les **événements** autres que Command Complete / Status : événements constructeur (code 0xFF, ou un code propre au fabricant comme 0xE4), par exemple « firmware démarré », ou l'acquittement de chaque partie du firmware à la place d'un Command Complete
 - Des données **Bulk OUT** avant le premier HCI Reset : certaines puces reçoivent le firmware sur le canal ACL
-- La provenance du fichier : comparez les données envoyées avec les fichiers du dossier du pilote (Gestionnaire de périphériques > détails du pilote, ou `C:\Windows\System32\DriverStore\FileRepository\`) et avec les fichiers de la puce dans [linux-firmware](https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/) (`mediatek/`, `qca/`), qui peuvent être redistribués et que les utilisateurs d'BlueCaster peuvent télécharger
+- La provenance du fichier : comparez les données envoyées avec les fichiers du dossier du pilote (Gestionnaire de périphériques > détails du pilote, ou `C:\Windows\System32\DriverStore\FileRepository\`) et avec les fichiers de la puce dans [linux-firmware](https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/) (`mediatek/`, `qca/`), qui peuvent être redistribués et que les utilisateurs de BlueCaster peuvent télécharger
 
-Notez tout délai que le pilote respecte entre deux étapes (horodatages de la capture) : une puce encore en cours de réinitialisation ne répond pas.
+Notez les délais que le pilote observe entre deux étapes (voir les horodatages de la capture) : une puce encore en cours de réinitialisation ne répond pas.
 
 {: .warning }
 Travaillez à partir des captures, des rapports de sonde et de la documentation du fabricant. Ne copiez pas de code GPL et ne le suivez pas de près, par exemple les pilotes `btmtk` ou `btqca` du noyau Linux : BlueCaster est sous licence Apache-2.0 ou MIT, et un chargeur qui en serait dérivé ne pourrait pas être intégré.
 
 ## Essayer sans compiler : les scripts de puce {#chip-scripts}
 
-Avant d'écrire un chargeur, essayez sur l'adaptateur ce que la capture a montré : un **script de puce** est la séquence sous forme de texte, une requête par ligne, exécutée à la place de la pile Bluetooth. Quelqu'un qui n'a pas l'adaptateur peut en écrire un et l'envoyer à quelqu'un qui l'a ; le résultat revient sous forme de rapport, sans nouvelle compilation.
+Avant d'écrire un chargeur, essayez sur l'adaptateur la séquence capturée à l'aide d'un **script de puce** : la séquence sous forme de texte, une requête par ligne, exécutée à la place de la pile Bluetooth. Quelqu'un qui n'a pas l'adaptateur peut écrire un script et l'envoyer à quelqu'un qui l'a ; le résultat revient sous forme de rapport, sans nouvelle compilation.
 
-**En exécuter un** : en mode développeur, **Développeur > Puce** : choisissez l'adaptateur (sous WinUSB), saisissez le script ou ouvrez un fichier, puis **Exécuter**. La réponse à chaque ligne s'affiche en dessous, et **Afficher le rapport** ouvre `script-<date>_<time>.json` dans `logs\probe\` (le script y figure). En ligne de commande : `bluecaster-core --cli -u <adapter> --script <file>`.
+**Exécuter un script** : en mode développeur, ouvrez **Développeur > Puce**, choisissez l'adaptateur (sous WinUSB), saisissez le script ou ouvrez un fichier, puis cliquez sur **Exécuter**. La réponse à chaque ligne s'affiche en dessous, et **Afficher le rapport** ouvre `script-<date>_<time>.json` dans `logs\probe\` (le script y figure). En ligne de commande : `bluecaster-core --cli -u <adapter> --script <file>`.
 
 ```text
 # une requête par ligne ; nombres en hexadécimal (0x facultatif) sauf wait, timeout= et chunk=
@@ -106,15 +106,15 @@ upload-bulk patch.bin fc09 01      # la même chose sur le canal bulk OUT
 ```
 
 - `hci` et `bulk` attendent le Command Complete ou le Command Status de la commande (2 s) et l'enregistrent, quel que soit son statut
-- `upload` envoie un fichier du dossier du firmware en commandes de cet opcode, chacune avec les octets d'en-tête et jusqu'à `chunk` octets du fichier (240 par défaut), et attend chaque acquittement : `ack=complete` (par défaut : un Command Complete ou Command Status de l'opcode avec le statut 0) ou `ack=event:<code>[:<bytes>]`. Un statut d'erreur l'arrête
+- `upload` envoie un fichier du dossier du firmware sous forme de commandes de cet opcode, chacune avec les octets d'en-tête et jusqu'à `chunk` octets du fichier (240 par défaut), et attend chaque acquittement : `ack=complete` (par défaut : un Command Complete ou Command Status de l'opcode avec le statut 0) ou `ack=event:<code>[:<bytes>]`. Un statut d'erreur interrompt l'envoi
 - Le script s'arrête à la première ligne qui échoue (pas de réponse, une erreur, un fichier manquant) et indique laquelle
-- Les événements qui ne répondent à aucune ligne figurent aussi dans le rapport
+- Les événements qui ne correspondent à aucune ligne figurent aussi dans le rapport
 
-**Sécurité** : seules les requêtes connues pour lire s'exécutent telles quelles : les lectures HCI standard (paramètres d'information et d'état, Read Local Name, les lectures LE), les requêtes USB standard de descripteur, `wait`, `expect` et `bootloader`. Un script contenant toute autre ligne ne s'exécute que si vous l'autorisez (**Les exécuter** sous la liste de ces lignes ; `--allow-writes` en ligne de commande). Les commandes constructeur qui peuvent écrire une mémoire que la puce conserve après une coupure d'alimentation ne s'exécutent jamais, quoi que vous autorisiez (`denied_opcodes` dans `app/src/crates/bt-host/src/chips.rs` : le BCCMD de CSR pour l'instant). Le mode bootloader est activé dès le départ, si bien que la fermeture de l'adaptateur n'envoie ensuite aucun HCI Reset. Un firmware chargé dans la RAM d'une puce disparaît après un rebranchement.
+**Sécurité** : seules les requêtes connues pour être en lecture seule s'exécutent sans confirmation : les lectures HCI standard (paramètres d'information et d'état, Read Local Name, les lectures LE), les requêtes USB standard de descripteur, `wait`, `expect` et `bootloader`. Un script contenant toute autre ligne ne s'exécute que si vous l'autorisez (**Les exécuter** sous la liste de ces lignes ; `--allow-writes` en ligne de commande). Les commandes constructeur qui peuvent écrire une mémoire que la puce conserve après une coupure d'alimentation ne s'exécutent jamais, quoi que vous autorisiez (`denied_opcodes` dans `app/src/crates/bt-host/src/chips.rs` : le BCCMD de CSR pour l'instant). Le mode bootloader est activé dès le départ : la fermeture de l'adaptateur n'envoie donc ensuite aucun HCI Reset. Un firmware chargé dans la RAM d'une puce disparaît après un rebranchement.
 
 ## Étape 4 : écrire le chargeur
 
-Les chemins à partir d'ici sont relatifs à la racine du dépôt. Trois crates sont concernés :
+À partir d'ici, les chemins sont relatifs à la racine du dépôt. Trois crates sont concernés :
 
 | Crate (paquet) | Dossier | Contenu |
 |:--|:--|:--|
@@ -124,7 +124,7 @@ Les chemins à partir d'ici sont relatifs à la racine du dépôt. Trois crates 
 
 Les deux derniers ont tous deux « core » dans leur nom ; ce sont les noms de paquet ci-dessus qu'attend `cargo -p`.
 
-Un chargeur est une machine à états sans E/S propre : il reçoit les événements du contrôleur, les résultats de ses requêtes USB et son minuteur, et renvoie des **actions** que l'application exécute. On peut ainsi le tester sans la puce, et les détails USB et de threads restent en dehors.
+Un chargeur est une machine à états sans E/S propre : il reçoit les événements du contrôleur, les résultats de ses requêtes USB et son minuteur, et renvoie des **actions** que l'application exécute. Le chargeur peut ainsi être testé sans la puce, et les détails liés à l'USB et aux threads restent en dehors de son code.
 
 1. Copiez `app/src/crates/bt-host/src/bringup/sample.rs`, un chargeur complet pour une puce imaginaire avec ses tests, vers `app/src/crates/bt-host/src/<vendor>.rs` (par exemple `mediatek.rs`). Ajoutez `pub mod <vendor>;` à `app/src/crates/bt-host/src/lib.rs`, dans l'ordre alphabétique avec les autres modules
 2. Gardez les noms : le type s'appelle `Loader` (utilisé comme `<vendor>::Loader`), `vendor()` renvoie le nom du fabricant. Gardez les tests dans le fichier, comme le fait l'exemple
@@ -169,16 +169,16 @@ Des fonctions utilitaires évitent au chargeur d'analyser les octets à la main 
 L'exemple montre chacun de ces cas ; retirez ce dont votre puce n'a pas besoin.
 
 - **Une commande, un acquittement** : envoyez, démarrez le minuteur et, dans l'état d'attente, n'acceptez que l'acquittement de cet opcode : un Command Complete, ou un Command Status de statut 0 pour une commande dont le résultat arrive plus tard. Tout le reste est ignoré, pour qu'une réponse tardive ne fasse pas avancer le chargeur
-- **Acquittement par un événement constructeur** : certaines puces répondent à chaque partie du firmware par leur propre événement au lieu d'un Command Complete. Cet événement est alors l'acquittement : attendez uniquement lui (son code et les paramètres qui l'identifient), ignorez dans cet état un Command Complete ou un Command Status de statut 0 de cette commande, mais terminez quand même sur un statut d'erreur dans l'un comme dans l'autre. L'exemple traite un Command Complete et un Command Status comme le même acquittement ; son `on_event` a donc besoin pour cela d'un `match` sur l'état et l'événement
+- **Acquittement par un événement constructeur** : certaines puces répondent à chaque partie du firmware par leur propre événement au lieu d'un Command Complete. N'attendez alors que cet événement (son code et les paramètres qui l'identifient). Dans cet état, ignorez un Command Complete ou un Command Status de statut 0 de cette commande, mais terminez quand même sur un statut d'erreur dans l'un ou l'autre. L'exemple traite un Command Complete et un Command Status comme le même acquittement ; pour ce cas, son `on_event` a donc besoin d'un `match` portant à la fois sur l'état et sur l'événement
 - **Plusieurs fichiers** (un correctif, puis une configuration) : chargez-les et vérifiez-les tous avant d'en envoyer un seul, envoyez-les dans l'ordre et nommez le dernier dans `Loaded { firmware, .. }` (les lignes du journal nomment les autres)
-- **Une pause volontaire** (le pilote attend 100 ms avant l'étape suivante) : un état pour cela et `Timer(100)` ; dans cet état, `on_timeout` envoie l'étape suivante au lieu d'échouer. Dans les tests, `SimRun::timeouts` compte aussi ces pauses
+- **Une pause volontaire** (le pilote attend 100 ms avant l'étape suivante) : ajoutez un état pour cette pause et envoyez `Timer(100)` ; dans cet état, `on_timeout` envoie l'étape suivante au lieu d'échouer. Dans les tests, `SimRun::timeouts` compte aussi ces pauses
 - **Une commande à deux réponses** (un acquittement, puis un événement constructeur comme « firmware démarré ») : deux états, le second avec son propre minuteur. Les états `Launching` et `Starting` de l'exemple font cela. Quand l'événement porte un code de résultat, un code d'échec termine le chargeur par `Rejected(code)`
 - **Un statut d'erreur** dans un Command Complete ou un Command Status termine le chargeur par `Command { opcode, status }`
 - **Mode bootloader** : `Bootloader(true)` avant la première commande, même avant la vérification de version. En cas de succès (`Loaded`, et aussi `AlreadyRunning`), envoyez `Bootloader(false)` juste avant `Done`, pour que l'initialisation HCI se déroule normalement ; après un échec, laissez-le actif, car la puce est encore dans son bootloader. La fonction `finish()` de l'exemple fait cela
 - **Déjà en cours d'exécution** : quand la version ou un registre montre le firmware opérationnel, terminez aussitôt par `AlreadyRunning`. L'adaptateur garde son firmware tant qu'il reste alimenté, et un second téléchargement peut échouer
 - **Vérifiez d'abord le fichier** : analysez et vérifiez le fichier entier avant d'en envoyer quoi que ce soit (`BadFile` avec la raison), et nommez exactement le fichier manquant
 - **Uniquement votre puce** : quand le chargeur ne couvre qu'une partie des puces d'un fabricant, vérifiez que l'adaptateur en fait partie avant d'envoyer quoi que ce soit (son propre registre d'ID de puce, ou les ID USB avec `ControlRequest::device_descriptor()`), et terminez sinon par `Unsupported`
-- **Journalisez** au niveau `info` ce que vous apprenez de la puce (ID de puce, version de la ROM, fichier choisi) : c'est ce que montrent les rapports
+- **Journalisez** au niveau `info` ce que vous apprenez de la puce (ID de puce, version de la ROM, fichier choisi) : ce sont ces lignes qui apparaissent dans les rapports
 - N'écrivez jamais dans la mémoire flash ou OTP de la puce, et ne lisez des fichiers qu'au travers du `FileReader`
 
 ## Étape 5 : le tester avec un contrôleur simulé
@@ -202,18 +202,18 @@ cargo test -p bt-host
 
 ## Étape 6 : l'intégrer à l'application
 
-Voici chaque fichier à modifier, pour un fabricant déjà listé comme non pris en charge (MediaTek, Qualcomm) ou pour un nouveau. Pour un nouveau fabricant, le compilateur signale les `match` qui ont besoin de sa variante ; le reste, et tout ce qui concerne un fabricant déjà listé, seule cette liste permet de le trouver.
+Voici tous les fichiers à modifier, pour un fabricant déjà listé comme non pris en charge (MediaTek, Qualcomm) ou pour un nouveau. Pour un nouveau fabricant, le compilateur signale les `match` qui ont besoin de sa variante. Pour tout le reste, y compris toutes les modifications pour un fabricant déjà listé, seule cette liste vous guide.
 
-**Une puce ou tout le fabricant ?** Un chargeur ne couvre généralement qu'une partie des puces d'un fabricant (le MT7921 mais pas le MT7925). Seules ces puces peuvent alors quitter « non pris en charge » : listez leurs VID:PID dans `LOADER_CHIPS` dans `app/src/crates/bt-host/src/chips.rs`, et laissez le fabricant dans `listed_chips_only()`. `chips::chip_supported(vendor, vid, pid)` et `chip_support_tag()` répondent alors adaptateur par adaptateur, et l'étiquette sur le nom de l'adaptateur, sa note sur l'écran **Adaptateur**, la proposition de WinUSB sur cet écran et l'avertissement « not implemented » en découlent. Ne retirez un fabricant de `listed_chips_only()` que pour un chargeur qui couvre toutes ses puces (comme celui d'Intel).
+**Une puce ou tout le fabricant ?** Un chargeur ne couvre généralement qu'une partie des puces d'un fabricant (le MT7921 mais pas le MT7925). Seules ces puces peuvent alors perdre le statut « non pris en charge » : listez leurs VID:PID dans `LOADER_CHIPS` dans `app/src/crates/bt-host/src/chips.rs`, et laissez le fabricant dans `listed_chips_only()`. `chips::chip_supported(vendor, vid, pid)` et `chip_support_tag()` répondent alors adaptateur par adaptateur, et l'étiquette sur le nom de l'adaptateur, sa note sur l'écran **Adaptateur**, la proposition de WinUSB sur cet écran et l'avertissement « not implemented » en découlent. Ne retirez un fabricant de `listed_chips_only()` que pour un chargeur qui couvre toutes ses puces (comme celui d'Intel).
 
 {: .note }
-Conservez les fins de ligne de chaque fichier : certains fichiers source utilisent CRLF, d'autres LF. Certains éditeurs et `sed -i` dans Git Bash les réécrivent sans le dire, et `cargo fmt` ne les rétablit pas. `git diff --stat` le révèle : un fichier modifié à quelques endroits compte toutes ses lignes. Reconvertissez alors le fichier (par exemple avec le sélecteur de fin de ligne de la barre d'état de VS Code) avant de valider.
+Conservez les fins de ligne de chaque fichier : certains fichiers source utilisent CRLF, d'autres LF. Certains éditeurs et `sed -i` dans Git Bash les réécrivent sans le dire, et `cargo fmt` ne les rétablit pas. `git diff --stat` le révèle : un fichier modifié à quelques endroits apparaît avec toutes ses lignes modifiées. Reconvertissez alors le fichier (par exemple avec le sélecteur de fin de ligne de la barre d'état de VS Code) avant de valider.
 
 **Détection** (`app/src/crates/bt-host/src/chips.rs`) :
 
 1. `ChipVendor` : un nouveau fabricant reçoit une variante (avec une ligne de doc) et une branche dans `name()`. Pour tout fabricant, mettez à jour le commentaire de doc de l'enum (quels fabricants ont un chargeur) et la ligne de doc de la variante (« not supported »)
 2. Certaines puces : leurs VID:PID dans `LOADER_CHIPS`, et un test dans le module du chargeur vérifiant que sa propre vérification de puce (ID de puce, version) accepte exactement ce que décrivent ces entrées. Tout le fabricant : retirez-le de `listed_chips_only()`
-3. `vendor_for_usb()` : les VID USB du fabricant. Un VID utilisé aussi par d'autres fabricants doit être reconnu sous la forme `VID if pid == PID`, jamais en entier : modules de portables sous le VID du fabricant du module (AzureWave 0x13D3, Foxconn 0x0489) et VID partagés comme pid.codes 0x1209. Chaque VID listé ici fait aussi considérer par `is_bluetooth_vendor_vid` les périphériques de ce fabricant comme des adaptateurs Bluetooth. Un VID:PID présent dans la table Realtek de BTstack ou dans `OEM_TABLE` (toutes deux dans `resolve_realtek_pid` de ce fichier) est pris pour du Realtek avant que `vendor_for_usb` soit interrogé : vérifiez que le vôtre ne figure dans aucune des deux
+3. `vendor_for_usb()` : les VID USB du fabricant. Un VID utilisé aussi par d'autres fabricants doit être reconnu sous la forme `VID if pid == PID`, jamais en entier : modules de portables sous le VID du fabricant du module (AzureWave 0x13D3, Foxconn 0x0489) et VID partagés comme pid.codes 0x1209. Avec chaque VID listé ici, `is_bluetooth_vendor_vid` traite aussi les périphériques de ce fabricant comme des adaptateurs Bluetooth. Un VID:PID présent dans la table Realtek de BTstack ou dans `OEM_TABLE` (toutes deux dans `resolve_realtek_pid` de ce fichier) est pris pour du Realtek avant que `vendor_for_usb` soit interrogé : vérifiez que le vôtre ne figure dans aucune des deux
 4. `company_name()` : le company ID du Bluetooth SIG renvoyé par Read Local Version, s'il n'y est pas encore
 5. Tests : `app/src/crates/bt-host/tests/chips.rs` (les VID:PID et l'étiquette)
 
@@ -228,8 +228,8 @@ Conservez les fins de ligne de chaque fichier : certains fichiers source utilise
 
 **Ce qu'affiche la fenêtre** :
 
-10. `app/src/core/src/state.rs`, `vendor_note()` : une branche avec une nouvelle clé `firmware.vendor_<vendor>`, sortie de la branche `MediaTek | Qualcomm`, et son test. La fonction répond auparavant `firmware.vendor_unsupported` pour les puces que `chip_supported` refuse, si bien que les autres puces du fabricant la conservent. L'écran **Adaptateur** propose WinUSB à tout adaptateur dont la note n'est pas `firmware.vendor_unsupported`
-11. `app/lang/*.json` (les 8 langues, à la même ligne dans chacune) : la nouvelle clé, sur le modèle de celle d'Intel ("Intel adapter. …"). Quand elle nomme un bouton ou un dossier, utilisez les mots de la langue tirés du même fichier (le bouton du dossier du firmware est `firmware.open_folder`). Tout le fabricant : retirez son nom de `firmware.vendor_unsupported`. Certaines puces : laissez-le, car les autres puces du fabricant affichent encore ce texte
+10. `app/src/core/src/state.rs`, `vendor_note()` : une branche avec une nouvelle clé `firmware.vendor_<vendor>`, sortie de la branche `MediaTek | Qualcomm`, et son test. Avant cette branche, la fonction renvoie `firmware.vendor_unsupported` pour les puces que `chip_supported` refuse : les autres puces du fabricant gardent ainsi cette note. L'écran **Adaptateur** propose WinUSB à tout adaptateur dont la note n'est pas `firmware.vendor_unsupported`
+11. `app/lang/*.json` (les 10 langues, à la même ligne dans chacune) : la nouvelle clé, sur le modèle de celle d'Intel ("Intel adapter. …"). Quand elle nomme un bouton ou un dossier, reprenez les termes de cette langue dans le même fichier (le bouton du dossier du firmware est `firmware.open_folder`). Tout le fabricant : retirez son nom de `firmware.vendor_unsupported`. Certaines puces : laissez-le, car les autres puces du fabricant affichent encore ce texte
 12. `app/src/ui/src/lib/links.ts` : la page de firmware du fabricant (dans `LINKS`, `firmwareUrl()` et `vendorFirmwareUrl()`, comme le dossier linux-firmware d'Intel), pour que l'écran **Adaptateur** indique où trouver les fichiers ; tests dans `app/src/ui/src/lib/chips.test.ts`. L'écran **Adaptateur** n'affiche la page que pour les adaptateurs dont la note n'est pas `firmware.vendor_unsupported`, de sorte que les autres puces du fabricant ne la reçoivent pas
 
 **Documentation** :
@@ -245,16 +245,16 @@ Compilez à la racine du dépôt (`cargo build --release -p bluecaster-core-exe`
 target\release\bluecaster-core.exe --cli -u 0e8d:7961 --scan 5 --hci-capture loader.pklg
 ```
 
-Le journal montre chaque étape ; `loader.pklg` s'ouvre dans Wireshark avec chaque commande, événement et transfert de contrôle dans l'ordre. Débranchez l'adaptateur (ou éteignez le PC) et recommencez : le téléchargement doit fonctionner sur une puce à froid, et ne rien faire quand le firmware tourne déjà.
+Le journal montre chaque étape ; `loader.pklg` s'ouvre dans Wireshark avec chaque commande, événement et transfert de contrôle dans l'ordre. Débranchez l'adaptateur (ou éteignez le PC) et recommencez : le téléchargement doit fonctionner sur une puce à froid, et ne rien faire quand le firmware est déjà en cours d'exécution.
 
 {: .note }
-Avec plusieurs adaptateurs sous WinUSB, un adaptateur Realtek est préféré et la configuration de sa puce appliquée, même avec `-u`. Réglez **Adaptateur > Puce Bluetooth** sur **Pas Realtek**, ou testez avec votre seul adaptateur sous WinUSB.
+Avec plusieurs adaptateurs sous WinUSB, BlueCaster privilégie un adaptateur Realtek et applique la configuration de sa puce, même avec `-u`. Réglez **Adaptateur > Puce Bluetooth** sur **Pas Realtek**, ou testez avec votre seul adaptateur sous WinUSB.
 
-Diffusez ensuite un moment vers un casque avec la fenêtre, et vérifiez que **Redémarrer le Bluetooth** et un rebranchement le remettent en marche. Pendant le démarrage de l'adaptateur, l'écran **Adaptateur** affiche le chargeur sous l'état du Bluetooth (« chargement 42% », ou son échec) ; en mode développeur aussi une fois prêt, avec les noms de vos `step()` et la façon dont il s'est terminé.
+Diffusez ensuite un moment vers un casque depuis la fenêtre, et vérifiez que **Redémarrer le Bluetooth** et un rebranchement remettent l'adaptateur en marche. Pendant le démarrage de l'adaptateur, l'écran **Adaptateur** affiche l'état du chargeur sous l'état du Bluetooth (« chargement 42 % », ou un échec). En mode développeur, cet état reste affiché une fois l'adaptateur prêt, avec les noms de vos `step()` et le résultat.
 
 ## Étape 8 : ouvrir la pull request
 
-Avant de l'ouvrir, lancez ces commandes dans l'ordre (voir [Building](building) pour l'installation). D'abord l'interface, dans `app\src\ui` : elle vérifie la modification de l'étape 6 (point 12), et l'espace de travail Rust comprend le crate de la fenêtre, qui a besoin de l'interface compilée :
+Avant de l'ouvrir, lancez ces vérifications dans l'ordre (voir [Compilation](building) pour l'installation). Commencez par l'interface, dans `app\src\ui` : cela vérifie votre modification de l'étape 6 (point 12), et l'espace de travail Rust comprend le crate de la fenêtre, qui a besoin de l'interface compilée :
 
 ```bat
 pnpm install
@@ -274,9 +274,9 @@ python tools/check_lang.py
 
 Sans Node.js, lancez plutôt les tests et clippy sur les trois crates ci-dessus (`-p bt-host -p bluecaster-core -p bluecaster-core-exe`), laissez les vérifications de l'interface à la CI de la pull request, et indiquez-le dans la pull request. `pwsh ./build.ps1 -Test` lance tout.
 
-Clippy vérifie aussi les noms : une variante de `State` appelée `PatchState` échoue sur `enum_variant_names` ; appelez-la `Patch`. `check_lang.py` peut signaler des « long hints left » qui existaient avant votre modification ; seuls les erreurs et les clés manquantes sont à votre charge.
+Clippy vérifie aussi les noms : une variante de `State` appelée `PatchState` échoue sur `enum_variant_names` ; appelez-la `Patch`. `check_lang.py` peut signaler des « long hints left » qui existaient avant votre modification ; seules les erreurs et les clés manquantes sont à corriger de votre côté.
 
-D'autres endroits mentionnent au passage MediaTek ou Qualcomm comme non pris en charge (les données fictives et les tests de l'interface, des commentaires dans `Adapter.tsx` et `probe.rs`, le choix « Pas Realtek ») : ils restent tels quels.
+D'autres endroits mentionnent au passage MediaTek ou Qualcomm comme non pris en charge (les données fictives et les tests de l'interface, des commentaires dans `Adapter.tsx` et `probe.rs`, le choix « Pas Realtek ») : laissez-les tels quels.
 
 Dans la pull request :
 

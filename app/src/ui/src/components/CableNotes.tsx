@@ -10,7 +10,7 @@
 // their donationware, so its origin is said under each cable
 // (https://vb-audio.com/Services/licensing.htm). The line cannot be closed
 // (issue #86: other ways to the microphone only bring bug reports);
-// Developer > Hide the virtual sound devices warning removes it, green too. About >
+// Developer > Hide the virtual audio device warning removes it, green too. About >
 // Third-party software opens the same dialog, the only place that names
 // the cables' origin. After an update from a version without it, the dialog
 // opens by itself once on the main window (issue #86: the setup, which shows
