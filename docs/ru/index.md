@@ -11,9 +11,13 @@ has_toc: false
 Продвинутый Bluetooth-аудиопередатчик для Windows с полной поддержкой кодеков.
 {: .fs-6 .fw-300 }
 
-BlueCaster превращает ваш адаптер Bluetooth — недорогой USB-адаптер или встроенный адаптер ноутбука — в Hi-Fi-передатчик. Windows поддерживает только простые кодеки, а BlueCaster передаёт звук в **LHDC V5, LDAC и aptX Adaptive** с частотой до 96 kHz (LHDC V5 — до 192 kHz). Также поддерживаются **aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC и FastStream** и LE Audio (LC3, экспериментально, только в режиме разработчика). BlueCaster настраивает адаптер автоматически, а вернуть адаптер Windows можно одним щелчком ([как это работает](architecture)).
+BlueCaster превращает ваш адаптер Bluetooth в Hi-Fi-аудиопередатчик. Он передаёт звук на наушники через Hi-Fi-кодеки, такие как **LDAC@96 kHz**, **LHDC V5@192 kHz** и **aptX Adaptive**. Сама Windows ни один из этих кодеков не поддерживает. Также BlueCaster поддерживает aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC и FastStream.
 
-![Экран «Кодеки» BlueCaster: передача LDAC 990 kbps / 48 kHz на Sony WH-1000XM4](../images/app_sample.png)
+- **Работает с Bluetooth, который у вас уже есть.** Подойдёт встроенный Bluetooth Intel, Realtek или MediaTek во многих ноутбуках, а также недорогой USB-адаптер. BlueCaster берёт адаптер на себя, а вернуть его Windows можно одним щелчком.
+- **Микрофон гарнитуры, который не мешает.** Микрофон включается, только пока приложение ведёт запись. В остальное время музыка звучит в полном качестве. Шумоподавление и регулировка усиления встроены.
+- **Без дополнительных программ.** BlueCaster настраивает адаптер прямо в приложении ([как это работает](architecture)).
+
+![Экран «Кодеки» BlueCaster: передача LDAC 990 kbps / 96 kHz на Sony WH-1000XM4, карточка BlueCaster над быстрыми настройками Windows](../images/app_sample.png)
 
 [Начало работы](setup){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [GitHub](https://github.com/SeiyaFunaokaJP/BlueCaster){: .btn .fs-5 .mb-4 .mb-md-0 }

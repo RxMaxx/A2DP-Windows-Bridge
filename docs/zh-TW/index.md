@@ -11,9 +11,13 @@ has_toc: false
 適用於 Windows 的進階藍牙音訊發射器，全面支援各種編解碼器。
 {: .fs-6 .fw-300 }
 
-BlueCaster 能把您的藍牙介面卡（便宜的 USB 介面卡，或許多筆電的內建介面卡）變成 Hi-Fi 發射器。Windows 只支援基本的編解碼器；BlueCaster 則能以最高 96 kHz 串流 **LHDC V5、LDAC 與 aptX Adaptive**（LHDC V5 最高 192 kHz），還支援 **aptX HD、aptX、aptX Low Latency、Opus、AAC、SBC XQ、SBC 與 FastStream**，以及 LE Audio（LC3，實驗性，僅限開發人員模式）。BlueCaster 會自動設定介面卡，按一下就能把介面卡交還給 Windows（[運作方式](architecture)）。
+BlueCaster 能把您的藍牙介面卡變成 Hi-Fi 音訊發射器，透過 **LDAC@96 kHz**、**LHDC V5@192 kHz** 與 **aptX Adaptive** 等 Hi-Fi 編解碼器將音訊串流到您的耳機。Windows 本身不支援這些編解碼器。BlueCaster 也支援 aptX HD、aptX、aptX Low Latency、Opus、AAC、SBC XQ、SBC 與 FastStream。
 
-![BlueCaster's Codecs screen, streaming LDAC 990 kbps / 48 kHz to Sony WH-1000XM4](../images/app_sample.png)
+- **直接使用您現有的藍牙。** 許多筆電內建的 Intel、Realtek 或 MediaTek 藍牙都能用，便宜的 USB 介面卡也可以。BlueCaster 接管介面卡後，按一下就能交還給 Windows。
+- **只在需要時運作的耳機麥克風。** 麥克風只在應用程式錄音時開啟，其餘時間音樂維持完整音質。內建雜訊抑制與增益調整。
+- **不需要額外的工具。** 在應用程式內就能完成介面卡設定（[運作方式](architecture)）。
+
+![BlueCaster 的編解碼器畫面，正以 LDAC 990 kbps / 96 kHz 串流到 Sony WH-1000XM4，Windows 快速設定上方顯示著 BlueCaster 的卡片](../images/app_sample.png)
 
 [開始使用](setup){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [GitHub](https://github.com/SeiyaFunaokaJP/BlueCaster){: .btn .fs-5 .mb-4 .mb-md-0 }

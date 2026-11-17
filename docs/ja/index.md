@@ -11,9 +11,13 @@ has_toc: false
 Windows 向け Bluetooth A2DP オーディオストリーミングツール（全コーデック対応）
 {: .fs-6 .fw-300 }
 
-BlueCaster は、安価な USB ドングルやノート PC 内蔵の Bluetooth アダプターを Hi-Fi 送信機に変えます。Windows が対応するのは基本的なコーデックだけですが、BlueCaster は **LHDC V5・LDAC・aptX Adaptive** を最大 96 kHz（LHDC V5 は最大 192 kHz）で送信できます。ほかに **aptX HD・aptX・aptX Low Latency・Opus・AAC・SBC XQ・SBC・FastStream** と、LE Audio（LC3、実験的、開発者モードのみ）にも対応しています。アダプターの設定は自動で行われ、ワンクリックで Windows に戻せます（[仕組み](architecture)）。
+BlueCaster は、お使いの Bluetooth アダプターを Hi-Fi オーディオトランスミッターに変えます。**LDAC@96 kHz**、**LHDC V5@192 kHz**、**aptX Adaptive** などの Hi-Fi コーデックで、ヘッドホンやイヤホンに音声を送信できます。これらのコーデックは Windows 単体では使えません。ほかに aptX HD・aptX・aptX Low Latency・Opus・AAC・SBC XQ・SBC・FastStream にも対応しています。
 
-![BlueCaster's Codecs screen, streaming LDAC 990 kbps / 48 kHz to Sony WH-1000XM4](../images/app_sample.png)
+- **今ある Bluetooth をそのまま使えます。** 多くのノート PC に内蔵されている Intel・Realtek・MediaTek の Bluetooth でも、手ごろな USB ドングルでも動作します。BlueCaster はアダプターを専用で使いますが、ワンクリックで Windows に戻せます。
+- **必要なときだけ動くヘッドセットマイク。** マイクはアプリが録音している間だけオンになるので、それ以外の時間は音楽を本来の音質で聴けます。ノイズ抑制とゲイン調整も備えています。
+- **追加のツールは不要です。** BlueCaster がアプリの中でアダプターを準備します（[仕組み](architecture)）。
+
+![BlueCaster の「コーデック」画面。Sony WH-1000XM4 に LDAC 990 kbps / 96 kHz で送信中で、Windows のクイック設定の上に BlueCaster のカードが表示されている](../images/app_sample.png)
 
 [セットアップ](setup){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [GitHub](https://github.com/SeiyaFunaokaJP/BlueCaster){: .btn .fs-5 .mb-4 .mb-md-0 }

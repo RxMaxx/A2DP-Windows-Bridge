@@ -11,9 +11,13 @@ has_toc: false
 모든 코덱을 지원하는 Windows용 고급 Bluetooth 오디오 송신기
 {: .fs-6 .fw-300 }
 
-BlueCaster는 저렴한 USB 동글이나 노트북 내장 어댑터 같은 Bluetooth 어댑터를 Hi-Fi 송신기로 바꿔 줍니다. Windows는 기본 코덱만 지원하지만, BlueCaster는 **LHDC V5, LDAC, aptX Adaptive**를 최대 96 kHz(LHDC V5는 최대 192 kHz)로 전송합니다. **aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC, FastStream**과 LE Audio(LC3, 실험적, 개발자 모드 전용)도 지원합니다. 어댑터는 자동으로 설정되며, 클릭 한 번으로 Windows에 되돌릴 수 있습니다([작동 방식](architecture)).
+BlueCaster는 Bluetooth 어댑터를 Hi-Fi 오디오 송신기로 바꿔 줍니다. **LDAC@96 kHz**, **LHDC V5@192 kHz**, **aptX Adaptive** 같은 Hi-Fi 코덱으로 헤드폰과 이어폰에 음악을 전송합니다. Windows 자체로는 이 코덱들을 사용할 수 없습니다. 그 밖에 aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC, FastStream도 지원합니다.
 
-![BlueCaster's Codecs screen, streaming LDAC 990 kbps / 48 kHz to Sony WH-1000XM4](../images/app_sample.png)
+- **지금 가진 Bluetooth를 그대로 사용합니다.** 많은 노트북에 내장된 Intel, Realtek, MediaTek Bluetooth도, 저렴한 USB 동글도 사용할 수 있습니다. BlueCaster가 어댑터를 전용으로 사용하며, 클릭 한 번으로 Windows에 되돌릴 수 있습니다.
+- **필요할 때만 켜지는 헤드셋 마이크.** 앱이 녹음하는 동안에만 마이크가 켜지므로, 그 밖의 시간에는 음악을 원래 음질로 들을 수 있습니다. 소음 억제와 게인 조절 기능도 들어 있습니다.
+- **별도의 도구가 필요 없습니다.** BlueCaster가 앱 안에서 어댑터를 설정합니다([작동 방식](architecture)).
+
+![BlueCaster의 코덱 화면. Sony WH-1000XM4에 LDAC 990 kbps / 96 kHz로 전송 중이며, Windows 빠른 설정 위에 BlueCaster 카드가 표시되어 있음](../images/app_sample.png)
 
 [시작하기](setup){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [GitHub](https://github.com/SeiyaFunaokaJP/BlueCaster){: .btn .fs-5 .mb-4 .mb-md-0 }
