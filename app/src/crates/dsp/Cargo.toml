@@ -1,0 +1,13 @@
+[package]
+name = "dsp"
+description = "Audio processing shared by the media and microphone paths: biquad EQ, noise gate and peak limiter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[lints]
+workspace = true
