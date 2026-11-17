@@ -183,6 +183,7 @@ impl LeAudioPath {
                 plan: plan.clone(),
                 input: crate::stream::input_format(format),
                 buffer: BufferPreset::Standard,
+                media_eq: Some(crate::media_eq::handle()),
             },
             started.sink.clone(),
             stats,

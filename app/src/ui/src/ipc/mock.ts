@@ -175,6 +175,7 @@ export function sampleProfile(over: Partial<Profile> = {}): Profile {
     ...over,
     codec_settings: over.codec_settings ?? {},
     codec_order: over.codec_order ?? [],
+    media_eq: over.media_eq ?? { enabled: false, bands: [] },
   };
 }
 
@@ -1404,6 +1405,9 @@ export class MockCore implements Transport {
         }
         return null;
       }
+      // Nothing plays in the mock: the curve is all there is to see
+      case "media_eq.preview":
+        return null;
       case "profile.delete":
         this.snap.profiles = this.snap.profiles.filter(
           (x) => x.name !== p.name,

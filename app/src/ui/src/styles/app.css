@@ -4007,3 +4007,197 @@ html.win-flyout body {
   flex-direction: column;
   gap: var(--s1);
 }
+/* Playback EQ (Audio Devices): the graph follows the Windows accent, as
+   every control does; the grid and labels are the page's quiet colours */
+.media-eq {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--border);
+}
+.media-eq .row {
+  padding: 0;
+}
+.media-eq .hint {
+  margin: 0;
+}
+.eq-graph {
+  position: relative;
+}
+.eq-graph svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  touch-action: none;
+}
+.eq-bg {
+  fill: var(--surface-2);
+}
+.eq-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.eq-grid.zero {
+  stroke: var(--border-strong);
+}
+.eq-axis {
+  fill: var(--text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.eq-curve {
+  fill: none;
+  stroke: var(--accent-fill);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+}
+.eq-fill {
+  fill: var(--accent-fill);
+  fill-opacity: 0.14;
+}
+.eq-point {
+  cursor: grab;
+  outline: none;
+}
+.dragging,
+.dragging .eq-point {
+  cursor: grabbing;
+}
+.eq-dot {
+  fill: var(--accent-fill);
+  stroke: var(--surface);
+  stroke-width: 1.5;
+}
+.eq-halo {
+  fill: var(--accent-fill);
+  fill-opacity: 0;
+}
+.eq-point:hover .eq-halo,
+.eq-point.on .eq-halo {
+  fill-opacity: 0.22;
+}
+.eq-point:focus-visible .eq-halo {
+  fill-opacity: 0.22;
+  stroke: var(--focus);
+  stroke-width: 2;
+}
+.eq-num {
+  fill: var(--on-accent);
+  font-size: 10px;
+  font-weight: 700;
+  pointer-events: none;
+}
+.eq-tip {
+  position: absolute;
+  z-index: 20;
+  padding: var(--s1) var(--s2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.eq-menu {
+  position: absolute;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 10rem;
+  padding: var(--s1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  background: var(--surface-2);
+}
+.eq-menu button {
+  padding: var(--s1) var(--s2);
+  border: 0;
+  border-radius: calc(var(--r) - 2px);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-14);
+  text-align: left;
+  cursor: pointer;
+}
+.eq-menu button:hover:not(:disabled),
+.eq-menu button:focus-visible {
+  background: var(--surface-3);
+}
+.eq-menu button:disabled {
+  color: var(--disabled-text);
+  cursor: default;
+}
+.eq-menu button[aria-checked="true"] {
+  box-shadow: inset 3px 0 0 var(--accent-fill);
+}
+.eq-menu hr {
+  width: 100%;
+  margin: var(--s1) 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+.eq-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--s2) var(--s3);
+}
+.eq-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+}
+.eq-field .select {
+  min-width: 9rem;
+}
+.eq-number {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+}
+.eq-number .input {
+  width: 5.5rem;
+}
+.eq-unit {
+  color: var(--text-3);
+}
+.eq-actions {
+  display: flex;
+  gap: var(--s2);
+  margin-left: auto;
+}
+@media (forced-colors: active) {
+  .eq-curve,
+  .eq-fill,
+  .eq-dot,
+  .eq-num,
+  .eq-grid,
+  .eq-axis {
+    forced-color-adjust: none;
+  }
+  .eq-curve {
+    stroke: Highlight;
+  }
+  .eq-fill {
+    fill: Highlight;
+  }
+  .eq-dot {
+    fill: ButtonText;
+    stroke: Canvas;
+  }
+  .eq-num {
+    fill: Canvas;
+  }
+  .eq-grid {
+    stroke: GrayText;
+  }
+  .eq-axis {
+    fill: CanvasText;
+  }
+}

@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use bluecaster_core::default_input::{DefaultInput, Want as InputWant};
 use bluecaster_core::diag::AudioRates;
+use bluecaster_core::media_eq::{self, MediaEq};
 use bluecaster_core::paths;
 use bluecaster_core::profiles::{self, Profile as CoreProfile};
 use bluecaster_core::receiver::{self, ReceiverClient};
@@ -217,6 +218,7 @@ fn to_ipc_profile(p: &CoreProfile, legacy: u16) -> Profile {
         sbc_channel_mode: p.sbc_channel_mode.clone(),
         codec_settings: p.codec_settings.iter().map(|(c, v)| (c.clone(), to_ipc_codec_values(v))).collect(),
         codec_order: p.codec_order.clone(),
+        media_eq: p.media_eq.to_ipc(),
     }
 }
 
@@ -312,6 +314,7 @@ fn merge_profile(base: Option<&CoreProfile>, p: &Profile) -> CoreProfile {
     // The codecs' keys, each once (the cards' order: FastStream and Opus 05
     // too, which Auto and the fallback never take); the UI sends none for
     // the default order; aptX Adaptive LL's card has its own place
+    c.media_eq = MediaEq::from_ipc(&p.media_eq);
     c.codec_order = Vec::new();
     let keys = p.codec_order.iter().filter_map(|k| {
         if k.eq_ignore_ascii_case(profiles::APTXAD_LL_CARD) {
@@ -2615,6 +2618,12 @@ impl CoreState {
 
     fn begin_stream(&self, req: StreamRequest, profile: Option<String>) {
         *self.starting_profile.lock().unwrap_or_else(|e| e.into_inner()) = profile.clone();
+        // The profile's playback EQ (none for a stream without one)
+        let eq = profile
+            .as_deref()
+            .and_then(|name| profiles::load(&self.config_dir()).into_iter().find(|p| p.name == name))
+            .map(|p| p.media_eq);
+        media_eq::apply(eq.as_ref());
         self.publish(Event::Stream(StreamStatus {
             state: StreamState::Connecting,
             message: Msg::new("status.initializing"),
@@ -3173,8 +3182,11 @@ impl CoreState {
                 });
                 let auto_select = self.service.settings().auto_codec;
                 // Settings of a codec not in use: nothing the stream uses
+                // The playback EQ alone: the stream takes it in place
                 let kept_only = pos.is_some_and(|i| {
-                    list[i].only_kept_settings_differ(&merged) || list[i].only_default_input_differs(&merged)
+                    list[i].only_kept_settings_differ(&merged)
+                        || list[i].only_default_input_differs(&merged)
+                        || list[i].only_media_eq_differs(&merged)
                 });
                 let in_order = merged.clone();
                 // The profile's device joins the saved ones of its kind (as
@@ -3208,6 +3220,11 @@ impl CoreState {
                     self.set_active_profile(Some(profile.name.clone()));
                 }
                 self.refresh_devices();
+                // The stream of this profile plays its EQ as saved from now
+                // on (also when it starts again below)
+                if restart_after_save(&s.stream, &key) {
+                    media_eq::apply(Some(&in_order.media_eq));
+                }
                 // The profile in use starts again with what was saved (v1),
                 // but for another source, which needs nothing of the link
                 let order_keeps_codec = order_only && !restart_for_order(&s.stream, &in_order, auto_select);
@@ -3294,6 +3311,13 @@ impl CoreState {
                         bluecaster_core::diag::quoted(&profile.name)
                     );
                     self.start_profile(&profile.name)?;
+                }
+                Ok(Value::Null)
+            }
+            Method::MediaEqPreview { name, eq } => {
+                let (_, s) = self.snapshot();
+                if restart_after_save(&s.stream, &name) {
+                    media_eq::apply(Some(&MediaEq::from_ipc(&eq)));
                 }
                 Ok(Value::Null)
             }
@@ -5610,6 +5634,25 @@ mod tests {
             merge_profile(None, &Profile { codec_order: order, ..ui }).codec_order,
             ["aac", "aptxadll", "aptxad"]
         );
+    }
+
+    /// The playback EQ goes through the UI and back as saved, and a save
+    /// that changes only it keeps the stream going
+    #[test]
+    fn media_eq_is_saved_and_changes_in_place() {
+        let base =
+            CoreProfile { name: "WH".into(), device_address: "C0:11:22:33:44:55".into(), ..CoreProfile::default() };
+        let ui = to_ipc_profile(&base, 679);
+        assert_eq!(ui.media_eq, ipc::MediaEq::default());
+        let eq = ipc::MediaEq {
+            enabled: true,
+            bands: vec![ipc::EqPoint { frequency: 120.0, gain: 3.5, q: 0.9, band_type: ipc::EqBandType::LowShelf }],
+        };
+        let merged = merge_profile(Some(&base), &Profile { media_eq: eq.clone(), ..ui });
+        assert_eq!(to_ipc_profile(&merged, 679).media_eq, eq);
+        // As saved before from the UI: the EQ alone differs
+        let before = merge_profile(Some(&base), &to_ipc_profile(&base, 679));
+        assert!(before.only_media_eq_differs(&merged));
     }
 
     #[test]

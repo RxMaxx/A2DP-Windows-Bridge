@@ -12,6 +12,7 @@
 #![forbid(unsafe_code)]
 
 pub mod convert;
+pub mod eq;
 pub mod le;
 pub mod le_rx;
 pub mod packetizer;
@@ -81,6 +82,8 @@ pub struct PipelineConfig {
     /// True while the audio is to be sent as silence (the headphones'
     /// volume is 0, [`bt_host::BtHost::volume_is_zero`]); None: never
     pub mute: Option<Box<dyn Fn() -> bool + Send>>,
+    /// The playback EQ, applied before encoding while it is on; None: none
+    pub media_eq: Option<eq::EqHandle>,
 }
 
 /// The capture thread's end: copies captured audio into the ring
@@ -380,7 +383,7 @@ fn encode_thread(
     mut sink: MediaSink,
     control: &Control,
 ) -> MediaSink {
-    let PipelineConfig { mut encoder, input, channels, mtu, abr, hold, mute, .. } = config;
+    let PipelineConfig { mut encoder, input, channels, mtu, abr, hold, mute, media_eq, .. } = config;
     let _priority = thread_priority();
     let kind = encoder.kind();
     let fmt = encoder.pcm_format();
@@ -398,6 +401,10 @@ fn encode_thread(
     let mut pcm16: Vec<i16> = if fmt == PcmFormat::I16 { Vec::with_capacity(cap) } else { Vec::new() };
     let mut pcm32: Vec<i32> = if fmt == PcmFormat::I32 { Vec::with_capacity(cap) } else { Vec::new() };
     let mut encoded = vec![0u8; encoder.max_output_bytes().max(4096)];
+    // The playback EQ, and one round of audio as float for it
+    let mut eq = media_eq.map(|h| eq::EqProcessor::new(h, input.sample_rate, out_ch));
+    let mut eq_buf = if eq.is_some() { vec![0f32; round_frames * out_ch] } else { Vec::new() };
+    let mut eq_was_on = false;
     let mut packetizer = Packetizer::new(kind, mtu, input.sample_rate);
     let mut timestamp: u32 = 0;
     let mut abr_last = Instant::now();
@@ -551,10 +558,13 @@ fn encode_thread(
             read_buf[..bytes].fill(0);
         }
         let raw = &read_buf[..bytes];
-        match fmt {
-            PcmFormat::I16 => convert::append_i16(raw, input.sample, in_ch, out_ch, &mut pcm16),
-            PcmFormat::I32 => convert::append_i32(raw, input.sample, in_ch, out_ch, &mut pcm32),
+        let eq_on = eq.as_mut().is_some_and(eq::EqProcessor::active);
+        if eq_on != eq_was_on {
+            eq_was_on = eq_on;
+            tracing::debug!("encode thread: EQ {}", if eq_on { "on" } else { "off" });
         }
+        let eq_now = if eq_on { eq.as_mut() } else { None };
+        convert_round(raw, input.sample, in_ch, out_ch, fmt, eq_now, &mut eq_buf, &mut pcm16, &mut pcm32);
 
         let queue_before = sink.depth() + held_packets;
         let timed = tracing::enabled!(tracing::Level::DEBUG);
@@ -626,6 +636,39 @@ fn encode_thread(
     tracing::debug!("encode thread: stopped at timestamp {timestamp}, {encode_errors} encode errors");
     sink.stats().set_live_codec(None);
     sink
+}
+
+/// One round's captured audio converted to what the encoder takes and
+/// appended to `pcm16` / `pcm32`, through the playback EQ when `eq` is given
+/// (`eq_buf`: room for the round as float). Without it the samples are
+/// converted directly, exactly as without an EQ.
+#[allow(clippy::too_many_arguments)]
+fn convert_round(
+    raw: &[u8],
+    sample: SampleType,
+    in_ch: usize,
+    out_ch: usize,
+    fmt: PcmFormat,
+    eq: Option<&mut eq::EqProcessor>,
+    eq_buf: &mut [f32],
+    pcm16: &mut Vec<i16>,
+    pcm32: &mut Vec<i32>,
+) {
+    let Some(eq) = eq else {
+        match fmt {
+            PcmFormat::I16 => convert::append_i16(raw, sample, in_ch, out_ch, pcm16),
+            PcmFormat::I32 => convert::append_i32(raw, sample, in_ch, out_ch, pcm32),
+        }
+        return;
+    };
+    let n = (raw.len() / (in_ch * sample.bytes()) * out_ch).min(eq_buf.len());
+    let buf = &mut eq_buf[..n];
+    convert::to_f32(raw, sample, in_ch, out_ch, buf);
+    eq.process(buf);
+    match fmt {
+        PcmFormat::I16 => convert::append_f32_as_i16(buf, pcm16),
+        PcmFormat::I32 => convert::append_f32_as_i32(buf, pcm32),
+    }
 }
 
 /// Publishes what the ABR encoder runs at when it changed
@@ -860,6 +903,7 @@ mod tests {
             buffer: BufferPreset::Standard,
             hold: false,
             mute: None,
+            media_eq: None,
         };
         let (pipeline, mut input) = Pipeline::start(config, sink, stats.clone());
         // Published before the stream info goes out
@@ -920,6 +964,7 @@ mod tests {
             buffer: BufferPreset::Standard,
             hold: false,
             mute: None,
+            media_eq: None,
         };
         let (pipeline, _input) = Pipeline::start(config, sink, stats.clone());
         assert_eq!(stats.live_codec(), None);
@@ -940,6 +985,7 @@ mod tests {
             buffer: BufferPreset::Standard,
             hold: false,
             mute: None,
+            media_eq: None,
         };
         let (pipeline, mut input) = Pipeline::start(config, sink, stats.clone());
         let audio = vec![0u8; 480 * 4];
@@ -1010,6 +1056,7 @@ mod tests {
             buffer: BufferPreset::Standard,
             hold: true,
             mute: None,
+            media_eq: None,
         };
         let (pipeline, input) = Pipeline::start(config, sink, stats.clone());
         streaming.store(true, Ordering::Release);
@@ -1091,6 +1138,7 @@ mod tests {
                 let zero = zero.clone();
                 move || zero.load(Ordering::Acquire)
             })),
+            media_eq: None,
         };
         let (pipeline, mut input) = Pipeline::start(config, sink, stats.clone());
         let audio: Vec<u8> = (0..480 * 2).flat_map(|i| (i as i16 + 1).to_le_bytes()).collect();
@@ -1108,5 +1156,125 @@ mod tests {
         assert!(pushed(&mut input));
         assert!(calls.loud.load(Ordering::Relaxed) > 0);
         assert!(pipeline.stop().is_some());
+    }
+
+    /// Keeps every sample it is given (16 or 32-bit as asked)
+    struct Recorder(PcmFormat, Arc<std::sync::Mutex<Vec<i64>>>);
+
+    impl Encoder for Recorder {
+        fn kind(&self) -> CodecKind {
+            CodecKind::Sbc
+        }
+        fn pcm_format(&self) -> PcmFormat {
+            self.0
+        }
+        fn pcm_frames_per_encode(&self) -> usize {
+            128
+        }
+        fn max_output_bytes(&self) -> usize {
+            16
+        }
+        fn encode(&mut self, pcm: Pcm<'_>, out: &mut [u8]) -> Result<Encoded, EncoderError> {
+            let mut kept = self.1.lock().unwrap();
+            match pcm {
+                Pcm::I16(s) => kept.extend(s.iter().map(|&v| i64::from(v))),
+                Pcm::I32(s) => kept.extend(s.iter().map(|&v| i64::from(v))),
+            }
+            out[0] = 0;
+            Ok(Encoded { bytes: 1, frames: 1 })
+        }
+        fn bitrate_kbps(&self) -> u32 {
+            0
+        }
+    }
+
+    /// What the encoder got from `audio` (whole encoder blocks), with or
+    /// without an EQ handle
+    fn encoded_through(audio: &[u8], input: InputFormat, fmt: PcmFormat, media_eq: Option<eq::EqHandle>) -> Vec<i64> {
+        let stats = Arc::new(LinkStats::default());
+        let (sink, _consumer, _streaming) = bt_host::media::detached_queue(stats.clone());
+        let kept = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let config = PipelineConfig {
+            encoder: Box::new(Recorder(fmt, kept.clone())),
+            input,
+            channels: 2,
+            mtu: 600,
+            abr: false,
+            buffer: BufferPreset::Stable,
+            hold: false,
+            mute: None,
+            media_eq,
+        };
+        let (pipeline, mut capture) = Pipeline::start(config, sink, stats);
+        let frame = input.frame_bytes();
+        let frames = audio.len() / frame;
+        for chunk in audio.chunks(480 * frame) {
+            capture.push(chunk);
+        }
+        let want = frames / 128 * 128 * 2;
+        let until = Instant::now() + Duration::from_secs(10);
+        while kept.lock().unwrap().len() < want && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(pipeline.stop().is_some());
+        let out = kept.lock().unwrap().clone();
+        assert_eq!(out.len(), want);
+        out
+    }
+
+    fn test_audio(input: InputFormat, frames: usize) -> Vec<u8> {
+        let mut out = Vec::new();
+        for n in 0..frames {
+            for c in 0..input.channels as usize {
+                let x = ((n as f64 * 0.0613 * (c + 1) as f64).sin() * 0.9) as f32;
+                match input.sample {
+                    SampleType::F32 => out.extend_from_slice(&x.to_le_bytes()),
+                    SampleType::I16 => out.extend_from_slice(&((x * 32767.0) as i16).to_le_bytes()),
+                    SampleType::I32 => out.extend_from_slice(&((f64::from(x) * 2147483647.0) as i32).to_le_bytes()),
+                }
+            }
+        }
+        out
+    }
+
+    /// The EQ off (or on with nothing to change) leaves what the encoder
+    /// gets bit for bit as without one, for every input and encoder format
+    #[test]
+    fn eq_off_is_bit_identical() {
+        let flat = eq::EqHandle::default();
+        flat.set(eq::EqSettings::new(true, &[dsp::EqBand::peaking(1000.0, 0.0, 1.0)]));
+        let off = eq::EqHandle::default();
+        off.set(eq::EqSettings::new(false, &[dsp::EqBand::peaking(1000.0, 12.0, 1.0)]));
+        for sample in [SampleType::F32, SampleType::I16, SampleType::I32] {
+            for (rate, channels) in [(44_100, 2), (48_000, 1), (96_000, 2)] {
+                let input = InputFormat { sample_rate: rate, channels, sample };
+                let audio = test_audio(input, 4800);
+                for fmt in [PcmFormat::I16, PcmFormat::I32] {
+                    let plain = encoded_through(&audio, input, fmt, None);
+                    assert_eq!(plain, encoded_through(&audio, input, fmt, Some(off.clone())), "{input:?} {fmt:?}");
+                    assert_eq!(plain, encoded_through(&audio, input, fmt, Some(flat.clone())), "{input:?} {fmt:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn eq_on_changes_the_audio_and_stays_under_full_scale() {
+        let input = InputFormat { sample_rate: 48_000, channels: 2, sample: SampleType::F32 };
+        // Full scale
+        let audio: Vec<u8> = (0..9600)
+            .flat_map(|n| {
+                let x = if (n / 20) % 2 == 0 { 1.0f32 } else { -1.0 };
+                [x, -x]
+            })
+            .flat_map(f32::to_le_bytes)
+            .collect();
+        let h = eq::EqHandle::default();
+        h.set(eq::EqSettings::new(true, &[dsp::EqBand::peaking(1200.0, 12.0, 1.0)]));
+        let plain = encoded_through(&audio, input, PcmFormat::I16, None);
+        let eqd = encoded_through(&audio, input, PcmFormat::I16, Some(h));
+        assert_ne!(plain, eqd);
+        let ceiling = (dsp::dynamics::db_to_lin(eq::CEILING_DB) * 32767.0) as i64 + 1;
+        assert!(eqd.iter().all(|v| v.abs() <= ceiling), "{:?}", eqd.iter().map(|v| v.abs()).max());
     }
 }

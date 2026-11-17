@@ -333,6 +333,7 @@ dependencies = [
  "audio-capture",
  "bt-host",
  "codec",
+ "dsp",
  "hci-transport",
  "if-addrs",
  "ipc",
@@ -364,6 +365,7 @@ dependencies = [
  "codec",
  "crc32fast",
  "ctrlc",
+ "dsp",
  "embed-resource",
  "flate2",
  "hci-transport",
@@ -3048,6 +3050,7 @@ version = "3.0.1"
 dependencies = [
  "bt-host",
  "codec",
+ "dsp",
  "le-audio",
  "proptest",
  "rtrb",

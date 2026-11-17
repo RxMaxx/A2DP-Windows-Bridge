@@ -16,6 +16,8 @@ bt-host.workspace = true
 # cli.rs: -u (UsbSelector)
 hci-transport.workspace = true
 codec = { workspace = true, features = ["default"] }
+# cli.rs: --eq's points
+dsp.workspace = true
 ipc.workspace = true
 win-sys.workspace = true
 audio-capture.workspace = true

@@ -112,6 +112,7 @@ export function newProfile(): Profile {
     sbc_channel_mode: "",
     codec_settings: {},
     codec_order: [],
+    media_eq: { enabled: false, bands: [] },
   };
 }
 

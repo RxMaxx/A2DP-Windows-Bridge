@@ -16,6 +16,7 @@ use bt_host::HeadsetMic;
 use bt_host::media::clamp_media_payload_limit;
 use codec::{CodecKind, Quality};
 
+use crate::media_eq::MediaEq;
 use crate::stream::{Bitpools, SourceRequest, StreamRequest, VolumeSync};
 
 fn auto() -> String {
@@ -213,6 +214,10 @@ pub struct Profile {
     /// it the device offers. Empty: highest sound quality first.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub codec_order: Vec<String>,
+    /// The playback EQ for this device (written only when on or with
+    /// points)
+    #[serde(skip_serializing_if = "MediaEq::is_default")]
+    pub media_eq: MediaEq,
     #[serde(flatten)]
     pub other: BTreeMap<String, serde_json::Value>,
 }
@@ -260,6 +265,7 @@ impl Default for Profile {
             mic_rate: 0,
             codec_settings: BTreeMap::new(),
             codec_order: Vec::new(),
+            media_eq: MediaEq::default(),
             other: BTreeMap::new(),
         }
     }
@@ -529,6 +535,12 @@ impl Profile {
         };
         // Only those fields left to differ, and they do
         same == *new && *self != *new
+    }
+
+    /// `new` is this profile with another playback EQ and nothing else
+    /// changed: the stream goes on and takes it in place
+    pub fn only_media_eq_differs(&self, new: &Profile) -> bool {
+        self.media_eq != new.media_eq && Profile { media_eq: new.media_eq.clone(), ..self.clone() } == *new
     }
 
     /// `new` is this profile with "Set as Windows default input while
@@ -2104,6 +2116,13 @@ mod tests {
         // "Show only options it supports" turned, nothing else (issue #86)
         let unlisted = Profile { unlisted_options: !p.unlisted_options, ..p.clone() };
         assert!(p.only_unlisted_differs(&unlisted));
+        let eq = Profile {
+            media_eq: crate::media_eq::MediaEq { enabled: true, bands: vec![dsp::EqBand::peaking(1000.0, 3.0, 1.0)] },
+            ..p.clone()
+        };
+        assert!(p.only_media_eq_differs(&eq));
+        assert!(!p.only_media_eq_differs(&p));
+        assert!(!p.only_media_eq_differs(&Profile { sbc_bitpool: 30, ..eq.clone() }));
         assert!(!p.only_unlisted_differs(&p));
         assert!(!p.only_unlisted_differs(&Profile { sbc_bitpool: 30, ..unlisted }));
     }

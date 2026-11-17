@@ -1318,6 +1318,7 @@ fn start_pipeline(
                 let zero = host.volume_is_zero();
                 move || zero() || crate::mute_output::key_silenced()
             })),
+            media_eq: Some(crate::media_eq::handle()),
         },
         sink,
         host.stats().clone(),

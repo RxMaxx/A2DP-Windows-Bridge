@@ -187,6 +187,11 @@ CTKD_ON = {'debug_mode': True, 'le_audio_experimental': True}
 # Further cases: name -> (BlueCaster -c, emu_sink.py arguments, the codec expected,
 # more BlueCaster arguments)
 NEGOTIATION = {
+    # The playback EQ on (--eq, EQ_POINTS): a cut leaves the level alone, a
+    # boost is taken off again by the preamp
+    'sbc-eq': ('sbc', [], 'sbc', ['--eq', '1500:-6:2']),
+    'aac-eq': ('aac', [], 'aac', ['--eq', '1000:6:4']),
+    'aptxhd-eq': ('aptxhd', [], 'aptxhd', ['--eq', '1000:6:4']),  # 24-bit
     'sbcxq-44k': ('sbcxq', [], 'sbcxq', ['--rate', '44100']),            # bitpool 47
     # A codec chosen on its card that the sink does not list (the profile's
     # codec_forced, issue #86): LDAC to a sink that lists SBC only
@@ -436,6 +441,32 @@ LOG_CHECKS = {
 # Cases whose LE keys BlueCaster keeps must equal the sink's (ctkd_check)
 CTKD_CASES = {'ctkd', 'ctkd-next-connection', 'ctkd-developer-off', 'ctkd-le-off'}
 TONES = ((1000.0, 0.5), (1500.0, 0.5))  # (frequency, amplitude) per channel, as --test-tone
+# The EQ points (Hz, dB, Q; peaking) of the NEGOTIATION cases that turn it on
+EQ_POINTS = {'sbc-eq': [(1500.0, -6.0, 2.0)], 'aac-eq': [(1000.0, 6.0, 4.0)], 'aptxhd-eq': [(1000.0, 6.0, 4.0)]}
+
+
+def peaking_db(points, freq, rate):
+    """The response (dB) of peaking points at freq, as BlueCaster's EQ
+    filters them (RBJ cookbook)"""
+    total = 0.0
+    for f0, gain, q in points:
+        w0 = 2 * math.pi * f0 / rate
+        alpha, a = math.sin(w0) / (2 * q), 10 ** (gain / 40)
+        b = (1 + alpha * a, -2 * math.cos(w0), 1 - alpha * a)
+        d = (1 + alpha / a, -2 * math.cos(w0), 1 - alpha / a)
+        z = complex(math.cos(2 * math.pi * freq / rate), -math.sin(2 * math.pi * freq / rate))
+        h = (b[0] + b[1] * z + b[2] * z * z) / (d[0] + d[1] * z + d[2] * z * z)
+        total += 20 * math.log10(abs(h))
+    return total
+
+
+def eq_tones(points, rate):
+    """The test tone after the EQ: each channel's tone shaped by the points
+    and lowered by the preamp (the highest boost)"""
+    top = min(20000.0, rate * 0.49)
+    grid = [20.0 * (top / 20.0) ** (i / 191) for i in range(192)] + [p[0] for p in points]
+    preamp = max([0.0] + [peaking_db(points, f, rate) for f in grid])
+    return tuple(((f, a * 10 ** ((peaking_db(points, f, rate) - preamp) / 20)),) for f, a in TONES)
 LATE_SDU_FAILURE = 'reached the controller after their SDU interval began'  # LE Audio cases run once more
 
 
@@ -496,12 +527,12 @@ def tone_block(xs, rate, expected):
     return ok, notes
 
 
-def tone_check(path, tones=None):
+def tone_check(path, tones=None, eq=None):
     """Returns (ok, description) for the test tone in the middle of the WAV.
     tones: per channel the (frequency, amplitude) pairs expected there
-    (default: TONES, one per channel)."""
-    tones = tones or tuple((t,) for t in TONES)
+    (default: TONES, one per channel; eq: through these EQ points)."""
     rate, channels = read_wav(path)
+    tones = tones or (eq_tones(eq, rate) if eq else tuple((t,) for t in TONES))
     if len(channels) != 2 or len(channels[0]) < rate:
         return False, f'expected >= 1 s of stereo audio, got {len(channels)} ch'
     start, count = len(channels[0]) // 2 - rate // 4, rate // 2
@@ -793,7 +824,7 @@ def run_codec(args, codec, port):
                 with open(sent['wav'], 'rb') as a, open(received['wav'], 'rb') as b:
                     if a.read() != b.read():
                         failures.append('decoded audio differs between sent and received side')
-                ok, notes = tone_check(received['wav'])
+                ok, notes = tone_check(received['wav'], eq=EQ_POINTS.get(codec))
                 detail += f' | {notes}'
                 if not ok:
                     failures.append(f'test tone not found: {notes}')

@@ -33,6 +33,7 @@ import {
 } from "../lib/profile";
 import { captureChoices, captureText, captureValue, withCapture } from "./CapturePicker";
 import { InputSource } from "./InputSource";
+import { MediaEqSettings } from "./MediaEq";
 import { Banner, Field, IconButton, Select, Toggle, type Option } from "./controls";
 import { Icon } from "./Icon";
 
@@ -217,6 +218,7 @@ export function DeviceSettings(props: { device: Device }) {
         />
       </Show>
       <InputSource device={props.device} devices={devices() ?? []} source={shown()} />
+      <MediaEqSettings device={props.device} />
     </div>
   );
 }

@@ -138,6 +138,10 @@ Development / testing:
                         Disconnect / Connect in the app (A2DP)
   --wait-off            headphones turned off: wait for them, as the app does
   --services            once streaming, list the services the device gives in SDP
+  --eq <point>[,<point>...]
+                        the playback EQ on, a point as <Hz>:<dB>[:<Q>[:<type>]]
+                        (type peak, lowshelf, highshelf, highpass, lowpass;
+                        Q 1 and peak when left out)
   --headset-mic-toggle <on_s>,<off_s>
                         headset mode on <on_s> seconds after streaming starts
                         and off at <off_s> (the voice link and back to A2DP)
@@ -195,6 +199,8 @@ struct Args {
     voice_codec: Option<bluecaster_core::VoiceCodec>,
     /// --mic-rate: the LE Audio microphone's rate (None: Auto)
     mic_rate: Option<u32>,
+    /// --eq: the playback EQ's points (empty: off)
+    eq: Vec<dsp::EqBand>,
     /// --headset-mic-toggle: headset mode on and off at these seconds
     headset_mic_toggle: Option<(u64, u64)>,
     script: Option<PathBuf>,
@@ -293,6 +299,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
         hci_tcp: None,
         hci_capture: None,
         test_tone: false,
+        eq: Vec::new(),
         duration: None,
         sessions: 1,
         restart: false,
@@ -408,6 +415,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
                 let v = value(&mut it, "--mic-rate")?;
                 a.mic_rate = Some(v.parse::<u32>().ok().filter(|&hz| hz > 0).ok_or("--mic-rate takes a rate in Hz")?);
             }
+            "--eq" => a.eq = parse_eq(&value(&mut it, "--eq")?)?,
             "--headset-mic-toggle" => {
                 let v = value(&mut it, "--headset-mic-toggle")?;
                 let (on, off) = v
@@ -523,6 +531,11 @@ pub fn run(args: &[String]) -> i32 {
         },
         tx,
     );
+    if !a.eq.is_empty() {
+        let eq = bluecaster_core::media_eq::MediaEq { enabled: true, bands: a.eq.clone() };
+        outln!("Playback EQ: {} point(s)", eq.settings().bands().len());
+        bluecaster_core::media_eq::apply(Some(&eq));
+    }
     // --headset-mic-toggle: the stack offers HFP audio from the start, as
     // a stream started in headset mode would
     if a.headset_mic_toggle.is_some() {
@@ -1462,6 +1475,31 @@ fn parse_device_address(s: &str) -> Option<[u8; 6]> {
     Some(a)
 }
 
+/// --eq's points: `<Hz>:<dB>[:<Q>[:<type>]]`, comma separated
+fn parse_eq(v: &str) -> Result<Vec<dsp::EqBand>, String> {
+    let bad = || format!("bad --eq point in \"{v}\" (<Hz>:<dB>[:<Q>[:<type>]])");
+    v.split(',')
+        .map(|point| {
+            let mut parts = point.trim().split(':');
+            let mut num = |default: Option<f32>| match parts.next() {
+                Some(x) => x.trim().parse::<f32>().ok().filter(|n| n.is_finite()),
+                None => default,
+            };
+            let (frequency, gain, q) =
+                (num(None).ok_or_else(bad)?, num(None).ok_or_else(bad)?, num(Some(1.0)).ok_or_else(bad)?);
+            let band_type = match parts.next().map(|t| t.trim().to_ascii_lowercase()).as_deref() {
+                None | Some("peak") => dsp::BandType::Peaking,
+                Some("lowshelf") => dsp::BandType::LowShelf,
+                Some("highshelf") => dsp::BandType::HighShelf,
+                Some("highpass") => dsp::BandType::HighPass,
+                Some("lowpass") => dsp::BandType::LowPass,
+                Some(_) => return Err(bad()),
+            };
+            Ok(dsp::EqBand { frequency, gain, q, band_type })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1761,5 +1799,20 @@ mod tests {
         ] {
             assert_eq!(parse_device_address(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn eq_points() {
+        let a = parse(&args("--cli -d 00:A2:D0:00:00:12 --eq 1000:6:4,80:-3:0.7:lowshelf,30:0")).unwrap();
+        assert_eq!(
+            a.eq,
+            [
+                dsp::EqBand::peaking(1000.0, 6.0, 4.0),
+                dsp::EqBand { frequency: 80.0, gain: -3.0, q: 0.7, band_type: dsp::BandType::LowShelf },
+                dsp::EqBand::peaking(30.0, 0.0, 1.0),
+            ]
+        );
+        assert!(parse(&args("--cli --eq 1000")).is_err());
+        assert!(parse(&args("--cli --eq 1000:3:1:wobble")).is_err());
     }
 }

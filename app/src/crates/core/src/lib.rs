@@ -13,6 +13,7 @@ mod health;
 mod le_media;
 mod le_stream;
 pub mod link;
+pub mod media_eq;
 pub mod messages;
 mod mic_test;
 pub mod migrate;
