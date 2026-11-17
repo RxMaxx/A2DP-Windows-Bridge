@@ -7,7 +7,7 @@
 import { createSignal, createUniqueId, Show } from "solid-js";
 import { t } from "../i18n";
 import type { MicProcessing } from "../ipc/types";
-import { Button, Dialog, Toggle } from "./controls";
+import { Dialog, NavRow, Toggle } from "./controls";
 
 /** Anything set away from "off" */
 export const micProcessingOn = (p: MicProcessing) =>
@@ -21,16 +21,16 @@ export function MicProcessingRow(props: {
 }) {
   const [open, setOpen] = createSignal(false);
   return (
-    <div class="row dialog-row">
-      <span class="row-label">{t("ui.mic_processing")}</span>
-      <div class="inline">
-        <span class="row-state">{t(micProcessingOn(props.value) ? "ui.state_on" : "ui.state_off")}</span>
-        <Button onClick={() => setOpen(true)}>{t("ui.adjust")}</Button>
-      </div>
+    <>
+      <NavRow
+        label={t("ui.mic_processing")}
+        value={t(micProcessingOn(props.value) ? "ui.state_on" : "ui.state_off")}
+        onClick={() => setOpen(true)}
+      />
       <Dialog open={open()} title={t("ui.mic_processing")} onCancel={() => setOpen(false)}>
         <MicProcessingControls value={props.value} disabled={props.disabled} onChange={props.onChange} />
       </Dialog>
-    </div>
+    </>
   );
 }
 

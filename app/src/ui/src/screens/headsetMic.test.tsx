@@ -275,11 +275,9 @@ describe("Input Source on Audio Devices", () => {
     await waitFor(() => expect(mode(wh, "on")).toBeChecked());
     // A line under Input Source, the controls in a dialog
     expect(within(wh).queryByRole("slider", { name: t("ui.mic_gain") })).toBeNull();
-    const row = [...wh.querySelectorAll<HTMLElement>(".dialog-row")].find((r) =>
-      r.textContent?.includes(t("ui.mic_processing")),
-    )!;
+    const row = within(wh).getByRole("button", { name: new RegExp(`^${t("ui.mic_processing")}`) });
     expect(row).toHaveTextContent(t("ui.state_off"));
-    fireEvent.click(within(row).getByRole("button", { name: t("ui.adjust") }));
+    fireEvent.click(row);
     const dialog = await screen.findByRole("dialog", { name: t("ui.mic_processing") });
     const gain = within(dialog).getByRole("slider", { name: t("ui.mic_gain") }) as HTMLInputElement;
     const gate = within(dialog).getByRole("slider", { name: t("ui.mic_gate") }) as HTMLInputElement;

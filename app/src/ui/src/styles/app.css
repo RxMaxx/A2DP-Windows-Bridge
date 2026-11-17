@@ -2191,11 +2191,34 @@ option {
 .mic-processing .row {
   padding: var(--s2) 0;
 }
-/* A setting kept in a dialog: its name, whether it is on, the button */
-.dialog-row {
-  padding: 0;
+/* A line that opens a dialog: the whole line is the button, its state and
+   an arrow at the end. No divider of its own: it follows the line above. */
+.nav-row,
+.row + .nav-row,
+.input-source .nav-row {
+  width: calc(100% + 2 * var(--s2));
+  margin: 0 calc(-1 * var(--s2));
+  padding: var(--s2);
+  border: none;
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--t-fast) var(--ease);
 }
-.row-state {
+.nav-row:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.nav-row:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.nav-row-end {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
   color: var(--text-2);
   font-size: var(--fs-14);
 }

@@ -191,6 +191,20 @@ export function Toggle(props: {
   );
 }
 
+/** A line that opens more settings: its name, its state, an arrow. The
+ *  whole line is the button. */
+export function NavRow(props: { label: string; value: string; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" class="row nav-row" disabled={props.disabled} onClick={() => props.onClick()}>
+      <span class="row-label">{props.label}</span>
+      <span class="nav-row-end">
+        <span class="nav-row-value">{props.value}</span>
+        <Icon name="chevron_right" />
+      </span>
+    </button>
+  );
+}
+
 /** A small switch with its label after it, for options inside a line or a
  *  dialog (every on/off option is a switch, issue #86) */
 export function Check(props: { label: string; checked: boolean; disabled?: boolean; title?: string; onChange: (v: boolean) => void }) {

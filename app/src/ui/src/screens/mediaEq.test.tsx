@@ -58,14 +58,12 @@ async function eqOn() {
   const env = start();
   const entry = await deviceEntry(/WH-1000XM5/);
   // A line on the device, the EQ itself in a dialog
-  const row = [...entry.querySelectorAll<HTMLElement>(".dialog-row")].find((r) =>
-    r.textContent?.includes(t("eq.playback_title")),
-  )!;
+  const row = within(entry).getByRole("button", { name: new RegExp(`^${t("eq.title")}`) });
   expect(row).toHaveTextContent(t("ui.state_off"));
   expect(entry.querySelector(".media-eq")).toBeNull();
-  fireEvent.click(within(row).getByRole("button", { name: t("ui.adjust") }));
-  const wh = await screen.findByRole("dialog", { name: t("eq.playback_title") });
-  const toggle = within(wh).getByRole("switch", { name: t("eq.title") });
+  fireEvent.click(row);
+  const wh = await screen.findByRole("dialog", { name: t("eq.title") });
+  const toggle = within(wh).getByRole("switch", { name: t("eq.enable") });
   expect(toggle).not.toBeChecked();
   expect(wh.querySelector(".eq-graph")).toBeNull();
   fireEvent.click(toggle);
@@ -171,7 +169,7 @@ describe("Playback EQ", () => {
     const { wh, lastEq } = await eqOn();
     fireEvent.click(within(wh).getByRole("button", { name: t("eq.add_point") }));
     await waitFor(() => expect(lastEq().bands).toHaveLength(1));
-    fireEvent.click(within(wh).getByRole("switch", { name: t("eq.title") }));
+    fireEvent.click(within(wh).getByRole("switch", { name: t("eq.enable") }));
     await waitFor(() => expect(lastEq().enabled).toBe(false));
     expect(lastEq().bands).toHaveLength(1);
     await waitFor(() => expect(wh.querySelector(".eq-graph")).toBeNull());
