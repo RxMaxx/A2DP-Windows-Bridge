@@ -47,7 +47,7 @@ import {
 import { saveHeadsetMic } from "../screens/Codecs";
 import { Segmented, Select, Toggle, type Option } from "./controls";
 import { Icon } from "./Icon";
-import { MicProcessingControls } from "./MicProcessing";
+import { MicProcessingRow } from "./MicProcessing";
 
 /** The render endpoint the stream records with this source (the default
  *  output for System Loopback): the microphone must not go there */
@@ -264,7 +264,7 @@ export function InputSource(props: {
           </p>
         </Show>
         <Show when={mode() !== "off"}>
-          <MicProcessingControls
+          <MicProcessingRow
             value={shown()?.mic_processing ?? MIC_PROCESSING_OFF}
             disabled={busy()}
             onChange={(p) => save({ mic_processing: p })}

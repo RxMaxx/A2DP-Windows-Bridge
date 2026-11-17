@@ -217,8 +217,8 @@ export function DeviceSettings(props: { device: Device }) {
           onChange={(v) => void apply({ auto_switch_device: v })}
         />
       </Show>
-      <InputSource device={props.device} devices={devices() ?? []} source={shown()} />
       <MediaEqSettings device={props.device} />
+      <InputSource device={props.device} devices={devices() ?? []} source={shown()} />
     </div>
   );
 }

@@ -1,4 +1,4 @@
-// A device's playback EQ on Audio Devices: on or off, and up to 16 points on
+// A device's playback EQ, in a dialog from Audio Devices: on or off, and up to 16 points on
 // a frequency-response graph (as Easy-MIC-Booster's): double-click adds a
 // point (or puts a point's gain back to 0), dragging moves it (left/right
 // the frequency on a log scale, up/down the gain), the wheel over it changes
@@ -38,7 +38,7 @@ import {
 } from "../lib/eq";
 import { audioEntries, deviceKey } from "../lib/profile";
 import { saveMediaEq } from "../screens/Codecs";
-import { Button, IconButton, Select, Toggle, type Option } from "./controls";
+import { Button, Dialog, IconButton, Select, Toggle, type Option } from "./controls";
 
 const OFF: MediaEq = { enabled: false, bands: [] };
 /** Shortest time between two previews sent while dragging */
@@ -53,7 +53,27 @@ const typeKey: Record<EqBandType, string> = {
 };
 const typeLabel = (b: EqBandType) => t(typeKey[b]);
 
+/** A line saying whether the playback EQ is on, with the editor in a dialog */
 export function MediaEqSettings(props: { device: Device }) {
+  const app = useApp();
+  const [open, setOpen] = createSignal(false);
+  const entry = () => audioEntries(app.core.state.snap!).find((e) => e.key === deviceKey(props.device)) ?? null;
+  const on = () => entry()?.profile?.media_eq?.enabled === true;
+  return (
+    <div class="row dialog-row">
+      <span class="row-label">{t("eq.playback_title")}</span>
+      <div class="inline">
+        <span class="row-state">{t(on() ? "ui.state_on" : "ui.state_off")}</span>
+        <Button onClick={() => setOpen(true)}>{t("ui.adjust")}</Button>
+      </div>
+      <Dialog open={open()} title={t("eq.playback_title")} onCancel={() => setOpen(false)}>
+        <MediaEqEditor device={props.device} />
+      </Dialog>
+    </div>
+  );
+}
+
+function MediaEqEditor(props: { device: Device }) {
   const app = useApp();
   const snap = () => app.core.state.snap!;
   const entry = () => audioEntries(snap()).find((e) => e.key === deviceKey(props.device)) ?? null;

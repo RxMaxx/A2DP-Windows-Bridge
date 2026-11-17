@@ -2188,6 +2188,17 @@ option {
   display: flex;
   flex-direction: column;
 }
+.mic-processing .row {
+  padding: var(--s2) 0;
+}
+/* A setting kept in a dialog: its name, whether it is on, the button */
+.dialog-row {
+  padding: 0;
+}
+.row-state {
+  color: var(--text-2);
+  font-size: var(--fs-14);
+}
 .mic-slider .volume {
   flex: 0 1 18rem;
   padding-right: 0;
@@ -4022,8 +4033,6 @@ html.win-flyout body {
   display: flex;
   flex-direction: column;
   gap: var(--s2);
-  padding-top: var(--s3);
-  border-top: 1px solid var(--border);
 }
 .media-eq .row {
   padding: 0;
