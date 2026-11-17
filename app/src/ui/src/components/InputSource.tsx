@@ -263,19 +263,19 @@ export function InputSource(props: {
             <span>{t("capture.mic_is_default_output")}</span>
           </p>
         </Show>
-        <Show when={mode() !== "off"}>
-          <MicProcessingRow
-            value={shown()?.mic_processing ?? MIC_PROCESSING_OFF}
-            disabled={busy()}
-            onChange={(p) => save({ mic_processing: p })}
-          />
-        </Show>
         <Show when={devicesSwitchShown(snap().settings)}>
           <Toggle
             label={t("capture.mic_default_input")}
             checked={shown()?.mic_default_input !== false}
             disabled={busy()}
             onChange={(v) => void save({ mic_default_input: v })}
+          />
+        </Show>
+        <Show when={mode() !== "off"}>
+          <MicProcessingRow
+            value={shown()?.mic_processing ?? MIC_PROCESSING_OFF}
+            disabled={busy()}
+            onChange={(p) => save({ mic_processing: p })}
           />
         </Show>
       </div>

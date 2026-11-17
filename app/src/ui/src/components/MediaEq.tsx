@@ -38,7 +38,7 @@ import {
 } from "../lib/eq";
 import { audioEntries, deviceKey } from "../lib/profile";
 import { saveMediaEq } from "../screens/Codecs";
-import { Button, Dialog, IconButton, Select, Toggle, type Option } from "./controls";
+import { Button, Dialog, IconButton, NavRow, Select, Toggle, type Option } from "./controls";
 
 const OFF: MediaEq = { enabled: false, bands: [] };
 /** Shortest time between two previews sent while dragging */
@@ -60,16 +60,16 @@ export function MediaEqSettings(props: { device: Device }) {
   const entry = () => audioEntries(app.core.state.snap!).find((e) => e.key === deviceKey(props.device)) ?? null;
   const on = () => entry()?.profile?.media_eq?.enabled === true;
   return (
-    <div class="row dialog-row">
-      <span class="row-label">{t("eq.playback_title")}</span>
-      <div class="inline">
-        <span class="row-state">{t(on() ? "ui.state_on" : "ui.state_off")}</span>
-        <Button onClick={() => setOpen(true)}>{t("ui.adjust")}</Button>
-      </div>
-      <Dialog open={open()} title={t("eq.playback_title")} onCancel={() => setOpen(false)}>
+    <>
+      <NavRow
+        label={t("eq.title")}
+        value={t(on() ? "ui.state_on" : "ui.state_off")}
+        onClick={() => setOpen(true)}
+      />
+      <Dialog open={open()} title={t("eq.title")} onCancel={() => setOpen(false)}>
         <MediaEqEditor device={props.device} />
       </Dialog>
-    </div>
+    </>
   );
 }
 
@@ -149,7 +149,7 @@ function MediaEqEditor(props: { device: Device }) {
   return (
     <div class="media-eq">
       <Toggle
-        label={t("eq.title")}
+        label={t("eq.enable")}
         checked={eq().enabled}
         disabled={!entry()}
         onChange={(v) => void commit({ ...eq(), enabled: v })}
