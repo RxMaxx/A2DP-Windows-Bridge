@@ -1,5 +1,5 @@
 //! Where vendors' Windows Bluetooth drivers keep their firmware on this PC,
-//! for the loaders that read it from there.
+//! for the loaders that read it from there (Realtek, MediaTek, Qualcomm).
 //!
 //! A driver package sits in the driver store
 //! (System32\DriverStore\FileRepository\<inf>_<arch>_<hash>), and its install
@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 pub(crate) enum Names<'a> {
     /// These names (Windows ignores their case)
     Exact(&'a [String]),
+    /// Every file whose lower-case name passes this test
+    Matching(&'a dyn Fn(&str) -> bool),
 }
 
 /// The driver's files on this PC, newest first: in the driver store's
@@ -44,6 +46,16 @@ pub(crate) fn find(windows: &Path, names: Names, package: &dyn Fn(&str) -> bool,
 fn in_folder(folder: &Path, names: &Names) -> Vec<PathBuf> {
     match names {
         Names::Exact(list) => list.iter().map(|n| folder.join(n)).filter(|p| p.is_file()).collect(),
+        Names::Matching(test) => std::fs::read_dir(folder)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter(|e| test(&e.file_name().to_string_lossy().to_ascii_lowercase()))
+                    .map(|e| e.path())
+                    .filter(|p| p.is_file())
+                    .collect()
+            })
+            .unwrap_or_default(),
     }
 }
 
@@ -83,12 +95,13 @@ mod tests {
         let names = ["fw.dat".to_string(), "fw".to_string()];
         let only_vendor = |n: &str| n.starts_with("vendor.inf");
         let exact = find(&windows, Names::Exact(&names), &only_vendor, std::slice::from_ref(&extra));
-        let all = find(&windows, Names::Exact(&names), &any_package, std::slice::from_ref(&extra));
+        let matching =
+            find(&windows, Names::Matching(&|n: &str| n.starts_with("fw")), &any_package, std::slice::from_ref(&extra));
         let _ = std::fs::remove_dir_all(&windows);
         // The other package is left out; the extra folder's file matches
         // whatever its case
         assert_eq!(exact.len(), 4, "{exact:?}");
         assert!(exact.iter().all(|p| !p.starts_with(&other)));
-        assert_eq!(all.len(), 5, "{all:?}");
+        assert_eq!(matching.len(), 5, "{matching:?}");
     }
 }

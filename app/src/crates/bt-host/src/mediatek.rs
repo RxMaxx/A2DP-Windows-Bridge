@@ -737,36 +737,19 @@ pub fn driver_container_file(container: &[u8], name: &str) -> Option<Vec<u8>> {
     })
 }
 
-/// The containers of MediaTek's Windows driver on this PC, newest first:
-/// the copy it installs in System32\drivers, then the driver store's (both
-/// stay after the adapter moved to WinUSB)
+/// The containers (mtkbt*.dat) of MediaTek's Windows driver on this PC,
+/// newest first (crate::driver_files): its packages in the driver store
+/// (mtkbtfilter.inf, mtkbtfilterx.inf; its INF keeps the container there),
+/// and copies in the Windows folder, System32 and System32\drivers. All stay
+/// after the adapter moved to WinUSB.
 fn driver_containers(windows: &Path) -> Vec<PathBuf> {
-    let mut found = Vec::new();
-    let drivers = windows.join("System32").join("drivers");
-    let store = windows.join("System32").join("DriverStore").join("FileRepository");
-    let is_container = |p: &Path| {
-        p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
-            let n = n.to_ascii_lowercase();
-            n.starts_with("mtkbt") && n.ends_with(".dat")
-        })
-    };
-    let files = |dir: &Path| -> Vec<PathBuf> {
-        std::fs::read_dir(dir)
-            .map(|e| e.flatten().map(|e| e.path()).filter(|p| is_container(p)).collect())
-            .unwrap_or_default()
-    };
-    found.extend(files(&drivers));
-    if let Ok(entries) = std::fs::read_dir(&store) {
-        for e in entries.flatten() {
-            let n = e.file_name().to_string_lossy().to_ascii_lowercase();
-            if n.starts_with("mtkbtfilter") {
-                found.extend(files(&e.path()));
-            }
-        }
-    }
-    let modified = |p: &PathBuf| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-    found.sort_by_key(|p| std::cmp::Reverse(modified(p)));
-    found
+    let container = |n: &str| n.starts_with("mtkbt") && n.ends_with(".dat");
+    crate::driver_files::find(
+        windows,
+        crate::driver_files::Names::Matching(&container),
+        &|n: &str| n.starts_with("mtkbt"),
+        &[],
+    )
 }
 
 /// A firmware file from MediaTek's Windows driver, if it is installed
@@ -775,7 +758,11 @@ pub fn from_windows_driver(name: &str) -> Option<Vec<u8>> {
     driver_containers(&windows).iter().find_map(|path| {
         let data = std::fs::read(path).ok()?;
         let file = driver_container_file(&data, name)?;
-        tracing::info!("mediatek: {name} from MediaTek's driver ({}), {} bytes", path.display(), file.len());
+        tracing::info!(
+            "mediatek: {name} from MediaTek's driver ({}), {} bytes",
+            crate::driver_files::file_name(path),
+            file.len()
+        );
         Some(file)
     })
 }

@@ -445,7 +445,7 @@ pub fn from_windows_driver(name: &str) -> Option<Vec<u8>> {
     let windows = std::env::var_os("SystemRoot").map(PathBuf::from)?;
     driver_files(&windows, name).iter().find_map(|path| {
         let data = std::fs::read(path).ok().filter(|d| d.starts_with(MAGIC))?;
-        tracing::info!("realtek: {name} from Realtek's driver ({}), {} bytes", path.display(), data.len());
+        tracing::info!("realtek: {name} from Realtek's driver ({}), {} bytes", file_name(path), data.len());
         Some(data)
     })
 }
