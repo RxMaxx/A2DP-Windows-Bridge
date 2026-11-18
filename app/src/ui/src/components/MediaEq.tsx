@@ -215,18 +215,18 @@ function MediaEqEditor(props: { device: Device }) {
         <div class="eq-field eq-point-field">
           <label for={pointId}>{t("eq.point")}</label>
           <span class="eq-point-pick">
+            <IconButton
+              icon="delete"
+              label={t("eq.delete_point")}
+              disabled={!active() || !sel()}
+              onClick={deleteSelected}
+            />
             <Select
               id={pointId}
               value={selected() ?? -1}
               options={pointOptions()}
               disabled={!active() || eq().bands.length === 0}
               onChange={(i) => setSelected(i)}
-            />
-            <IconButton
-              icon="delete"
-              label={t("eq.delete_point")}
-              disabled={!active() || !sel()}
-              onClick={deleteSelected}
             />
           </span>
         </div>

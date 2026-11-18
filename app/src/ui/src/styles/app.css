@@ -997,9 +997,10 @@ option {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  /* Room so focus rings at the edges are not clipped by the scroller */
-  margin: 0 calc(-1 * var(--s1));
-  padding: 0 var(--s1);
+  /* Room so focus rings at the edges are not clipped by the scroller, and a
+     pressed button (moved down 1px) does not flash a scrollbar */
+  margin: calc(-1 * var(--s1));
+  padding: var(--s1);
 }
 .dialog-actions {
   display: flex;
@@ -4231,11 +4232,14 @@ html.win-flyout body {
   border: 0;
   border-top: 1px solid var(--border);
 }
+/* Spread over the graph's width: the first field under its left edge, the
+   last under its right edge */
 .eq-fields {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: var(--s3) var(--s2);
+  justify-content: space-between;
+  gap: var(--s3) var(--s4);
 }
 .eq-field {
   display: flex;
