@@ -119,6 +119,11 @@ dev_debug: DevDebug,
  */
 bt_chip_pid: number, bt_chip_fw_stem: string, 
 /**
+ * A Realtek chip loads the firmware folder's files instead of Realtek's
+ * Windows driver's (AdapterInfo::firmware_driver)
+ */
+realtek_custom_firmware: boolean, 
+/**
  * auto, off, or Wi-Fi channels such as "6,11"
  */
 afh: string, remote_sink: string, 

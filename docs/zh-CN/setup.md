@@ -131,7 +131,7 @@ bluecaster-core.exe --cli --scan
 
 其他厂商的适配器没有**蓝牙芯片**选项，而是用标签显示固件的来源：**来自 MediaTek 的驱动程序**或**来自 Qualcomm 的驱动程序**（从厂商的 Windows 驱动程序读取，改用 WinUSB 后该驱动程序仍保留安装），**来自 Wi-Fi 驱动程序**（Marvell；请保持 Wi-Fi 开启），**来自固件文件夹**（Intel，附有**打开下载页面**、**打开固件文件夹**和**设置指南**），**可选**（Broadcom 的 `.hcd`）或**不需要**（CSR、Barrot、Actions）。BlueCaster 通过 WinUSB 加载固件后，标签显示**已加载**；加载失败时显示**未加载**，同时附有**打开下载页面**、**打开固件文件夹**和一行说明固件来源的文字。
 
-如果电脑上安装了 Realtek 的 Windows 驱动程序，RTL8761B 适配器（如 TP-Link UB500）就无需下载固件。BlueCaster 会直接使用该驱动程序附带的固件。适配器改用 WinUSB 后，这些固件仍保留在电脑上。你自己放入固件文件夹的固件文件会优先使用。
+如果电脑上安装了 Realtek 的 Windows 驱动程序，RTL8761B 适配器（如 TP-Link UB500）就无需下载固件。BlueCaster 会直接使用该驱动程序附带的固件。适配器改用 WinUSB 后，这些固件仍保留在电脑上。如需加载其他固件（例如 Linux 的固件），请在**适配器**页面中该适配器的固件区域选择**使用自定义固件**。BlueCaster 随后会加载固件文件夹中的文件。选择**使用驱动程序的固件**即可切换回来。
 
 对于**蓝牙芯片**列表中的芯片，**下载固件**可以代你完成：确认后，BlueCaster 会从 linux-firmware（kernel.org）下载文件，逐个校验预期的 SHA-256，然后保存到固件文件夹。如果 linux-firmware 中没有某个芯片的 config 文件，BlueCaster 会保存一个空的 `_config.bin`，芯片将使用自身的设置。这些文件不属于 BlueCaster，只在你要求时才会下载。
 

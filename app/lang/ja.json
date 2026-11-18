@@ -818,6 +818,8 @@
   "ui.adapter.firmware": "ファームウェア",
   "ui.adapter.firmware_not_realtek": "Realtek のファイルは不要",
   "ui.adapter.firmware_from_driver": "%s のドライバーから",
+  "ui.adapter.custom_firmware": "カスタムファームウェアを使う",
+  "ui.adapter.driver_firmware": "ドライバーのファームウェアを使う",
   "ui.adapter.firmware_from_wifi": "Wi-Fi ドライバーから",
   "ui.adapter.firmware_from_folder": "ファームウェアフォルダーから",
   "ui.adapter.firmware_optional": "任意",

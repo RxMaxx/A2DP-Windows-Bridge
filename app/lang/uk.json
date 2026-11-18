@@ -818,6 +818,8 @@
   "ui.adapter.firmware": "Мікропрограма",
   "ui.adapter.firmware_not_realtek": "Файли Realtek не потрібні",
   "ui.adapter.firmware_from_driver": "З драйвера %s",
+  "ui.adapter.custom_firmware": "Використовувати власну мікропрограму",
+  "ui.adapter.driver_firmware": "Використовувати мікропрограму драйвера",
   "ui.adapter.firmware_from_wifi": "З драйвера Wi-Fi",
   "ui.adapter.firmware_from_folder": "З папки мікропрограм",
   "ui.adapter.firmware_optional": "Необов'язково",

@@ -818,6 +818,8 @@
   "ui.adapter.firmware": "Firmware",
   "ui.adapter.firmware_not_realtek": "No necesita archivos de Realtek",
   "ui.adapter.firmware_from_driver": "Del controlador de %s",
+  "ui.adapter.custom_firmware": "Usar firmware personalizado",
+  "ui.adapter.driver_firmware": "Usar el firmware del controlador",
   "ui.adapter.firmware_from_wifi": "Del controlador Wi-Fi",
   "ui.adapter.firmware_from_folder": "De la carpeta de firmware",
   "ui.adapter.firmware_optional": "Opcional",

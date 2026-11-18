@@ -818,6 +818,8 @@
   "ui.adapter.firmware": "Прошивка",
   "ui.adapter.firmware_not_realtek": "Файлы Realtek не нужны",
   "ui.adapter.firmware_from_driver": "Из драйвера %s",
+  "ui.adapter.custom_firmware": "Использовать свою прошивку",
+  "ui.adapter.driver_firmware": "Использовать прошивку драйвера",
   "ui.adapter.firmware_from_wifi": "Из драйвера Wi-Fi",
   "ui.adapter.firmware_from_folder": "Из папки прошивки",
   "ui.adapter.firmware_optional": "Необязательно",

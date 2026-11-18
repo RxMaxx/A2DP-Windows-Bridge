@@ -214,6 +214,10 @@ pub struct Settings {
     pub bt_chip_pid: u16,
     /// Firmware stem for chips not in the chip table (e.g. "rtl8761bu")
     pub bt_chip_fw_stem: String,
+    /// A Realtek chip loads the firmware folder's files even where Realtek's
+    /// Windows driver on this PC has its firmware, which is loaded by
+    /// default (issue #86; adapter::configure)
+    pub realtek_custom_firmware: bool,
 
     /// AFH host channel classification: "auto", "off" or Wi-Fi channels "6,11"
     #[serde(default = "default_afh")]
@@ -403,6 +407,7 @@ impl Default for Settings {
             dev_debug: DevDebug::default(),
             bt_chip_pid: 0,
             bt_chip_fw_stem: String::new(),
+            realtek_custom_firmware: false,
             afh: default_afh(),
             remote_sink: String::new(),
             last_profile: String::new(),

@@ -818,6 +818,8 @@
   "ui.adapter.firmware": "固件",
   "ui.adapter.firmware_not_realtek": "无需 Realtek 文件",
   "ui.adapter.firmware_from_driver": "来自 %s 的驱动程序",
+  "ui.adapter.custom_firmware": "使用自定义固件",
+  "ui.adapter.driver_firmware": "使用驱动程序的固件",
   "ui.adapter.firmware_from_wifi": "来自 Wi-Fi 驱动程序",
   "ui.adapter.firmware_from_folder": "来自固件文件夹",
   "ui.adapter.firmware_optional": "可选",

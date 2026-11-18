@@ -818,6 +818,8 @@
   "ui.adapter.firmware": "韌體",
   "ui.adapter.firmware_not_realtek": "不需要 Realtek 檔案",
   "ui.adapter.firmware_from_driver": "來自 %s 的驅動程式",
+  "ui.adapter.custom_firmware": "使用自訂韌體",
+  "ui.adapter.driver_firmware": "使用驅動程式的韌體",
   "ui.adapter.firmware_from_wifi": "來自 Wi-Fi 驅動程式",
   "ui.adapter.firmware_from_folder": "來自韌體資料夾",
   "ui.adapter.firmware_optional": "選用",

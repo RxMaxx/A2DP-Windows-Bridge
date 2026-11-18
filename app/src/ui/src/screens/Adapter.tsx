@@ -260,6 +260,10 @@ export function Adapter() {
             // by hand or the firmware did not load.
             const driverFirmware = () =>
               a.firmware_from_driver && isAutoChip(snap().settings) && !adapter().rom_firmware;
+            // The firmware folder's files although the driver has the
+            // firmware: back to the driver's
+            const customFirmware = () => a.firmware_driver && snap().settings.realtek_custom_firmware;
+            const setCustom = (on: boolean) => void saveSettings(app, { realtek_custom_firmware: on });
             const driverHead = createUniqueId();
             const firmwareHead = createUniqueId();
             return (
@@ -348,6 +352,17 @@ export function Adapter() {
                       >
                         <VendorFirmwareBox adapter={a} />
                       </Show>
+                    </Show>
+                    {/* Issue #86: other firmware (Linux's) for those who want it */}
+                    <Show when={driverFirmware()}>
+                      <Button icon="wrench" onClick={() => setCustom(true)}>
+                        {t("ui.adapter.custom_firmware")}
+                      </Button>
+                    </Show>
+                    <Show when={customFirmware()}>
+                      <Button icon="arrow_reset" onClick={() => setCustom(false)}>
+                        {t("ui.adapter.driver_firmware")}
+                      </Button>
                     </Show>
                     <Show when={!adapterSupported(a)}>
                       <Button icon="arrow_download" disabled>

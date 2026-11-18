@@ -356,6 +356,7 @@ mod tests {
             firmware_invalid: None,
             firmware_download: true,
             firmware_from_driver: false,
+            firmware_driver: false,
             vendor_note: None,
             restart_needed: false,
             le_audio: None,

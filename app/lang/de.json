@@ -818,6 +818,8 @@
   "ui.adapter.firmware": "Firmware",
   "ui.adapter.firmware_not_realtek": "Keine Realtek-Dateien nötig",
   "ui.adapter.firmware_from_driver": "Aus dem Treiber von %s",
+  "ui.adapter.custom_firmware": "Eigene Firmware verwenden",
+  "ui.adapter.driver_firmware": "Firmware des Treibers verwenden",
   "ui.adapter.firmware_from_wifi": "Aus dem WLAN-Treiber",
   "ui.adapter.firmware_from_folder": "Aus dem Firmware-Ordner",
   "ui.adapter.firmware_optional": "Optional",

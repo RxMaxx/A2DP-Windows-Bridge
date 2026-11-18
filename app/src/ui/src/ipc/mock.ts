@@ -75,6 +75,8 @@ export type MockScenario =
   | "capped"
   /** Huawei earbuds that list LDAC only once it is asked for (issue #30) */
   | "huawei"
+  /** Realtek's Windows driver on this PC has the RTL8761BU's firmware (issue #86) */
+  | "realtek_driver"
   /** Headset microphone on for the WH-1000XM5 (to CABLE
    *  Input) and for the LE Audio earbuds: a stream reports its voice link */
   | "voice";
@@ -103,6 +105,7 @@ const RTL: AdapterInfo = {
   firmware_invalid: null,
   firmware_download: true,
   firmware_from_driver: false,
+  firmware_driver: false,
   vendor_note: null,
   restart_needed: false,
   le_audio: null,
@@ -248,6 +251,7 @@ export function sampleSettings(over: Partial<Settings> = {}): Settings {
     },
     bt_chip_pid: 0,
     bt_chip_fw_stem: "",
+    realtek_custom_firmware: false,
     afh: "auto",
     remote_sink: "",
     le_audio_experimental: false,
@@ -373,6 +377,9 @@ const LE_BUDS = sampleDevice({
   le_audio_set: true,
 });
 
+/** The RTL8761B firmware of Realtek's Windows driver (core realtek_btnic) */
+const RTL_DRIVER_FILE = "rtl8761b_mp_chip_bt40_fw_asic_rom_patch_new.dat";
+
 export function sampleSnapshot(scenario: MockScenario = "normal"): Snapshot {
   const fresh = scenario === "fresh";
   // LE Audio on; le_unsupported: an adapter without isochronous channels,
@@ -445,7 +452,9 @@ export function sampleSnapshot(scenario: MockScenario = "normal"): Snapshot {
               firmware_present: false,
             },
           ]
-        : [RTL],
+        : scenario === "realtek_driver"
+          ? [{ ...RTL, firmware_driver: true, firmware_from_driver: true, firmware_files: [RTL_DRIVER_FILE] }]
+          : [RTL],
       error: null,
       le_audio:
         scenario === "le_unsupported" ? false : scenario === "le" ? true : null,
@@ -734,7 +743,7 @@ const FIRMWARE_FILES: FirmwareFile[] = [
  */
 export function adapterWithFirmware(
   a: AdapterInfo,
-  s: ChipSetting,
+  s: ChipSetting & { realtek_custom_firmware?: boolean },
   folder: readonly FirmwareFile[],
 ): AdapterInfo {
   const detected =
@@ -754,12 +763,23 @@ export function adapterWithFirmware(
       firmware_invalid: null,
       firmware_download: false,
     };
+  // As the core: the driver's firmware first, custom firmware the folder's
+  if (a.firmware_driver && !s.realtek_custom_firmware)
+    return {
+      ...a,
+      firmware_present: true,
+      firmware_files: [RTL_DRIVER_FILE],
+      firmware_invalid: null,
+      firmware_from_driver: true,
+      firmware_download: REALTEK_CHIPS.some((c) => c.stem === stem.toLowerCase()),
+    };
   const entry = folder.find((f) => f.stem.toLowerCase() === stem.toLowerCase());
   return {
     ...a,
     firmware_present: entry?.has_config ?? false,
     firmware_files: [`${stem}_fw.bin`, `${stem}_config.bin`],
     firmware_invalid: null,
+    firmware_from_driver: false,
     // core firmware::available: every table chip but Custom
     firmware_download: REALTEK_CHIPS.some((c) => c.stem === stem.toLowerCase()),
   };
@@ -1459,7 +1479,8 @@ export class MockCore implements Transport {
         }
         if (
           before.bt_chip_pid !== this.snap.settings.bt_chip_pid ||
-          before.bt_chip_fw_stem !== this.snap.settings.bt_chip_fw_stem
+          before.bt_chip_fw_stem !== this.snap.settings.bt_chip_fw_stem ||
+          before.realtek_custom_firmware !== this.snap.settings.realtek_custom_firmware
         ) {
           // As the core's reload_adapter: the firmware state for the new
           // chip, then an idle stack is released so the firmware loads again

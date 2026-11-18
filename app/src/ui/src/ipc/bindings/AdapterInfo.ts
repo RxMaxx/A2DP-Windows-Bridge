@@ -48,6 +48,11 @@ firmware_download: boolean,
  */
 firmware_from_driver: boolean, 
 /**
+ * The vendor's Windows driver on this PC has this chip's firmware, also
+ * while Settings::realtek_custom_firmware loads the folder's instead
+ */
+firmware_driver: boolean, 
+/**
  * What to tell about other vendors' firmware (firmware.vendor_intel,
  * _broadcom, _csr, _unsupported); None for Realtek and unknown chips
  */

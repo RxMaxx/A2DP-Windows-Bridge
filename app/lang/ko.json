@@ -818,6 +818,8 @@
   "ui.adapter.firmware": "펌웨어",
   "ui.adapter.firmware_not_realtek": "Realtek 파일이 필요 없습니다",
   "ui.adapter.firmware_from_driver": "%s 드라이버에서",
+  "ui.adapter.custom_firmware": "사용자 지정 펌웨어 사용",
+  "ui.adapter.driver_firmware": "드라이버 펌웨어 사용",
   "ui.adapter.firmware_from_wifi": "Wi-Fi 드라이버에서",
   "ui.adapter.firmware_from_folder": "펌웨어 폴더에서",
   "ui.adapter.firmware_optional": "선택 사항",

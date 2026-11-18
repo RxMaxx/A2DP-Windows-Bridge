@@ -140,18 +140,9 @@ pub fn realtek_driver_firmware(fw_stem: &str) -> Option<std::path::PathBuf> {
     bt_host::realtek_btnic::driver_firmware(fw_stem.strip_suffix(".bin").unwrap_or(fw_stem))
 }
 
-/// The firmware folder has a valid `fw_stem` file (with .bin or, as
-/// BTstack's driver also takes it, without)
-fn folder_firmware(dir: &Path, fw_stem: &str) -> bool {
-    let stem = fw_stem.strip_suffix(".bin").unwrap_or(fw_stem);
-    [format!("{stem}.bin"), stem.to_string()]
-        .iter()
-        .any(|n| chips::firmware_file_state(&dir.join(n)) == chips::FileState::Ok)
-}
-
 /// Fills the chipset part of `config` from the settings and the present
 /// adapters
-pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path) {
+pub fn configure(config: &mut HostConfig, settings: &Settings, _config_dir: &Path) {
     config.afh = Some(Box::new(WifiAfh::default()));
     if matches!(config.transport, TransportConfig::Tcp(_)) {
         return; // a virtual controller: no chipset, no firmware
@@ -235,16 +226,18 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path
         (stem(fw), stem(cfg))
     });
     tracing::debug!("adapter: realtek pid {pid:04X}, firmware files {:?}", config.realtek_files);
-    // The firmware folder's file first (one the user placed), else Realtek's
-    // Windows driver's (issue #86), else none: the card offers the download
-    let dir = config.firmware_dir.clone().unwrap_or_else(|| crate::paths::firmware_dir(config_dir));
+    // Realtek's Windows driver's firmware first (issue #86), else the
+    // firmware folder's; custom firmware: the folder's only
     if pid != 0
         && let Some((fw, _)) = &config.realtek_files
-        && !folder_firmware(&dir, fw)
     {
-        config.realtek_firmware_file = realtek_driver_firmware(fw);
-        if config.realtek_firmware_file.is_none() {
-            tracing::info!("no {fw}.bin in the firmware folder, and none in Realtek's Windows driver on this PC");
+        if settings.realtek_custom_firmware {
+            tracing::info!("custom firmware: the firmware folder's {fw}");
+        } else {
+            config.realtek_firmware_file = realtek_driver_firmware(fw);
+            if config.realtek_firmware_file.is_none() {
+                tracing::info!("no firmware for this chip in Realtek's Windows driver on this PC: the folder's {fw}");
+            }
         }
     }
     if pid == 0 {

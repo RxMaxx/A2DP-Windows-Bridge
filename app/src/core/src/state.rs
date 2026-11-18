@@ -426,6 +426,7 @@ fn to_ipc_settings(s: &CoreSettings) -> Settings {
         },
         bt_chip_pid: s.bt_chip_pid,
         bt_chip_fw_stem: s.bt_chip_fw_stem.clone(),
+        realtek_custom_firmware: s.realtek_custom_firmware,
         afh: s.afh.clone(),
         remote_sink: s.remote_sink.clone(),
         le_audio_experimental: s.le_audio_experimental,
@@ -535,6 +536,7 @@ fn merge_settings(base: &CoreSettings, s: &Settings) -> CoreSettings {
     };
     c.bt_chip_pid = s.bt_chip_pid;
     c.bt_chip_fw_stem = s.bt_chip_fw_stem.clone();
+    c.realtek_custom_firmware = s.realtek_custom_firmware;
     c.afh = s.afh.clone();
     c.remote_sink = s.remote_sink.clone();
     c.le_audio_experimental = s.le_audio_experimental;
@@ -662,19 +664,17 @@ fn adapter_infos(config_dir: &Path, settings: &CoreSettings) -> (Vec<AdapterInfo
             let files = chips::firmware_files(chip_pid, fw_stem);
             let mut check = chips::firmware_check(&paths::firmware_dir(config_dir), chip_pid, fw_stem);
             let mut file_names = files.clone().map(|(f, c)| vec![f, c]).unwrap_or_default();
-            let mut from_driver = false;
-            // Without the folder's files, Realtek's Windows driver's firmware
-            // stands in for them, with no config file (issue #86): no
-            // download is asked for then
-            if let Some(name) = files
+            // Realtek's Windows driver's firmware comes first, with no config
+            // file (issue #86): no download is asked for then. Custom
+            // firmware: the folder's files as before.
+            let driver_fw = files
                 .as_ref()
-                .filter(|_| !check.as_ref().is_some_and(|c| c.present))
                 .and_then(|(fw, _)| bluecaster_core::adapter::realtek_driver_firmware(fw))
-                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-            {
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
+            let from_driver = driver_fw.is_some() && !settings.realtek_custom_firmware;
+            if let Some(name) = driver_fw.as_ref().filter(|_| from_driver) {
                 check = Some(chips::FirmwareCheck { present: true, invalid_file: None });
-                file_names = vec![name];
-                from_driver = true;
+                file_names = vec![name.clone()];
             }
             AdapterInfo {
                 instance_id: a.device.instance_id.clone(),
@@ -690,6 +690,7 @@ fn adapter_infos(config_dir: &Path, settings: &CoreSettings) -> (Vec<AdapterInfo
                 firmware_download: files.as_ref().is_some_and(|(f, _)| bluecaster_core::firmware::available(f)),
                 firmware_files: file_names,
                 firmware_from_driver: from_driver,
+                firmware_driver: driver_fw.is_some(),
                 firmware_invalid: check.and_then(|c| c.invalid_file),
                 vendor_note: vendor_note(a.vendor, a.device.vid, a.device.pid),
                 restart_needed: a.device.problem_code == Some(CM_PROB_NEED_RESTART),
@@ -1279,7 +1280,9 @@ fn autostart_changed(before: &CoreSettings, after: &CoreSettings) -> bool {
 
 /// The chip or firmware setting changed: the stack must load firmware anew
 fn chip_changed(before: &CoreSettings, after: &CoreSettings) -> bool {
-    before.bt_chip_pid != after.bt_chip_pid || before.bt_chip_fw_stem != after.bt_chip_fw_stem
+    before.bt_chip_pid != after.bt_chip_pid
+        || before.bt_chip_fw_stem != after.bt_chip_fw_stem
+        || before.realtek_custom_firmware != after.realtek_custom_firmware
 }
 
 /// The codec and what it runs with: "LDAC 990 kbps | 96 kHz | 24-bit | ABR"
@@ -4021,6 +4024,7 @@ mod tests {
             firmware_invalid: invalid.map(str::to_owned),
             firmware_download: true,
             firmware_from_driver: false,
+            firmware_driver: false,
             vendor_note: None,
             restart_needed: false,
             le_audio: None,
@@ -5573,6 +5577,7 @@ mod tests {
         assert!(!chip_changed(&a, &a.clone()));
         assert!(chip_changed(&a, &CoreSettings { bt_chip_pid: 0x8771, ..a.clone() }));
         assert!(chip_changed(&a, &CoreSettings { bt_chip_fw_stem: "rtl8761bu".into(), ..a.clone() }));
+        assert!(chip_changed(&a, &CoreSettings { realtek_custom_firmware: true, ..a.clone() }));
     }
 
     #[test]

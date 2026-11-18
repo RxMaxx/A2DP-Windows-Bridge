@@ -117,6 +117,10 @@ pub struct AdapterInfo {
     /// firmware_files names the driver's file, nothing is to be done
     #[serde(default)]
     pub firmware_from_driver: bool,
+    /// The vendor's Windows driver on this PC has this chip's firmware, also
+    /// while Settings::realtek_custom_firmware loads the folder's instead
+    #[serde(default)]
+    pub firmware_driver: bool,
     /// What to tell about other vendors' firmware (firmware.vendor_intel,
     /// _broadcom, _csr, _unsupported); None for Realtek and unknown chips
     #[serde(default)]
@@ -1034,6 +1038,10 @@ pub struct Settings {
     /// 0 = auto, a Realtek PID, 0xFFFE = not Realtek
     pub bt_chip_pid: u16,
     pub bt_chip_fw_stem: String,
+    /// A Realtek chip loads the firmware folder's files instead of Realtek's
+    /// Windows driver's (AdapterInfo::firmware_driver)
+    #[serde(default)]
+    pub realtek_custom_firmware: bool,
     /// auto, off, or Wi-Fi channels such as "6,11"
     pub afh: String,
     pub remote_sink: String,
