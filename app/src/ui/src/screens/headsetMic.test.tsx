@@ -78,6 +78,28 @@ const MUTE = () => t("ui.headset_mic_mute");
 const UNMUTE = () => t("ui.headset_mic_unmute");
 
 describe("Input Source on Audio Devices", () => {
+  it("offers On only in developer mode; a device saved as On works as Auto meanwhile", async () => {
+    const { core, saves } = start("#/devices", "voice");
+    const wh = await deviceEntry(/WH-1000XM5/);
+    await waitFor(() => expect(mode(wh, "on")).toBeChecked());
+    const before = saves().length;
+    await core.request("settings.set", {
+      settings: { ...core.state.snap!.settings, developer_mode: false },
+    });
+    // Off and Auto only, Auto chosen, nothing saved: On stays in the profile
+    await waitFor(() => expect(mode(wh, "auto")).toBeChecked());
+    expect(within(micModes(wh)!).getAllByRole("radio")).toHaveLength(2);
+    expect(within(micModes(wh)!).queryByRole("radio", { name: t("ui.headset_mic_on") })).toBeNull();
+    expect(saves().length).toBe(before);
+    expect(core.state.snap!.profiles.find((p) => p.device_name === "WH-1000XM5")?.headset_mic).toBe("on");
+    // Developer mode again: On is back
+    await core.request("settings.set", {
+      settings: { ...core.state.snap!.settings, developer_mode: true },
+    });
+    await waitFor(() => expect(mode(wh, "on")).toBeChecked());
+    expect(within(micModes(wh)!).getAllByRole("radio")).toHaveLength(3);
+  });
+
   it("is on every device outside developer mode too, and no longer on Codecs", async () => {
     const { core } = start("#/devices");
     const wh = await deviceEntry(/WH-1000XM5/);

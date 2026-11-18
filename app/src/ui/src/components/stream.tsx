@@ -423,7 +423,7 @@ export function micShown(snap: Snapshot, profile: Profile | null | undefined): b
     s.state !== "idle" &&
     s.profile === profile.name &&
     !!profile.mic_device_id &&
-    headsetMode(profile) !== "off"
+    headsetMode(profile, true) !== "off"
   );
 }
 
@@ -435,7 +435,9 @@ export function MicBadge(props: { profile: Profile | null | undefined }) {
   const snap = () => core.state.snap!;
   const voice = () => (micShown(snap(), props.profile) ? (snap().stream.voice ?? null) : null);
   const idle = () =>
-    props.profile?.mic_muted ? t("ui.headset_mic_off") : t(`ui.headset_mic_${headsetMode(props.profile!)}`);
+    props.profile?.mic_muted
+      ? t("ui.headset_mic_off")
+      : t(`ui.headset_mic_${headsetMode(props.profile!, !!snap().settings.developer_mode)}`);
   return (
     <Show when={micShown(snap(), props.profile)}>
       <div

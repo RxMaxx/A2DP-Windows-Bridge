@@ -1620,9 +1620,16 @@ impl bluecaster_core::default_input::InputEndpoints for NoInputs {
 }
 
 /// The headset mode in force for a profile: its mode with an output
-/// chosen; Off otherwise (or while muted)
-fn headset_mic_in_force(p: &CoreProfile) -> HeadsetMic {
-    if p.mic_device_id.is_empty() { HeadsetMic::Off } else { p.headset_mic_mode() }
+/// chosen; Off otherwise (or while muted). On (the microphone kept open)
+/// counts only in developer mode (`developer`, Settings::debug_mode; issue
+/// #86): elsewhere it works as Auto, and the saved value stays, so turning
+/// developer mode on brings it back. LE Audio takes Auto as On anyway.
+fn headset_mic_in_force(p: &CoreProfile, developer: bool) -> HeadsetMic {
+    match p.headset_mic_mode() {
+        _ if p.mic_device_id.is_empty() => HeadsetMic::Off,
+        HeadsetMic::On if !developer => HeadsetMic::Auto,
+        mode => mode,
+    }
 }
 
 /// Headset mode in force into a profile's request, for classic and LE Audio
@@ -1670,7 +1677,9 @@ fn is_mic_note(key: &str) -> bool {
 /// headset mode in force and a call codec (classic) or microphone rate (LE
 /// Audio) chosen. Auto-select turned on or off then changes what it uses.
 fn mic_choice_matters(p: &CoreProfile) -> bool {
-    headset_mic_in_force(p).is_on() && if p.le_audio { p.mic_rate != 0 } else { !p.voice_codec.is_empty() }
+    p.headset_mic_mode().is_on()
+        && !p.mic_device_id.is_empty()
+        && if p.le_audio { p.mic_rate != 0 } else { !p.voice_codec.is_empty() }
 }
 
 /// The save changed only `headset_mic` / `mic_device_*` / the microphone's
@@ -2423,7 +2432,7 @@ impl CoreState {
                 if (p.mic_device_id.as_str(), p.headset_mic.as_str())
                     != (was.mic_device_id.as_str(), was.headset_mic.as_str())
                 {
-                    let mode = headset_mic_in_force(p);
+                    let mode = headset_mic_in_force(p, settings.debug_mode);
                     let kept = self.service.set_headset_mic(
                         mode,
                         mode.is_on().then(|| p.mic_device_id.clone()),
@@ -2573,7 +2582,7 @@ impl CoreState {
             req.codec_values = p.all_codec_values();
         }
         // Headset mode: on only with an output chosen
-        let headset_mic = headset_mic_in_force(p);
+        let headset_mic = headset_mic_in_force(p, settings.debug_mode);
         if headset_mic.is_on() {
             tracing::debug!(
                 "profile {}: headset microphone ({}) to {}",
@@ -3258,7 +3267,7 @@ impl CoreState {
                         // The session refuses an output that would feed the
                         // capture; false (no stream, or a stack without
                         // voice): it starts again instead
-                        let mode = headset_mic_in_force(&in_order);
+                        let mode = headset_mic_in_force(&in_order, self.service.settings().debug_mode);
                         let kept = self.service.set_headset_mic(
                             mode,
                             mode.is_on().then(|| in_order.mic_device_id.clone()),
@@ -3365,11 +3374,37 @@ impl CoreState {
                     let le_toggled = base.le_audio() != merged.le_audio();
                     let auto_toggled = base.auto_codec != merged.auto_codec;
                     let developer_off = base.debug_mode && !merged.debug_mode;
+                    let developer_toggled = base.debug_mode != merged.debug_mode;
                     let sync_toggled =
                         base.volume_sync != merged.volume_sync || base.mutes_output() != merged.mutes_output();
                     me.save_settings(merged)?;
                     if chip {
                         me.reload_adapter();
+                    }
+                    // Developer mode on / off: a classic stream of a profile
+                    // saved as On switches between On and Auto in place
+                    if developer_toggled {
+                        let (_, s) = me.snapshot();
+                        let list = profiles::load(&me.config_dir());
+                        let now = me.service.settings();
+                        let saved_on = |p: &&CoreProfile| {
+                            !p.le_audio && p.headset_mic_mode() == HeadsetMic::On && !p.mic_device_id.is_empty()
+                        };
+                        if let Some(p) =
+                            s.stream.profile.as_deref().and_then(|n| list.iter().find(|p| p.name == n)).filter(saved_on)
+                        {
+                            let mode = headset_mic_in_force(p, now.debug_mode);
+                            let kept = me.service.set_headset_mic(
+                                mode,
+                                Some(p.mic_device_id.clone()),
+                                p.voice_codec_in_force(now.auto_codec),
+                            );
+                            tracing::info!(
+                                "developer mode {}: headset microphone {} in place: {kept}",
+                                if now.debug_mode { "on" } else { "off" },
+                                mode.as_str()
+                            );
+                        }
                     }
                     // Auto-select on / off: a profile in use whose codec it
                     // changes starts again (as a profile save does); Windows
@@ -3426,7 +3461,7 @@ impl CoreState {
                             // A call codec chosen: the classic stream's
                             // voice link takes Auto's or the chosen one in
                             // place, or the profile starts again
-                            let mode = headset_mic_in_force(p);
+                            let mode = headset_mic_in_force(p, me.service.settings().debug_mode);
                             let codec = p.voice_codec_in_force(settings.auto_codec);
                             if !me.service.set_headset_mic(mode, Some(p.mic_device_id.clone()), codec)
                                 && restart_after_save(&s.stream, &p.name)
@@ -4394,11 +4429,17 @@ mod tests {
         assert_eq!(classic.mic_output.as_deref(), Some("{cable}"));
         // In force: an output chosen and not muted
         let auto = CoreProfile { headset_mic: "auto".into(), mic_device_id: "{cable}".into(), ..le_profile };
-        assert_eq!(headset_mic_in_force(&auto), HeadsetMic::Auto);
+        assert_eq!(headset_mic_in_force(&auto, false), HeadsetMic::Auto);
         let muted = CoreProfile { mic_muted: true, ..auto.clone() };
-        assert_eq!(headset_mic_in_force(&muted), HeadsetMic::Off);
+        assert_eq!(headset_mic_in_force(&muted, true), HeadsetMic::Off);
+        // On only in developer mode; Auto otherwise, saved as it was
+        let on = CoreProfile { headset_mic: "on".into(), ..auto.clone() };
+        assert_eq!(headset_mic_in_force(&on, true), HeadsetMic::On);
+        assert_eq!(headset_mic_in_force(&on, false), HeadsetMic::Auto);
+        assert_eq!(on.headset_mic, "on");
+        assert_eq!(headset_mic_in_force(&CoreProfile { mic_muted: true, ..on }, false), HeadsetMic::Off);
         let no_output = CoreProfile { mic_device_id: String::new(), ..auto };
-        assert_eq!(headset_mic_in_force(&no_output), HeadsetMic::Off);
+        assert_eq!(headset_mic_in_force(&no_output, true), HeadsetMic::Off);
     }
 
     #[test]

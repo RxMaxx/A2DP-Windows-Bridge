@@ -34,7 +34,7 @@ import {
   audioEntries,
   deviceKey,
   entryBase,
-  HEADSET_MODES,
+  headsetModes,
   headsetMode,
   hifiCable,
   isHifiCable,
@@ -95,13 +95,14 @@ export function InputSource(props: {
         }
       : base;
   };
+  const developer = () => !!snap().settings.developer_mode;
   /** The mode saved: what the microphone's button opens again */
   const saved = (): HeadsetMode => {
     const p = entry()?.profile;
-    return p ? headsetMode(p) : "off";
+    return p ? headsetMode(p, developer()) : "off";
   };
   /** The mode shown: Off while muted (the cards' button) */
-  const mode = (): HeadsetMode => (!shown() || shown()!.mic_muted ? "off" : headsetMode(shown()!));
+  const mode = (): HeadsetMode => (!shown() || shown()!.mic_muted ? "off" : headsetMode(shown()!, developer()));
   /** Off mutes a device whose mode is Auto or On, as its button does */
   const chooseMode = (m: HeadsetMode) => {
     if (m === mode()) return;
@@ -231,7 +232,7 @@ export function InputSource(props: {
           <Segmented<HeadsetMode>
             label={t("capture.input_source")}
             value={mode()}
-            options={HEADSET_MODES.map((m) => ({
+            options={headsetModes(developer()).map((m) => ({
               value: m,
               label: t(`ui.headset_mic_${m}`),
               disabled: busy(),

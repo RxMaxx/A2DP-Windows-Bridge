@@ -56,13 +56,22 @@ export function deviceDefaults(profiles: readonly Profile[], address: string): D
  *  switches it */
 export type HeadsetMode = "off" | "auto" | "on";
 
-/** As Codecs offers them */
+/** Every mode a profile may hold */
 export const HEADSET_MODES: readonly HeadsetMode[] = ["off", "auto", "on"];
 
-/** A profile's headset mode; anything unknown reads as Off */
-export function headsetMode(p: Pick<Profile, "headset_mic">): HeadsetMode {
+/** The modes offered: On (the microphone kept open) only in developer mode
+ *  (issue #86) */
+export function headsetModes(developer: boolean): readonly HeadsetMode[] {
+  return developer ? HEADSET_MODES : ["off", "auto"];
+}
+
+/** A profile's headset mode in force; anything unknown reads as Off. On
+ *  outside developer mode works as Auto, as the core takes it, and comes
+ *  back with developer mode (the saved value stays). */
+export function headsetMode(p: Pick<Profile, "headset_mic">, developer: boolean): HeadsetMode {
   const m = p.headset_mic as string;
-  return (HEADSET_MODES as readonly string[]).includes(m) ? (m as HeadsetMode) : "off";
+  const mode = (HEADSET_MODES as readonly string[]).includes(m) ? (m as HeadsetMode) : "off";
+  return mode === "on" && !developer ? "auto" : mode;
 }
 
 /** The headset microphone's processing all off: the microphone as it comes */

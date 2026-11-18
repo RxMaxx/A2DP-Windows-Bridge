@@ -929,6 +929,15 @@ UI:
 
 ## UI: Off / Auto / On and the mute chip
 
+- On is a developer-mode mode (issue #86, 2026-11-18: no use case for
+  users). The UI offers `headsetModes(developer)` (Off / Auto outside
+  developer mode); `headsetMode(p, developer)` and the core's
+  `headset_mic_in_force(p, debug_mode)` take a saved On as Auto. The saved
+  value stays, so turning developer mode on brings On back; turning it on
+  or off switches a classic stream of such a profile in place
+  (`SettingsSet`). LE Audio takes Auto as On anyway; the CLI's
+  `--headset-mic on` is not gated.
+
 - Audio Devices, each device's Input Source (`components/InputSource.tsx`,
   issue #86 round 35; previously on Codecs): a `Segmented` Off / Auto / On on
   the right of its label saves `headset_mic` (and `mic_muted: false`); the
