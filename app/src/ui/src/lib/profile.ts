@@ -68,8 +68,7 @@ export function headsetMode(p: Pick<Profile, "headset_mic">): HeadsetMode {
 /** The headset microphone's processing all off: the microphone as it comes */
 export const MIC_PROCESSING_OFF: MicProcessing = {
   gain_db: 0,
-  noise_suppression: false,
-  suppression: 100,
+  suppression: 0,
   gate_db: -80,
 };
 

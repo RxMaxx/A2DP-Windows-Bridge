@@ -264,7 +264,6 @@ fn from_ipc_codec_values(v: &ipc::CodecValues) -> profiles::CodecValues {
 fn clamp_mic_processing(p: ipc::MicProcessing) -> ipc::MicProcessing {
     ipc::MicProcessing {
         gain_db: p.gain_db.clamp(-12, 24),
-        noise_suppression: p.noise_suppression,
         suppression: p.suppression.min(100),
         gate_db: p.gate_db.clamp(ipc::MicProcessing::GATE_OFF_DB, -20),
     }
@@ -4407,12 +4406,9 @@ mod tests {
             CoreProfile { name: "WH".into(), device_address: "00:11:22:33:44:55".into(), ..CoreProfile::default() };
         let mut p = to_ipc_profile(&core, 679);
         assert_eq!(p.mic_processing, ipc::MicProcessing::default());
-        p.mic_processing = ipc::MicProcessing { gain_db: 40, noise_suppression: true, suppression: 120, gate_db: -127 };
+        p.mic_processing = ipc::MicProcessing { gain_db: 40, suppression: 120, gate_db: -127 };
         let merged = merge_profile(Some(&core), &p);
-        assert_eq!(
-            merged.mic_processing,
-            ipc::MicProcessing { gain_db: 24, noise_suppression: true, suppression: 100, gate_db: -80 }
-        );
+        assert_eq!(merged.mic_processing, ipc::MicProcessing { gain_db: 24, suppression: 100, gate_db: -80 });
         let unchanged = merge_profile(Some(&core), &to_ipc_profile(&core, 679));
         assert!(unchanged.only_mic_processing_differs(&merged));
         assert_eq!(to_ipc_profile(&merged, 679).mic_processing, merged.mic_processing);

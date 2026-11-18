@@ -18,8 +18,8 @@ pub const LIMITER_CEILING_DB: f32 = -1.0;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MicSettings {
     pub gain_db: f32,
-    pub noise_suppression: bool,
-    /// 0..1: how much of the denoised signal (the rest is the dry one)
+    /// 0..1: how much of the denoised signal (the rest is the dry one); 0:
+    /// noise suppression off (the denoiser does not run)
     pub suppression: f32,
     /// The gate's threshold in dBFS; [`GATE_OFF_DB`] or lower: off
     pub gate_db: f32,
@@ -27,22 +27,26 @@ pub struct MicSettings {
 
 impl Default for MicSettings {
     fn default() -> Self {
-        MicSettings { gain_db: 0.0, noise_suppression: false, suppression: 1.0, gate_db: GATE_OFF_DB }
+        MicSettings { gain_db: 0.0, suppression: 0.0, gate_db: GATE_OFF_DB }
     }
 }
 
 impl MicSettings {
     /// Anything to do: off, the samples pass untouched
     pub fn is_active(&self) -> bool {
-        self.gain_db != 0.0 || self.noise_suppression || self.gate_db > GATE_OFF_DB
+        self.gain_db != 0.0 || self.suppresses() || self.gate_db > GATE_OFF_DB
+    }
+
+    /// Noise suppression is on
+    pub fn suppresses(&self) -> bool {
+        self.suppression > 0.0
     }
 
     /// Within the ranges the chain takes
     pub fn clamped(self) -> MicSettings {
         MicSettings {
             gain_db: if self.gain_db.is_finite() { self.gain_db.clamp(GAIN_MIN_DB, GAIN_MAX_DB) } else { 0.0 },
-            noise_suppression: self.noise_suppression,
-            suppression: if self.suppression.is_finite() { self.suppression.clamp(0.0, 1.0) } else { 1.0 },
+            suppression: if self.suppression.is_finite() { self.suppression.clamp(0.0, 1.0) } else { 0.0 },
             gate_db: if self.gate_db.is_finite() { self.gate_db.clamp(GATE_OFF_DB, GATE_MAX_DB) } else { GATE_OFF_DB },
         }
     }
@@ -89,7 +93,7 @@ impl MicChain {
         }
         let limiter = ((0.0015 * self.rate as f32) as usize).max(1);
         let ns = match &self.denoiser {
-            Some(d) if settings.noise_suppression => d.latency(),
+            Some(d) if settings.suppresses() => d.latency(),
             _ => 0,
         };
         limiter + ns
@@ -119,7 +123,7 @@ impl MicChain {
         self.gain = target;
 
         match self.denoiser.as_mut() {
-            Some(d) if settings.noise_suppression => {
+            Some(d) if settings.suppresses() => {
                 if !std::mem::replace(&mut self.denoising, true) {
                     d.reset();
                 }
@@ -200,7 +204,7 @@ mod tests {
                 ((seed >> 8) as f32 / (1 << 24) as f32 - 0.5) * 0.04
             })
             .collect();
-        let s = MicSettings { noise_suppression: true, ..MicSettings::default() };
+        let s = MicSettings { suppression: 1.0, ..MicSettings::default() };
         let out = run(16_000, &noise, &s, 120);
         let db = lin_to_db(rms(&out[32_000..]) / rms(&noise[32_000..]));
         assert!(db < -10.0, "{db:.1} dB");
@@ -216,8 +220,24 @@ mod tests {
 
     #[test]
     fn clamped_keeps_values_in_range() {
-        let s = MicSettings { gain_db: 99.0, suppression: f32::NAN, gate_db: 0.0, noise_suppression: true }.clamped();
+        let s = MicSettings { gain_db: 99.0, suppression: 7.0, gate_db: 0.0 }.clamped();
         assert_eq!((s.gain_db, s.suppression, s.gate_db), (GAIN_MAX_DB, 1.0, GATE_MAX_DB));
+        assert_eq!(MicSettings { suppression: f32::NAN, ..MicSettings::default() }.clamped().suppression, 0.0);
+    }
+
+    #[test]
+    fn zero_strength_is_no_noise_suppression() {
+        let s = MicSettings { suppression: 0.0, ..MicSettings::default() };
+        assert!(!s.is_active());
+        let mut chain = MicChain::new(16_000);
+        assert_eq!(chain.latency(&s), 0);
+        let input = tone(16_000, 0.5, 1_600);
+        let mut out = input.clone();
+        assert!(!chain.process(&mut out, &s));
+        assert_eq!(out, input);
+        // With the gain on, the denoiser still stays out (no added delay)
+        let g = MicSettings { gain_db: 6.0, ..s };
+        assert_eq!(chain.latency(&g), (0.0015f32 * 16_000.0) as usize);
     }
 
     /// `cargo test -p dsp --release -- --ignored --nocapture bench_mic_chain`
@@ -227,7 +247,7 @@ mod tests {
         for rate in [16_000u32, 32_000, 48_000] {
             let secs = 30;
             let input = tone(rate, 0.2, rate as usize * secs);
-            let s = MicSettings { gain_db: 12.0, noise_suppression: true, gate_db: -50.0, ..MicSettings::default() };
+            let s = MicSettings { gain_db: 12.0, suppression: 1.0, gate_db: -50.0 };
             let mut chain = MicChain::new(rate);
             let mut buf = input.clone();
             let t = std::time::Instant::now();

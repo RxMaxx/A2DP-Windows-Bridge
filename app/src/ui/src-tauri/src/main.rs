@@ -75,6 +75,7 @@ fn main() {
             commands::open_url,
             commands::open_folder,
             commands::reveal_path,
+            commands::save_text_file,
             commands::update_status,
             commands::update_install,
         ])

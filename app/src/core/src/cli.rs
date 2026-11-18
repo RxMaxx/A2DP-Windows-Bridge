@@ -425,7 +425,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
                     .filter(|db| (-12..=24).contains(db))
                     .ok_or("--mic-gain takes -12 to 24 (dB)")?;
             }
-            "--mic-noise-suppression" => a.mic_processing.noise_suppression = true,
+            "--mic-noise-suppression" => a.mic_processing.suppression = 100,
             "--mic-rate" => {
                 let v = value(&mut it, "--mic-rate")?;
                 a.mic_rate = Some(v.parse::<u32>().ok().filter(|&hz| hz > 0).ok_or("--mic-rate takes a rate in Hz")?);
@@ -1624,7 +1624,7 @@ mod tests {
         assert_eq!(parse(&args("--cli --headset-mic")).unwrap().headset_mic, HeadsetMic::On);
         assert_eq!(parse(&args("--cli --mic-output")).err().as_deref(), Some("--mic-output needs a value"));
         let a = parse(&args("--cli --headset-mic --mic-gain 6 --mic-noise-suppression")).unwrap();
-        assert_eq!((a.mic_processing.gain_db, a.mic_processing.noise_suppression), (6, true));
+        assert_eq!((a.mic_processing.gain_db, a.mic_processing.suppression), (6, 100));
         assert_eq!(parse(&args("--cli --mic-gain 30")).err().as_deref(), Some("--mic-gain takes -12 to 24 (dB)"));
         // The microphone's codec (run_test.py's voice-limit cases)
         let a = parse(&args("--cli --headset-mic --voice-codec msbc --mic-rate 16000")).unwrap();

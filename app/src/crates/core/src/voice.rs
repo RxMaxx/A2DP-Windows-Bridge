@@ -518,7 +518,6 @@ impl VoiceRx for ShellRx {
 pub(crate) fn mic_settings(p: &ipc::MicProcessing) -> voice_link::MicSettings {
     voice_link::MicSettings {
         gain_db: f32::from(p.gain_db),
-        noise_suppression: p.noise_suppression,
         suppression: f32::from(p.suppression.min(100)) / 100.0,
         gate_db: f32::from(p.gate_db),
     }
@@ -1436,9 +1435,8 @@ mod tests {
     #[test]
     fn a_profiles_mic_processing_reaches_the_chain() {
         assert!(!mic_settings(&ipc::MicProcessing::default()).is_active());
-        let s =
-            mic_settings(&ipc::MicProcessing { gain_db: 30, noise_suppression: true, suppression: 250, gate_db: -10 });
-        assert_eq!((s.gain_db, s.noise_suppression, s.suppression, s.gate_db), (24.0, true, 1.0, -20.0));
+        let s = mic_settings(&ipc::MicProcessing { gain_db: 30, suppression: 250, gate_db: -10 });
+        assert_eq!((s.gain_db, s.suppression, s.gate_db), (24.0, 1.0, -20.0));
         // A gate below its lowest threshold is off
         assert!(!mic_settings(&ipc::MicProcessing { gate_db: -100, ..Default::default() }).is_active());
     }

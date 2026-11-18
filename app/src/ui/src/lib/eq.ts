@@ -183,3 +183,49 @@ export function formatFreq(f: number): string {
 export function formatGain(g: number): string {
   return `${g > 0 ? "+" : g < 0 ? "−" : ""}${Math.abs(g).toFixed(1)} dB`;
 }
+
+/** The highest boost of the response (dB, 0 when it only cuts), as the
+ *  core's preamp takes it (pipeline::eq::max_boost_db): scanned over the
+ *  audible range and at each point's own frequency */
+export function maxBoostDb(bands: readonly EqPoint[], rate = GRAPH_RATE): number {
+  const coeffs = bands.map((b) => forBand(b, rate)).filter((c): c is Coeffs => c !== null);
+  const response = (f: number) => coeffs.reduce((s, c) => s + responseDb(c, f, rate), 0);
+  const top = Math.min(FREQ_MAX, rate * 0.49);
+  const scan = 192;
+  let max = 0;
+  for (let i = 0; i < scan; i++) max = Math.max(max, response(FREQ_MIN * Math.pow(top / FREQ_MIN, i / (scan - 1))));
+  for (const b of bands) if (b.frequency < rate * 0.49) max = Math.max(max, response(b.frequency));
+  return max;
+}
+
+/** Equalizer APO's names of the filters (as AutoEq writes them): the
+ *  shelves are the cookbook's with the core's slope 1, which is Q 1/√2 at
+ *  the same frequency (LSC/HSC), the pass filters take their Q (HPQ/LPQ) */
+const APO_TYPE: Record<EqBandType, string> = {
+  Peaking: "PK",
+  LowShelf: "LSC",
+  HighShelf: "HSC",
+  HighPass: "HPQ",
+  LowPass: "LPQ",
+};
+const SHELF_Q = Math.SQRT1_2;
+
+/** The points as an Equalizer APO / AutoEq parametric EQ: the preamp the
+ *  core plays them with, then one line per point */
+export function eqApoText(bands: readonly EqPoint[]): string {
+  const num = (v: number, digits: number) => {
+    const s = v.toFixed(digits);
+    return Number(s) === 0 ? (0).toFixed(digits) : s;
+  };
+  const fc = (f: number) => (Number.isInteger(f) ? String(f) : num(f, 1));
+  // Rounded up: the preamp never lets the loudest part go over
+  const preamp = -Math.ceil(maxBoostDb(bands) * 10 - 1e-6) / 10;
+  const lines = [`Preamp: ${num(preamp, 1)} dB`];
+  bands.forEach((b, i) => {
+    const parts = [`Filter ${i + 1}: ON ${APO_TYPE[b.band_type]} Fc ${fc(b.frequency)} Hz`];
+    if (hasGain(b.band_type)) parts.push(`Gain ${num(b.gain, 1)} dB`);
+    parts.push(`Q ${num(hasQ(b.band_type) ? b.q : SHELF_Q, 2)}`);
+    lines.push(parts.join(" "));
+  });
+  return lines.join("\r\n") + "\r\n";
+}

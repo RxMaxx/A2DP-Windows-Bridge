@@ -42,6 +42,9 @@ export interface Transport {
   openUrl(url: string): Promise<void>;
   openFolder(path: string): Promise<void>;
   revealPath(path: string): Promise<void>;
+  /** Saves `text` to a .txt file picked in the Save As dialog, `name`
+   *  suggested -> false when cancelled; rejects with the error's text */
+  saveTextFile(name: string, text: string): Promise<boolean>;
   setTheme(theme: string): Promise<void>;
   /** Windows' accent colours ("#rrggbb"), null if not known */
   accentColors?(): Promise<{ light: string; dark: string } | null>;

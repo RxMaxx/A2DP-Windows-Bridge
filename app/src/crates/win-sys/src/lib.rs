@@ -17,6 +17,7 @@ pub mod crash;
 pub mod dpapi;
 pub mod driver;
 pub mod elevation;
+pub mod file_dialog;
 pub mod locale;
 pub mod media_keys;
 pub mod mmcss;

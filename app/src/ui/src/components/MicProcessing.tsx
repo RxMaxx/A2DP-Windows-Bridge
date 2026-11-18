@@ -1,22 +1,27 @@
 // The headset microphone's processing, in a dialog opened under its Input
-// Source: gain, noise suppression with its strength, and the noise gate's
-// threshold (lowest: off). Kept in the device's profile; the running
+// Source: gain, noise suppression's strength and the noise gate's threshold
+// (each at its lowest: off). Kept in the device's profile; the running
 // microphone takes a change in place, nothing reconnects. A slider saves
-// when let go and shows what it holds until the profile has it.
+// when let go and shows what it holds until the profile has it. Nothing
+// hides (issue #86): while the microphone is Off the line and the controls
+// stay, disabled.
 
 import { createSignal, createUniqueId, Show } from "solid-js";
 import { t } from "../i18n";
 import type { MicProcessing } from "../ipc/types";
-import { Dialog, NavRow, Toggle } from "./controls";
+import { Dialog, NavRow } from "./controls";
 
 /** Anything set away from "off" */
 export const micProcessingOn = (p: MicProcessing) =>
-  p.gain_db !== 0 || p.noise_suppression || p.gate_db > MIC_GATE_RANGE[0];
+  p.gain_db !== 0 || p.suppression > 0 || p.gate_db > MIC_GATE_RANGE[0];
 
-/** A line saying whether the processing is on, with the dialog behind it */
+/** A line saying whether the processing is on, with the dialog behind it
+ *  (`off`: the microphone is Off, the line disabled; `busy`: a change is
+ *  on its way) */
 export function MicProcessingRow(props: {
   value: MicProcessing;
-  disabled?: boolean;
+  off?: boolean;
+  busy?: boolean;
   onChange: (p: MicProcessing) => Promise<unknown>;
 }) {
   const [open, setOpen] = createSignal(false);
@@ -25,10 +30,11 @@ export function MicProcessingRow(props: {
       <NavRow
         label={t("ui.mic_processing")}
         value={t(micProcessingOn(props.value) ? "ui.state_on" : "ui.state_off")}
+        disabled={props.off}
         onClick={() => setOpen(true)}
       />
       <Dialog open={open()} title={t("ui.mic_processing")} onCancel={() => setOpen(false)}>
-        <MicProcessingControls value={props.value} disabled={props.disabled} onChange={props.onChange} />
+        <MicProcessingControls value={props.value} disabled={props.off || props.busy} onChange={props.onChange} />
       </Dialog>
     </>
   );
@@ -39,6 +45,7 @@ export const MIC_GATE_RANGE = [-80, -20] as const;
 
 export const gainText = (db: number) => `${db > 0 ? "+" : ""}${db} dB`;
 export const gateText = (db: number) => (db <= MIC_GATE_RANGE[0] ? t("ui.mic_gate_off") : `${db} dB`);
+export const suppressionText = (v: number) => (v <= 0 ? t("ui.mic_suppression_off") : `${v}%`);
 
 function Slider(props: {
   label: string;
@@ -117,23 +124,15 @@ export function MicProcessingControls(props: {
         disabled={props.disabled}
         onSave={(v) => save({ gain_db: v })}
       />
-      <Toggle
+      <Slider
         label={t("ui.mic_noise_suppression")}
-        checked={props.value.noise_suppression}
+        min={0}
+        max={100}
+        value={props.value.suppression}
+        text={suppressionText}
         disabled={props.disabled}
-        onChange={(v) => void save({ noise_suppression: v })}
+        onSave={(v) => save({ suppression: v })}
       />
-      <Show when={props.value.noise_suppression}>
-        <Slider
-          label={t("ui.mic_suppression_strength")}
-          min={0}
-          max={100}
-          value={props.value.suppression}
-          text={(v) => `${v}%`}
-          disabled={props.disabled}
-          onSave={(v) => save({ suppression: v })}
-        />
-      </Show>
       <Slider
         label={t("ui.mic_gate")}
         hint={t("ui.mic_gate_hint")}

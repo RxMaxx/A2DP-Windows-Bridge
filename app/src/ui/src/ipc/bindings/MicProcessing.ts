@@ -10,9 +10,10 @@ export type MicProcessing = {
 /**
  * dB, -12 to 24
  */
-gain_db: number, noise_suppression: boolean, 
+gain_db: number, 
 /**
- * Percent of the denoised signal (the rest is the original), 0 to 100
+ * Noise suppression: percent of the denoised signal (the rest is the
+ * original), 0 (off) to 100
  */
 suppression: number, 
 /**

@@ -22,8 +22,8 @@
 // again in the same mode. Its recording side becomes Windows' default input
 // while the device is connected unless turned off (the core's
 // default_input.rs), so apps that record from the default microphone open it.
-// While the microphone is not Off, its processing (gain, noise suppression,
-// noise gate) follows; it applies in place.
+// Its processing (gain, noise suppression, noise gate) follows, disabled
+// while the microphone is Off; it applies in place.
 
 import { createSignal, Show } from "solid-js";
 import { useApp } from "../app/context";
@@ -271,13 +271,12 @@ export function InputSource(props: {
             onChange={(v) => void save({ mic_default_input: v })}
           />
         </Show>
-        <Show when={mode() !== "off"}>
-          <MicProcessingRow
-            value={shown()?.mic_processing ?? MIC_PROCESSING_OFF}
-            disabled={busy()}
-            onChange={(p) => save({ mic_processing: p })}
-          />
-        </Show>
+        <MicProcessingRow
+          value={shown()?.mic_processing ?? MIC_PROCESSING_OFF}
+          off={mode() === "off"}
+          busy={busy()}
+          onChange={(p) => save({ mic_processing: p })}
+        />
       </div>
     </Show>
   );

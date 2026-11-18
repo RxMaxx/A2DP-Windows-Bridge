@@ -17,7 +17,7 @@ pub use dsp::mic::MicSettings;
 #[derive(Debug)]
 struct Shared {
     gain_db: AtomicU32,
-    /// 0: off, else 1 + the strength's bits
+    /// The strength in thousandths (0: off)
     suppression: AtomicU32,
     gate_db: AtomicU32,
 }
@@ -48,19 +48,15 @@ impl MicDsp {
         let s = s.clamped();
         let r = Ordering::Relaxed;
         self.0.gain_db.store(s.gain_db.to_bits(), r);
-        // Both suppression fields in one word: a push never sees half a change
-        let ns = if s.noise_suppression { 1 + (s.suppression * 1000.0).round() as u32 } else { 0 };
-        self.0.suppression.store(ns, r);
+        self.0.suppression.store((s.suppression * 1000.0).round() as u32, r);
         self.0.gate_db.store(s.gate_db.to_bits(), r);
     }
 
     pub fn get(&self) -> MicSettings {
         let r = Ordering::Relaxed;
-        let ns = self.0.suppression.load(r);
         MicSettings {
             gain_db: f32::from_bits(self.0.gain_db.load(r)),
-            noise_suppression: ns != 0,
-            suppression: if ns == 0 { 1.0 } else { (ns - 1) as f32 / 1000.0 },
+            suppression: self.0.suppression.load(r) as f32 / 1000.0,
             gate_db: f32::from_bits(self.0.gate_db.load(r)),
         }
     }
@@ -113,11 +109,11 @@ mod tests {
     fn settings_round_trip() {
         let p = MicDsp::new();
         assert_eq!(p.get(), MicSettings::default());
-        let s = MicSettings { gain_db: 6.0, noise_suppression: true, suppression: 0.7, gate_db: -45.0 };
+        let s = MicSettings { gain_db: 6.0, suppression: 0.7, gate_db: -45.0 };
         p.clone().set(s);
         assert_eq!(p.get(), s);
-        p.set(MicSettings { noise_suppression: false, ..s });
-        assert_eq!(p.get(), MicSettings { noise_suppression: false, suppression: 1.0, ..s });
+        p.set(MicSettings { suppression: 0.0, ..s });
+        assert_eq!(p.get(), MicSettings { suppression: 0.0, ..s });
     }
 
     #[test]

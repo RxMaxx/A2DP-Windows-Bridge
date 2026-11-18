@@ -1751,6 +1751,19 @@ export class MockCore implements Transport {
   async revealPath(path: string) {
     console.info("[mock] reveal", path);
   }
+  /** The files saved (tests); in a browser, also downloaded */
+  savedFiles: { name: string; text: string }[] = [];
+  async saveTextFile(name: string, text: string) {
+    this.savedFiles.push({ name, text });
+    if (typeof URL.createObjectURL === "function") {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+    return true;
+  }
   async setTheme() {}
   /** Windows has no virtual device (tests) */
   noVirtual = false;

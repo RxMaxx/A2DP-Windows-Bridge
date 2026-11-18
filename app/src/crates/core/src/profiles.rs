@@ -1293,7 +1293,7 @@ mod tests {
         let p = Profile { name: "WH".into(), device_address: "00:11:22:33:44:55".into(), ..Profile::default() };
         assert!(serde_json::to_value(&p).unwrap().get("mic_processing").is_none());
         let on = Profile {
-            mic_processing: ipc::MicProcessing { gain_db: 6, noise_suppression: true, ..Default::default() },
+            mic_processing: ipc::MicProcessing { gain_db: 6, suppression: 100, ..Default::default() },
             ..p.clone()
         };
         assert!(p.only_mic_processing_differs(&on));

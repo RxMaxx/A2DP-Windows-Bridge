@@ -426,7 +426,7 @@ impl Inner {
             tracing::info!(
                 "microphone processing: gain {} dB, noise suppression {}, gate {}",
                 p.gain_db,
-                if s.noise_suppression { format!("{} %", p.suppression.min(100)) } else { "off".into() },
+                if s.suppresses() { format!("{} %", p.suppression.min(100)) } else { "off".into() },
                 if p.gate_db > ipc::MicProcessing::GATE_OFF_DB { format!("{} dB", p.gate_db) } else { "off".into() }
             );
         }
@@ -2130,11 +2130,11 @@ mod tests {
     #[test]
     fn mic_processing_applies_now_and_stays_with_the_request() {
         let s = service();
-        let p = ipc::MicProcessing { gain_db: 9, noise_suppression: true, suppression: 50, gate_db: -50 };
+        let p = ipc::MicProcessing { gain_db: 9, suppression: 50, gate_db: -50 };
         // Nothing runs: the next microphone takes it
         s.set_mic_processing(p);
         let got = s.inner.mic_dsp.get();
-        assert_eq!((got.gain_db, got.noise_suppression, got.suppression, got.gate_db), (9.0, true, 0.5, -50.0));
+        assert_eq!((got.gain_db, got.suppression, got.gate_db), (9.0, 0.5, -50.0));
         *s.last_request.lock().unwrap() = Some(request());
         s.set_mic_processing(ipc::MicProcessing::default());
         assert!(!s.inner.mic_dsp.get().is_active());
