@@ -172,6 +172,9 @@ pub struct LeScanResult {
     pub appearance: u16,
     /// ASCS / PACS / CAS advertised (or a module said so)
     pub le_audio: bool,
+    /// `le_audio` only for an audio appearance: no LE Audio service or set
+    /// advertised (a classic headset's LE side for its app often looks so)
+    pub appearance_only: bool,
     pub connectable: bool,
     /// Service UUIDs and service data UUIDs
     pub uuids16: Vec<u16>,

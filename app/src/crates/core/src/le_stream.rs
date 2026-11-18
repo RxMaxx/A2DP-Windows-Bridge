@@ -422,7 +422,7 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
     let mut le = req.le.clone().unwrap_or_default();
     let addr = bt_host::addr_str(&req.device);
     tracing::info!("LE Audio stream to {addr} ({})", crate::diag::quoted(&req.device_name));
-    tracing::debug!("le stream: request {req:?}");
+    tracing::debug!("le stream: request {:?}", req.redacted());
     let stopped = || inner.stop_requested();
     let ready = || inner.notify(StreamState::Idle, Msg::new("status.ready"));
     let session_start = Instant::now();
@@ -821,7 +821,7 @@ fn run_broadcast(inner: &Arc<Inner>, req: StreamRequest) {
     let stopped = || inner.stop_requested();
     let ready = || inner.notify(StreamState::Idle, Msg::new("status.ready"));
     tracing::info!("Auracast (developer mode): broadcast {}", crate::diag::quoted(&req.device_name));
-    tracing::debug!("broadcast: request {req:?}");
+    tracing::debug!("broadcast: request {:?}", req.redacted());
 
     if let Some(key) = refusal(inner.le_wanted(), inner.developer(), &req.source) {
         tracing::debug!("broadcast: refused ({key})");

@@ -1728,15 +1728,21 @@ fn parse_ad(r: &mut LeScanResult, data: &[u8]) {
         .iter()
         .any(|u| matches!(*u, UUID_SERVICE_ASCS | UUID_SERVICE_PACS | UUID_SERVICE_TMAS | UUID_SERVICE_GMAS));
     let named_cas = r.uuids16.contains(&UUID_SERVICE_CAS) && !r.name.trim().is_empty();
+    if audio_service || named_cas || r.rsi.is_some() {
+        r.appearance_only = false;
+    }
     if audio_service || named_cas {
         r.le_audio = true;
     }
     // No LE Audio UUID, but an audio appearance (Audio Sink 0x0840-0x087F,
     // Wearable Audio Device 0x0940-0x097F, e.g. earbuds): list it as a
-    // candidate; connecting tells (no ASCS: "no sink ASE")
+    // candidate; connecting tells (no ASCS: "no sink ASE"). Not for the LE
+    // side of a classic device (the service drops those, a Sennheiser
+    // HDR 275 advertises so for its app)
     let category = r.appearance >> 6;
     if !r.le_audio && r.connectable && (category == 0x021 || category == 0x025) {
         r.le_audio = true;
+        r.appearance_only = r.rsi.is_none();
         if r.note.is_empty() {
             r.note = "audio appearance, LE Audio not advertised".into();
         }
@@ -2309,8 +2315,11 @@ mod tests {
         // An earbud appearance without LE Audio UUIDs is a candidate
         let mut e = LeScanResult { connectable: true, ..LeScanResult::default() };
         parse_ad(&mut e, &[3, 0x19, 0x41, 0x09, 3, 0x03, 0x0F, 0x18]);
-        assert!(e.le_audio);
+        assert!(e.le_audio && e.appearance_only);
         assert_eq!(e.note, "audio appearance, LE Audio not advertised");
+        // ... until its other report advertises PACS
+        parse_ad(&mut e, &[3, 0x03, 0x50, 0x18]);
+        assert!(e.le_audio && !e.appearance_only);
         // Fast Pair data and a bare CAS scan response, no name (issue #86):
         // not listed; with a name it is
         let mut c = LeScanResult { connectable: true, ..LeScanResult::default() };

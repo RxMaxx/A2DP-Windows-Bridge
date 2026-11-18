@@ -101,6 +101,21 @@ pub struct Bitpools {
 }
 
 impl StreamRequest {
+    /// The request for the log: its addresses zeroed and an Auracast
+    /// broadcast code left out. As numbers, the addresses escaped the
+    /// diagnostic bundle's masking (a tester's bundle had them).
+    pub fn redacted(&self) -> StreamRequest {
+        let mut r = self.clone();
+        r.device = [0; 6];
+        if let Some(le) = r.le.as_mut() {
+            le.extra_devices.iter_mut().for_each(|a| *a = [0; 6]);
+            if let Some(code) = le.broadcast.as_mut().and_then(|b| b.code.as_mut()) {
+                *code = "<code>".into();
+            }
+        }
+        r
+    }
+
     /// The bitpools, as a profile saved while streaming has them
     pub fn set_bitpools(&mut self, b: Bitpools) {
         self.sbc_bitpool = b.sbc;
@@ -1417,7 +1432,7 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
         req.sample_rate.map_or("device's".into(), |r| format!("{r} Hz")),
         req.source
     );
-    tracing::debug!("stream: request {req:?}");
+    tracing::debug!("stream: request {:?}", req.redacted());
     let stopped = || inner.stop_requested();
     let session_start = Instant::now();
 

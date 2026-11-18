@@ -145,6 +145,21 @@ impl ScannedDevice {
 const APPEARANCE_PHONE: u16 = 0x001;
 const APPEARANCE_COMPUTER: u16 = 0x002;
 
+/// The addresses of advertisers listed as LE Audio only for their audio
+/// appearance that are a classic device (`classic`: found or saved): a
+/// classic headset's LE side for its app (a Sennheiser HDR 275 advertises
+/// name, battery and the appearance "headset", no LE Audio service). Not
+/// listed, and a saved LE side of them is removed: else "Use LE Audio when
+/// available" connected it over LE, where nothing answers.
+fn classic_appearance_only(results: &[LeScanResult], classic: &[String]) -> Vec<String> {
+    results
+        .iter()
+        .filter(|r| r.le_audio && r.appearance_only)
+        .map(|r| r.identity.unwrap_or(r.addr).to_string())
+        .filter(|a| classic.iter().any(|c| c.eq_ignore_ascii_case(a)))
+        .collect()
+}
+
 /// The LE Audio entries of an LE scan (v1 A2dpService scan thread): LE
 /// Audio advertisers only; a saved LE Audio device is listed (with its new
 /// name); of a coordinated set nobody saved, one member (connecting it
@@ -1844,7 +1859,12 @@ impl Service {
         let classic = host.scan_with(seconds, &mut |found| {
             let mut list: Vec<ScannedDevice> = found.iter().map(ScannedDevice::classic).collect();
             if le_scan {
-                let mut le = le_scan_entries(&host.le_scan_results(), &saved_le, &own).0;
+                let results = host.le_scan_results();
+                let mut le = le_scan_entries(&results, &saved_le, &own).0;
+                let classic: Vec<String> =
+                    list.iter().map(|d| d.address.clone()).chain(saved.iter().map(|d| d.address.clone())).collect();
+                let drop = classic_appearance_only(&results, &classic);
+                le.retain(|e| !drop.contains(&e.address));
                 let known: Vec<(String, String)> = list
                     .iter()
                     .map(|d| (d.address.clone(), d.name.clone()))
@@ -1894,6 +1914,18 @@ impl Service {
                 );
             }
             let (mut entries, found) = le_scan_entries(&results, &saved_le, &own);
+            let classic: Vec<String> =
+                list.iter().map(|d| d.address.clone()).chain(saved.iter().map(|d| d.address.clone())).collect();
+            let drop = classic_appearance_only(&results, &classic);
+            entries.retain(|e| !drop.contains(&e.address));
+            for a in drop.iter().filter(|a| saved_le.iter().any(|d| d.address.eq_ignore_ascii_case(a))) {
+                tracing::info!(
+                    "LE scan: a classic device's LE side without LE Audio removed from the LE Audio devices"
+                );
+                if let Err(e) = crate::devices::remove_le(&self.inner.opts.config_dir, a) {
+                    tracing::warn!("LE scan: removing that LE side: {e}");
+                }
+            }
             tracing::info!(
                 "LE scan: {} advertiser(s) in {:.1} s, {found} LE Audio, {} listed",
                 results.len(),
@@ -2125,6 +2157,21 @@ mod tests {
         }
         .to_request(1000)
         .unwrap()
+    }
+
+    #[test]
+    fn the_logged_request_has_no_address_or_broadcast_code() {
+        let mut req = request();
+        req.le = Some(bt_host::LeRequest {
+            extra_devices: vec![[0x66; 6]],
+            broadcast: Some(bt_host::LeBroadcast { code: Some("secret12".into()), ..Default::default() }),
+            ..Default::default()
+        });
+        let logged = format!("{:?}", req.redacted());
+        for leak in ["17, 34, 51, 68, 85", "102, 102", "secret12"] {
+            assert!(!logged.contains(leak), "{leak} in {logged}");
+        }
+        assert_eq!(req.redacted().device_name, req.device_name);
     }
 
     #[test]
@@ -2463,6 +2510,18 @@ mod tests {
         let got: Vec<_> = list.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(got, ["Earbuds", "Speaker"]);
         assert_eq!(found, 2);
+    }
+
+    #[test]
+    fn a_classic_headsets_appearance_only_le_side_is_not_le_audio() {
+        let guess = |addr, name| LeScanResult { appearance: 0x0942, appearance_only: true, ..le(addr, name, None) };
+        let results = [
+            guess("00:A2:D0:00:00:60", "HDR 275"),
+            guess("00:A2:D0:00:00:61", "LE-only buds"),
+            le("00:A2:D0:00:00:62", "Dual-mode buds", None),
+        ];
+        let classic = ["00:a2:d0:00:00:60".to_string(), "00:A2:D0:00:00:62".to_string()];
+        assert_eq!(classic_appearance_only(&results, &classic), ["00:A2:D0:00:00:60"]);
     }
 
     #[test]
