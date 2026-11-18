@@ -212,6 +212,9 @@ pub(crate) struct LeShared {
     pub low_latency: AtomicBool,
     /// Set once when a device or CIS of the running stream was lost
     pub stream_lost: AtomicBool,
+    /// Members of the stream's coordinated sets that were not found or
+    /// went down: the stream plays on the others (CSIP prepare_group)
+    pub set_members_missing: AtomicU32,
     /// Counters of the running (or last) stream, published by the sender
     pub stats: Arc<Mutex<LeStreamStats>>,
     /// The modules' worker / any-thread parts (registry order)

@@ -3457,6 +3457,16 @@ impl CoreState {
                     // connects again over what is now on (its LE Audio
                     // profile, or its classic one)
                     if le_toggled {
+                        // LE Audio off: a device paired over LE only, whose
+                        // pairing gave a classic link key, gets its classic
+                        // side, listed and connecting over classic
+                        if !me.service.settings().le_audio() {
+                            let keys = bluecaster_core::paths::link_keys_file(&me.config_dir());
+                            let keys = bt_host::link_keys::FileLinkKeyStore::open(&keys);
+                            if bluecaster_core::devices::save_classic_sides(&me.config_dir(), keys.entries()) > 0 {
+                                me.refresh_devices();
+                            }
+                        }
                         let (_, s) = me.snapshot();
                         let list = profiles::load(&me.config_dir());
                         let in_use = s

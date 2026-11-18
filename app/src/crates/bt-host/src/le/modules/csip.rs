@@ -887,6 +887,7 @@ impl LeGroupHooks for CsipHooks {
                 add(&mut out, s.id);
             }
             if have.len() < size {
+                host.le_note_set_members_missing((size - have.len()) as u32);
                 tracing::warn!(
                     "CSIP: only {} of {size} members of coordinated set {} found within {} s: streaming to what is \
                      available",

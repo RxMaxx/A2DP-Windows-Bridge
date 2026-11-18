@@ -413,6 +413,20 @@ pub(crate) fn refusal(le_enabled: bool, developer: bool, source: &SourceRequest)
     }
 }
 
+/// LE Audio is off and `req` is an LE Audio device's: when its LE pairing
+/// gave a classic link key (cross-transport key derivation, stored under its
+/// public address), the classic request for it, with its classic side saved
+/// so it is listed with LE Audio off. Else None (it was paired over LE
+/// only, without a classic key: refused).
+fn classic_instead(config_dir: &std::path::Path, req: &StreamRequest) -> Option<StreamRequest> {
+    let keys = bt_host::link_keys::FileLinkKeyStore::open(&crate::paths::link_keys_file(config_dir));
+    if !keys.entries().iter().any(|e| e.addr == req.device) {
+        return None;
+    }
+    crate::devices::save_classic_sides(config_dir, keys.entries());
+    Some(StreamRequest { le: None, codec: None, codec_forced: false, ..req.clone() })
+}
+
 /// The session thread for `req` (`req.le` is Some). Returns when stopped or
 /// on an error (state reported), as `stream::run` does.
 pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
@@ -428,6 +442,12 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
     let session_start = Instant::now();
 
     if let Some(key) = refusal(inner.le_wanted(), inner.developer(), &req.source) {
+        if key == "error.le_audio_disabled"
+            && let Some(classic) = classic_instead(inner.config_dir(), &req)
+        {
+            tracing::info!("LE Audio is off: streaming over classic with the link key of the LE pairing");
+            return crate::stream::run(inner, classic);
+        }
         tracing::debug!("le stream: refused ({key}), LE wanted {}, source {}", inner.le_wanted(), req.source);
         return inner.notify(StreamState::Error, Msg::new(key));
     }
@@ -562,7 +582,11 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
     let mut mic = open_mic(inner, &mut started, mic_target.as_ref(), mic_streams, &mut mic_note);
 
     let report = |started: &LeStreamStarted, audio: Option<&LeAudioPath>, note: Option<&Msg>| {
-        inner.notify(StreamState::Streaming, note.cloned().unwrap_or_else(|| Msg::new("status.connected")));
+        // A set member left out (not found, or its link went down): say
+        // so, else one earbud plays in mono without a word (a tester's
+        // WF-1000XM6 did)
+        let partial = (host.le_set_members_missing() > 0).then(|| Msg::new("status.le_set_partial"));
+        inner.notify(StreamState::Streaming, note.cloned().or(partial).unwrap_or_else(|| Msg::new("status.connected")));
         let details = LeStreamDetails::of(started);
         let plan = &started.status.plan;
         let channels = plan.channel_count() as u32;
