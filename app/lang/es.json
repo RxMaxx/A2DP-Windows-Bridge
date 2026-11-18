@@ -519,6 +519,7 @@
   "ui.dev.le_mic_retry_same_link": "Reintentar sin el micrófono en la misma conexión",
   "ui.dev.realtek_section": "Realtek",
   "ui.dev.realtek_driver_firmware": "Cargar el firmware del RTL8761B desde el controlador de Windows de Realtek de este PC",
+  "ui.dev.realtek_driver_firmware_none": "No se encontró firmware del RTL8761B en el controlador de Realtek de este PC.",
   "ui.dev.keys_section": "Claves de emparejamiento y Windows",
   "ui.dev.le_keys_to_windows": "Copiar también las claves LE a Windows al restaurar el controlador original",
   "ui.dev.keys_adapter": "Adaptador",

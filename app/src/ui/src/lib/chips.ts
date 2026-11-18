@@ -175,6 +175,16 @@ export function chipStatus(
   return { kind: "unchecked", files, present };
 }
 
+/** Developer > Debug's driver firmware is on but did not help: an RTL8761B
+ *  adapter still lacks its firmware. The core reports that firmware as
+ *  present when Realtek's driver on this PC has it (issue #86). */
+export function realtekDriverFirmwareMissing(
+  on: boolean,
+  adapters: readonly Pick<AdapterFirmware, "realtek_chip" | "firmware_present">[],
+): boolean {
+  return on && adapters.some((a) => a.realtek_chip === "RTL8761BU" && a.firmware_present === false);
+}
+
 /**
  * Where another vendor's adapter gets its firmware (issue #86: the Realtek
  * chip choice means nothing to it): its vendor's Windows driver (MediaTek,

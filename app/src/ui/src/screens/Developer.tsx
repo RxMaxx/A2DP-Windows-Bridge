@@ -30,6 +30,7 @@ import {
 } from "../components/controls";
 import type { IconName } from "../components/icons";
 import { t } from "../i18n";
+import { realtekDriverFirmwareMissing } from "../lib/chips";
 import type {
   DevDebug,
   DevLog,
@@ -477,9 +478,15 @@ function Debug(props: {
   value: DevDebug;
   save: (v: DevDebug) => Promise<boolean>;
 }) {
+  const { core } = useApp();
   const set = (patch: Partial<DevDebug>) =>
     void props.save({ ...props.value, ...patch });
   const active = () => JSON.stringify(props.value) !== JSON.stringify(NO_DEBUG);
+  const driverFirmwareMissing = () =>
+    realtekDriverFirmwareMissing(
+      props.value.realtek_driver_firmware,
+      core.state.snap?.adapter.adapters ?? [],
+    );
   const commitPad = (text: string) =>
     set({ mtk_iso_pad: clampInt(text, 0, 4096, 0) });
   return (
@@ -580,6 +587,7 @@ function Debug(props: {
       <Section title={t("ui.dev.realtek_section")}>
         <Toggle
           label={t("ui.dev.realtek_driver_firmware")}
+          hint={driverFirmwareMissing() ? t("ui.dev.realtek_driver_firmware_none") : undefined}
           checked={props.value.realtek_driver_firmware}
           onChange={(v) => set({ realtek_driver_firmware: v })}
         />

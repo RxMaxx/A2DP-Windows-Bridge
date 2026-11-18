@@ -662,7 +662,19 @@ fn adapter_infos(config_dir: &Path, settings: &CoreSettings) -> (Vec<AdapterInfo
             };
             let (chip_pid, fw_stem) = adapter_chip(a.vendor, a.realtek_pid, settings);
             let files = chips::firmware_files(chip_pid, fw_stem);
-            let check = chips::firmware_check(&paths::firmware_dir(config_dir), chip_pid, fw_stem);
+            let mut check = chips::firmware_check(&paths::firmware_dir(config_dir), chip_pid, fw_stem);
+            let mut file_names = files.clone().map(|(f, c)| vec![f, c]).unwrap_or_default();
+            // Realtek's Windows driver's firmware stands in for the folder's
+            // files, with no config file (Developer > Debug; issue #86: the
+            // card said "not found" while that firmware was loaded)
+            if let Some(name) = files
+                .as_ref()
+                .and_then(|(fw, _)| bluecaster_core::adapter::realtek_driver_firmware(settings, fw))
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            {
+                check = Some(chips::FirmwareCheck { present: true, invalid_file: None });
+                file_names = vec![name];
+            }
             AdapterInfo {
                 instance_id: a.device.instance_id.clone(),
                 vid: a.device.vid,
@@ -675,7 +687,7 @@ fn adapter_infos(config_dir: &Path, settings: &CoreSettings) -> (Vec<AdapterInfo
                 realtek_chip: a.realtek_pid.and_then(chips::realtek_chip_name).map(str::to_owned),
                 firmware_present: check.as_ref().map(|c| c.present),
                 firmware_download: files.as_ref().is_some_and(|(f, _)| bluecaster_core::firmware::available(f)),
-                firmware_files: files.map(|(f, c)| vec![f, c]).unwrap_or_default(),
+                firmware_files: file_names,
                 firmware_invalid: check.and_then(|c| c.invalid_file),
                 vendor_note: vendor_note(a.vendor, a.device.vid, a.device.pid),
                 restart_needed: a.device.problem_code == Some(CM_PROB_NEED_RESTART),

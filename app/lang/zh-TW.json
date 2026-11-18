@@ -519,6 +519,7 @@
   "ui.dev.le_mic_retry_same_link": "在同一連線上不使用麥克風重試",
   "ui.dev.realtek_section": "Realtek",
   "ui.dev.realtek_driver_firmware": "從此電腦上的 Realtek Windows 驅動程式載入 RTL8761B 韌體",
+  "ui.dev.realtek_driver_firmware_none": "在此電腦的 Realtek 驅動程式中找不到 RTL8761B 韌體。",
   "ui.dev.keys_section": "配對金鑰與 Windows",
   "ui.dev.le_keys_to_windows": "還原原始驅動程式時，也將 LE 金鑰複製到 Windows",
   "ui.dev.keys_adapter": "介面卡",
