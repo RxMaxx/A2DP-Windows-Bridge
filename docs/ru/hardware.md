@@ -30,7 +30,7 @@ nav_order: 2.5
 | Адаптер CSR8510 A10 | CSR8510 | 0A12:0001 | USB-адаптер | ✅ | Файлы прошивки не нужны | [#32](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/32) |
 | Intel AX211 (встроенная карта Wi-Fi / Bluetooth) | Intel AX211 (загрузчик TLV) | 8087:0033 | Встроенный | ✅ | Прошивка из папки `intel/` пакета linux-firmware загружается через загрузчик за 1,5–1,7 с: `ibt-0180-0041` (вариант 0x1B) или `ibt-1040-0041` (вариант 0x19). Какой файл выбран, видно в журнале. Сопряжение, AAC и LDAC работают. Пока адаптер занят BlueCaster, Bluetooth в Windows недоступен | [#261](https://github.com/SeiyaFunaokaJP/BlueCaster/pull/261), [#237](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/237) |
 | Intel AX200 (встроенная карта Wi-Fi / Bluetooth) | Intel AX200 | 8087:0029 | Встроенный | ✅ | В отчёте прошивка уже была запущена, поэтому файл не загружался. LHDC V5 1000 kbps / 192 kHz работает. Пока адаптер занят BlueCaster, Bluetooth в Windows недоступен | [#237](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/237) |
-| MediaTek MT7925 (встроенная карта Wi-Fi / Bluetooth) | MediaTek MT7925 | 0E8D:7925 | Встроенный | ✅ | Прошивка берётся из драйвера MediaTek для Windows. A2DP работает. LE Audio (экспериментально) воспроизводится при одной из настроек в разделе Разработчик > Отладка, но с известными проблемами | [#86](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/86) |
+| MediaTek MT7925 (встроенная карта Wi-Fi / Bluetooth) | MediaTek MT7925 | 0E8D:7925 | Встроенный | ✅ | Прошивка берётся из драйвера MediaTek для Windows. A2DP работает. LE Audio (экспериментально): звук был лишь в некоторых тестах, пока работает ненадёжно | [#86](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/86) |
 | MediaTek MT7921 (встроенная карта Wi-Fi / Bluetooth) | MediaTek MT7921 | 13D3:3606 | Встроенный | ✅ | – | [#432](https://github.com/SeiyaFunaokaJP/BlueCaster/pull/432) |
 | Адаптер «MA530» | Не указан | – | USB-адаптер | ✅ | Сообщение относится к v1.0.9 | [#3](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/3), [#9](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/9) |
 | Адаптеры UGREEN Bluetooth 5.4 и 6.0 | Не указан | – | USB-адаптер | ✅ | Сообщение относится к 2.0.1 | [#11](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/11#issuecomment-6563908711) |
@@ -66,5 +66,5 @@ nav_order: 2.5
 ## Ещё не проверено
 
 - **Кодеки на реальных наушниках**: aptX HD, aptX Low Latency, Opus, Opus 05, FastStream
-- **LE Audio** (экспериментально, только в режиме разработчика): проверено только на эмуляторе и на MediaTek MT7925, с известными проблемами
+- **LE Audio** (экспериментально, только в режиме разработчика): работает с эмулятором, но на реальных адаптерах пока ненадёжно (проверено на MediaTek MT7925)
 - **Windows на ARM64** и **Windows 10 с v2** (v1 работала в Windows 10 22H2: [#18](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/18), [#30](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/30))

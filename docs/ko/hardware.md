@@ -30,7 +30,7 @@ BlueCaster에서 사용해 본 어댑터와 헤드폰입니다. 관리자가 직
 | CSR8510 A10 동글 | CSR8510 | 0A12:0001 | USB 동글 | ✅ | 펌웨어 파일 불필요 | [#32](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/32) |
 | Intel AX211 (내장 Wi-Fi / Bluetooth 카드) | Intel AX211 (TLV 부트로더) | 8087:0033 | 내장 | ✅ | linux-firmware `intel/`의 펌웨어를 부트로더 상태에서 1.5–1.7초 만에 로드: `ibt-0180-0041`(variant 0x1B) 또는 `ibt-1040-0041`(variant 0x19). 어느 파일인지는 로그에 표시됨. 페어링, AAC, LDAC 작동. BlueCaster가 사용하는 동안에는 Windows에서 Bluetooth를 쓸 수 없음 | [#261](https://github.com/SeiyaFunaokaJP/BlueCaster/pull/261), [#237](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/237) |
 | Intel AX200 (내장 Wi-Fi / Bluetooth 카드) | Intel AX200 | 8087:0029 | 내장 | ✅ | 보고 당시 펌웨어가 이미 실행 중이어서 파일을 로드하지 않음. LHDC V5 1000 kbps / 192 kHz 작동. BlueCaster가 사용하는 동안에는 Windows에서 Bluetooth를 쓸 수 없음 | [#237](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/237) |
-| MediaTek MT7925 (내장 Wi-Fi / Bluetooth 카드) | MediaTek MT7925 | 0E8D:7925 | 내장 | ✅ | 펌웨어는 MediaTek의 Windows 드라이버에서 읽음. A2DP 작동. LE Audio(실험적)는 개발자 > 디버그 설정을 켜면 재생되지만 알려진 문제가 있음 | [#86](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/86) |
+| MediaTek MT7925 (내장 Wi-Fi / Bluetooth 카드) | MediaTek MT7925 | 0E8D:7925 | 내장 | ✅ | 펌웨어는 MediaTek의 Windows 드라이버에서 읽음. A2DP 작동. LE Audio(실험적)는 일부 테스트에서만 재생되었고 아직 안정적으로 작동하지 않음 | [#86](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/86) |
 | MediaTek MT7921 (내장 Wi-Fi / Bluetooth 카드) | MediaTek MT7921 | 13D3:3606 | 내장 | ✅ | – | [#432](https://github.com/SeiyaFunaokaJP/BlueCaster/pull/432) |
 | "MA530" 어댑터 | 알 수 없음 | – | USB 동글 | ✅ | v1.0.9에서 보고 | [#3](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/3), [#9](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/9) |
 | UGREEN Bluetooth 5.4 및 6.0 동글 | 알 수 없음 | – | USB 동글 | ✅ | 2.0.1에서 보고 | [#11](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/11#issuecomment-6563908711) |
@@ -66,5 +66,5 @@ Qualcomm 어댑터는 아직 보고가 없습니다. 어떻게 작동할지는 [
 ## 아직 검증되지 않음
 
 - **실제 헤드폰에서의 코덱**: aptX HD, aptX Low Latency, Opus, Opus 05, FastStream
-- **LE Audio** (실험적, 개발자 모드 전용): 에뮬레이터와 MediaTek MT7925에서만 테스트했으며 알려진 문제가 있음
+- **LE Audio** (실험적, 개발자 모드 전용): 에뮬레이터에서는 작동하지만 실제 어댑터에서는 아직 안정적으로 작동하지 않음(MediaTek MT7925에서 테스트)
 - **ARM64용 Windows**와 **Windows 10에서의 v2**(v1은 Windows 10 22H2에서 실행됨: [#18](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/18), [#30](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/30))

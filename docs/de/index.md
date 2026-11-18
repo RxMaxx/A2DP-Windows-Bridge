@@ -148,7 +148,7 @@ BlueCaster umgeht den Bluetooth-Stack von Windows vollständig. Es kommuniziert 
 ## Funktionen
 
 - **Mehrere Codecs**: LHDC V5, LDAC, aptX Adaptive, aptX, AAC, aptX HD, aptX Low Latency, Opus, Opus 05, FastStream, SBC XQ und SBC mit automatischer Aushandlung
-- **LE Audio (experimentell, nur im Entwicklermodus)**: LC3 an LE-Audio-Kopfhörer und -Ohrhörer (BAP Unicast, beide Ohrhörer eines Paars, Headset-Lautstärke, Medientasten, GMAP mit niedriger Latenz). Benötigt einen Adapter mit isochronen Kanälen nach Bluetooth 5.2. Bisher nur an einem MediaTek MT7925 getestet, mit bekannten Problemen ([Verwendung](usage#le-audio))
+- **LE Audio (experimentell, nur im Entwicklermodus)**: LC3 an LE-Audio-Kopfhörer und -Ohrhörer (BAP Unicast, beide Ohrhörer eines Paars, Headset-Lautstärke, Medientasten, GMAP mit niedriger Latenz). Benötigt einen Adapter mit isochronen Kanälen nach Bluetooth 5.2. LE Audio funktioniert auf echten Adaptern noch nicht zuverlässig, auch nicht auf dem MediaTek MT7925 ([Verwendung](usage#le-audio))
 - **Drei Aufnahmemodi**: System-Loopback, Umleitung über ein virtuelles Audiogerät oder die Ausgabe einer einzelnen Anwendung
 - **Fenster, Infobereich und CLI**: ein Fenster für Einrichtung und Diagnose, ein Flyout und ein Menü im Infobereich für das alltägliche Verbinden sowie eine Befehlszeile (siehe [Verwendung](usage))
 - **WinUSB in der App**: weist dem Adapter den WinUSB-Treiber zu und stellt den ursprünglichen Treiber wieder her, ohne Zadig (siehe [Einrichtung](setup#winusb)). Kopfhörer, die Windows über den Adapter gekoppelt hat, verbinden sich ohne erneutes Koppeln

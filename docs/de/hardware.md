@@ -30,7 +30,7 @@ Haben Sie BlueCaster mit anderer Hardware ausprobiert? Berichten Sie bitte in ei
 | CSR8510-A10-Dongle | CSR8510 | 0A12:0001 | USB-Dongle | ✅ | Keine Firmware-Dateien nötig | [#32](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/32) |
 | Intel AX211 (eingebaute WLAN- / Bluetooth-Karte) | Intel AX211 (TLV-Bootloader) | 8087:0033 | Eingebaut | ✅ | Firmware aus `intel/` von linux-firmware, vom Bootloader aus in 1,5–1,7 s geladen: `ibt-0180-0041` (Variante 0x1B) oder `ibt-1040-0041` (Variante 0x19). Welche Datei es ist, steht im Protokoll. Kopplung, AAC und LDAC funktionieren. Solange BlueCaster sie verwendet, hat Windows kein eigenes Bluetooth | [#261](https://github.com/SeiyaFunaokaJP/BlueCaster/pull/261), [#237](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/237) |
 | Intel AX200 (eingebaute WLAN- / Bluetooth-Karte) | Intel AX200 | 8087:0029 | Eingebaut | ✅ | Im Bericht lief die Firmware bereits, daher wurde keine Datei geladen. LHDC V5 1000 kbps / 192 kHz funktioniert. Solange BlueCaster sie verwendet, hat Windows kein eigenes Bluetooth | [#237](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/237) |
-| MediaTek MT7925 (eingebaute WLAN- / Bluetooth-Karte) | MediaTek MT7925 | 0E8D:7925 | Eingebaut | ✅ | Firmware aus dem Windows-Treiber von MediaTek gelesen. A2DP funktioniert. LE Audio (experimentell) spielte mit einer Einstellung unter Entwickler > Debug ab, mit bekannten Problemen | [#86](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/86) |
+| MediaTek MT7925 (eingebaute WLAN- / Bluetooth-Karte) | MediaTek MT7925 | 0E8D:7925 | Eingebaut | ✅ | Firmware aus dem Windows-Treiber von MediaTek gelesen. A2DP funktioniert. LE Audio (experimentell) lief nur in einigen Tests und funktioniert noch nicht zuverlässig | [#86](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/86) |
 | MediaTek MT7921 (eingebaute WLAN- / Bluetooth-Karte) | MediaTek MT7921 | 13D3:3606 | Eingebaut | ✅ | – | [#432](https://github.com/SeiyaFunaokaJP/BlueCaster/pull/432) |
 | Adapter „MA530“ | Nicht angegeben | – | USB-Dongle | ✅ | Gemeldet unter v1.0.9 | [#3](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/3), [#9](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/9) |
 | UGREEN-Dongles Bluetooth 5.4 und 6.0 | Nicht angegeben | – | USB-Dongle | ✅ | Gemeldet unter 2.0.1 | [#11](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/11#issuecomment-6563908711) |
@@ -66,5 +66,5 @@ Zu Qualcomm-Adaptern gibt es noch keine Berichte. Was Sie von ihnen erwarten kö
 ## Noch nicht geprüft
 
 - **Codecs an echten Kopfhörern**: aptX HD, aptX Low Latency, Opus, Opus 05, FastStream
-- **LE Audio** (experimentell, nur im Entwicklermodus): nur mit dem Emulator und am MediaTek MT7925 getestet, mit bekannten Problemen
+- **LE Audio** (experimentell, nur im Entwicklermodus): funktioniert mit dem Emulator, auf echten Adaptern aber noch nicht zuverlässig (getestet am MediaTek MT7925)
 - **Windows auf ARM64** und **Windows 10 mit v2** (v1 lief unter Windows 10 22H2: [#18](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/18), [#30](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/30))

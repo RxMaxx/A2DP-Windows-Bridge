@@ -30,7 +30,7 @@ nav_order: 2.5
 | CSR8510 A10 适配器 | CSR8510 | 0A12:0001 | USB 适配器 | ✅ | 无需固件文件 | [#32](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/32) |
 | Intel AX211（内置 Wi-Fi / 蓝牙网卡） | Intel AX211（TLV bootloader） | 8087:0033 | 内置 | ✅ | 固件来自 linux-firmware 的 `intel/`，在 1.5–1.7 秒内从 bootloader 加载：`ibt-0180-0041`（variant 0x1B）或 `ibt-1040-0041`（variant 0x19），日志中会写明文件名。配对、AAC 和 LDAC 均可用。BlueCaster 使用它时，Windows 自带的蓝牙无法使用 | [#261](https://github.com/SeiyaFunaokaJP/BlueCaster/pull/261)、[#237](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/237) |
 | Intel AX200（内置 Wi-Fi / 蓝牙网卡） | Intel AX200 | 8087:0029 | 内置 | ✅ | 报告时固件已在运行，因此没有加载文件。LHDC V5 1000 kbps / 192 kHz 可用。BlueCaster 使用它时，Windows 自带的蓝牙无法使用 | [#237](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/237) |
-| MediaTek MT7925（内置 Wi-Fi / 蓝牙网卡） | MediaTek MT7925 | 0E8D:7925 | 内置 | ✅ | 固件从 MediaTek 的 Windows 驱动程序中读取。A2DP 可用；LE Audio（实验性）需在“开发者 > 调试”中更改一项设置才能播放，存在已知问题 | [#86](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/86) |
+| MediaTek MT7925（内置 Wi-Fi / 蓝牙网卡） | MediaTek MT7925 | 0E8D:7925 | 内置 | ✅ | 固件从 MediaTek 的 Windows 驱动程序中读取。A2DP 可用。LE Audio（实验性）仅在部分测试中播放成功，目前尚不能稳定工作 | [#86](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/86) |
 | MediaTek MT7921（内置 Wi-Fi / 蓝牙网卡） | MediaTek MT7921 | 13D3:3606 | 内置 | ✅ | – | [#432](https://github.com/SeiyaFunaokaJP/BlueCaster/pull/432) |
 | “MA530”适配器 | 未提供 | – | USB 适配器 | ✅ | 报告于 v1.0.9 | [#3](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/3)、[#9](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/9) |
 | UGREEN Bluetooth 5.4 和 6.0 适配器 | 未提供 | – | USB 适配器 | ✅ | 报告于 2.0.1 | [#11](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/11#issuecomment-6563908711) |
@@ -66,5 +66,5 @@ Qualcomm 适配器尚无报告，可能的表现请参阅[推荐适配器](setup
 ## 尚未验证
 
 - **真实耳机上的编解码器**：aptX HD、aptX Low Latency、Opus、Opus 05、FastStream
-- **LE Audio**（实验性，仅限开发者模式）：只在模拟器和 MediaTek MT7925 上测试过，存在已知问题
+- **LE Audio**（实验性，仅限开发者模式）：在模拟器上可用，但在真实适配器上尚不能稳定工作（在 MediaTek MT7925 上测试）
 - **ARM64 上的 Windows**，以及 **Windows 10 上的 v2**（v1 曾在 Windows 10 22H2 上运行：[#18](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/18)、[#30](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/30)）
