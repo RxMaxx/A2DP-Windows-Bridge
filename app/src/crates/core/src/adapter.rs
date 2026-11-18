@@ -132,26 +132,26 @@ pub fn usb_known_ids(vendor_class: &[(u16, u16)]) -> Vec<(u16, u16)> {
     ids
 }
 
-/// Developer > Debug (issue #427): Realtek's Windows driver's firmware
-/// instead of the firmware folder's
-fn realtek_driver_firmware_on(settings: &Settings) -> bool {
-    settings.debug_mode && settings.dev_debug.realtek_driver_firmware
+/// The firmware of Realtek's Windows driver that stands in for the firmware
+/// folder's `fw_stem` ("rtl8761bu_fw", ".bin" allowed) where the driver on
+/// this PC has the chip's in a format BTstack's download reads (issue #86).
+/// No config file is needed with it.
+pub fn realtek_driver_firmware(fw_stem: &str) -> Option<std::path::PathBuf> {
+    bt_host::realtek_btnic::driver_firmware(fw_stem.strip_suffix(".bin").unwrap_or(fw_stem))
 }
 
-/// The firmware of Realtek's Windows driver that stands in for the firmware
-/// folder's `fw_stem` ("rtl8761bu_fw", ".bin" allowed), when Developer > Debug
-/// asks for it and the driver on this PC has the chip's in a format BTstack's
-/// download reads (the RTL8761B). The config file is not needed then.
-pub fn realtek_driver_firmware(settings: &Settings, fw_stem: &str) -> Option<std::path::PathBuf> {
-    if !realtek_driver_firmware_on(settings) {
-        return None;
-    }
-    bt_host::realtek_btnic::driver_firmware(fw_stem.strip_suffix(".bin").unwrap_or(fw_stem))
+/// The firmware folder has a valid `fw_stem` file (with .bin or, as
+/// BTstack's driver also takes it, without)
+fn folder_firmware(dir: &Path, fw_stem: &str) -> bool {
+    let stem = fw_stem.strip_suffix(".bin").unwrap_or(fw_stem);
+    [format!("{stem}.bin"), stem.to_string()]
+        .iter()
+        .any(|n| chips::firmware_file_state(&dir.join(n)) == chips::FileState::Ok)
 }
 
 /// Fills the chipset part of `config` from the settings and the present
 /// adapters
-pub fn configure(config: &mut HostConfig, settings: &Settings, _config_dir: &Path) {
+pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path) {
     config.afh = Some(Box::new(WifiAfh::default()));
     if matches!(config.transport, TransportConfig::Tcp(_)) {
         return; // a virtual controller: no chipset, no firmware
@@ -235,11 +235,16 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, _config_dir: &Pat
         (stem(fw), stem(cfg))
     });
     tracing::debug!("adapter: realtek pid {pid:04X}, firmware files {:?}", config.realtek_files);
-    if pid != 0 && realtek_driver_firmware_on(settings) {
-        config.realtek_firmware_file =
-            config.realtek_files.as_ref().and_then(|(fw, _)| realtek_driver_firmware(settings, fw));
+    // The firmware folder's file first (one the user placed), else Realtek's
+    // Windows driver's (issue #86), else none: the card offers the download
+    let dir = config.firmware_dir.clone().unwrap_or_else(|| crate::paths::firmware_dir(config_dir));
+    if pid != 0
+        && let Some((fw, _)) = &config.realtek_files
+        && !folder_firmware(&dir, fw)
+    {
+        config.realtek_firmware_file = realtek_driver_firmware(fw);
         if config.realtek_firmware_file.is_none() {
-            tracing::info!("no firmware for this chip in Realtek's Windows driver: the firmware folder's is loaded");
+            tracing::info!("no {fw}.bin in the firmware folder, and none in Realtek's Windows driver on this PC");
         }
     }
     if pid == 0 {

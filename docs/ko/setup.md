@@ -131,6 +131,8 @@ Realtek 기반 USB Bluetooth 어댑터(예: TP-Link UB500, RTL8761BU 동글)가 
 
 다른 제조사의 어댑터에는 **Bluetooth 칩** 선택이 없고, 대신 펌웨어를 어디서 가져오는지 표시됩니다. **MediaTek 드라이버에서** 또는 **Qualcomm 드라이버에서**(제조사의 Windows 드라이버에서 읽음. 이 드라이버는 WinUSB로 바꾼 뒤에도 설치된 채로 남습니다), **Wi-Fi 드라이버에서**(Marvell. Wi-Fi를 켜 두세요), **펌웨어 폴더에서**(Intel. **다운로드 페이지 열기**, **펌웨어 폴더 열기**, **설정 안내** 포함), **선택 사항**(Broadcom의 `.hcd`), **필요 없음**(CSR, Barrot, Actions). BlueCaster가 WinUSB로 펌웨어를 로드하면 **로드됨**, 로드하지 못하면 **로드 안 됨**으로 바뀌고, **다운로드 페이지 열기**, **펌웨어 폴더 열기**와 펌웨어 출처를 알려 주는 줄이 함께 표시됩니다.
 
+RTL8761B 어댑터(예: TP-Link UB500)는 PC에 Realtek Windows 드라이버가 설치되어 있으면 다운로드할 필요가 없습니다. 이 경우 BlueCaster는 그 드라이버의 펌웨어를 사용합니다. 이 펌웨어는 어댑터를 WinUSB로 바꾼 뒤에도 PC에 남아 있습니다. 펌웨어 폴더에 직접 넣은 펌웨어 파일이 있으면 그 파일이 우선합니다.
+
 **Bluetooth 칩** 목록에 있는 칩이라면 **펌웨어 다운로드**로 이 작업을 자동으로 할 수 있습니다. 확인을 누르면 BlueCaster가 linux-firmware(kernel.org)에서 파일을 다운로드하고, 각 파일을 예상 SHA-256 값과 대조한 뒤 펌웨어 폴더에 저장합니다. linux-firmware에 config 파일이 없는 칩이면 빈 `_config.bin`을 저장하고, 칩은 자체 설정을 사용합니다. 이 파일들은 BlueCaster에 포함되어 있지 않으며, 요청할 때만 다운로드됩니다.
 
 BlueCaster는 어댑터의 칩셋을 감지하고 필요한 펌웨어 파일을 알려 줍니다.
@@ -166,7 +168,7 @@ BlueCaster에서 실제로 사용한 어댑터와 헤드폰은 코덱, 보고 �
 
 | 칩셋 | 제품 예 | 참고 |
 |:-----|:--------|:-----|
-| Realtek | TP-Link UB500, RTL8761BU | 펌웨어 다운로드 필요(위 참고). 가장 많이 테스트됨 |
+| Realtek | TP-Link UB500, RTL8761BU | Realtek Windows 드라이버가 설치되어 있으면 그 펌웨어 사용, 없으면 펌웨어 다운로드 필요(위 참고). 가장 많이 테스트됨 |
 | Realtek | 노트북 내장 RTL8852BD(`0BDA:B853`) | linux-firmware에는 이 칩의 펌웨어가 없습니다. BlueCaster가 Realtek의 Windows Bluetooth 드라이버에서 `rtl8852bd_mp_chip_new.dat`를 읽으므로 그 드라이버를 제거하지 마세요(또는 파일을 펌웨어 폴더에 넣으세요). 아직 실제 하드웨어에서 테스트하지 않았습니다 |
 | CSR | 일반 CSR8510 동글 | 바로 작동하며 펌웨어 불필요 |
 | Barrot | Bluetooth 5.4 / 6.0 동글(`33FA:0010`, `33FA:0012`) | ROM 펌웨어로 작동하며 펌웨어 불필요. 지금까지 사용자 보고 1건 |

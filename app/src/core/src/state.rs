@@ -416,7 +416,6 @@ fn to_ipc_settings(s: &CoreSettings) -> Settings {
             mtk_command_before_reset: s.dev_debug.mtk_command_before_reset,
             mtk_register: s.dev_debug.mtk_register.clone(),
             le_keys_to_windows: s.dev_debug.le_keys_to_windows,
-            realtek_driver_firmware: s.dev_debug.realtek_driver_firmware,
             le_latency_c_to_p_ms: s.dev_debug.le_latency_c_to_p_ms,
             le_latency_p_to_c_ms: s.dev_debug.le_latency_p_to_c_ms,
             le_rtn_c_to_p: s.dev_debug.le_rtn_c_to_p,
@@ -526,7 +525,6 @@ fn merge_settings(base: &CoreSettings, s: &Settings) -> CoreSettings {
         mtk_command_before_reset: s.dev_debug.mtk_command_before_reset,
         mtk_register: s.dev_debug.mtk_register.trim().to_string(),
         le_keys_to_windows: s.dev_debug.le_keys_to_windows,
-        realtek_driver_firmware: s.dev_debug.realtek_driver_firmware,
         le_latency_c_to_p_ms: s.dev_debug.le_latency_c_to_p_ms.min(4000),
         le_latency_p_to_c_ms: s.dev_debug.le_latency_p_to_c_ms.min(4000),
         le_rtn_c_to_p: s.dev_debug.le_rtn_c_to_p.map(|r| r.min(15)),
@@ -664,12 +662,13 @@ fn adapter_infos(config_dir: &Path, settings: &CoreSettings) -> (Vec<AdapterInfo
             let files = chips::firmware_files(chip_pid, fw_stem);
             let mut check = chips::firmware_check(&paths::firmware_dir(config_dir), chip_pid, fw_stem);
             let mut file_names = files.clone().map(|(f, c)| vec![f, c]).unwrap_or_default();
-            // Realtek's Windows driver's firmware stands in for the folder's
-            // files, with no config file (Developer > Debug; issue #86: the
-            // card said "not found" while that firmware was loaded)
+            // Without the folder's files, Realtek's Windows driver's firmware
+            // stands in for them, with no config file (issue #86): no
+            // download is asked for then
             if let Some(name) = files
                 .as_ref()
-                .and_then(|(fw, _)| bluecaster_core::adapter::realtek_driver_firmware(settings, fw))
+                .filter(|_| !check.as_ref().is_some_and(|c| c.present))
+                .and_then(|(fw, _)| bluecaster_core::adapter::realtek_driver_firmware(fw))
                 .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
             {
                 check = Some(chips::FirmwareCheck { present: true, invalid_file: None });

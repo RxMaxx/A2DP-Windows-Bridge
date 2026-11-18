@@ -131,6 +131,8 @@ bluecaster-core.exe --cli --scan
 
 其他廠商的介面卡沒有 **藍牙晶片** 選項，而是以標籤顯示韌體的來源：**來自 MediaTek 的驅動程式** 或 **來自 Qualcomm 的驅動程式**（從廠商的 Windows 驅動程式讀取；改用 WinUSB 後，該驅動程式仍會保留），**來自 Wi-Fi 驅動程式**（Marvell；請保持 Wi-Fi 開啟），**來自韌體資料夾**（Intel，附有 **開啟下載頁面**、**開啟韌體資料夾** 與 **設定指南**），**選用**（Broadcom 的 `.hcd`），或 **不需要**（CSR、Barrot、Actions）。BlueCaster 透過 WinUSB 載入韌體後，標籤會顯示 **已載入**；載入失敗時則顯示 **未載入**，並附上 **開啟下載頁面**、**開啟韌體資料夾**，以及說明韌體來源的一行文字。
 
+若電腦上已安裝 Realtek 的 Windows 驅動程式，RTL8761B 介面卡（例如 TP-Link UB500）就不需要下載韌體。BlueCaster 會直接使用該驅動程式附帶的韌體。介面卡改用 WinUSB 後，這些韌體仍會保留在電腦上。您自行放到韌體資料夾中的韌體檔案會優先使用。
+
 對於 **藍牙晶片** 清單中的晶片，**下載韌體** 可以代您完成這些步驟：確認後，BlueCaster 會從 linux-firmware (kernel.org) 下載檔案，逐一比對預期的 SHA-256，並儲存到韌體資料夾。如果 linux-firmware 沒有某個晶片的 config 檔案，BlueCaster 會儲存一個空的 `_config.bin`，晶片則使用自身的設定。這些檔案不屬於 BlueCaster，只有在您要求時才會下載。
 
 BlueCaster 會偵測介面卡的晶片組，並顯示需要哪些韌體檔案。
@@ -166,7 +168,7 @@ BlueCaster 會偵測介面卡的晶片組，並顯示需要哪些韌體檔案。
 
 | 晶片組 | 產品範例 | 備註 |
 |:--------|:-----------------|:------|
-| Realtek | TP-Link UB500, RTL8761BU | 需要下載韌體（見上文）。測試最完整 |
+| Realtek | TP-Link UB500, RTL8761BU | 已安裝 Realtek 的 Windows 驅動程式時使用其中的韌體，否則需要下載韌體（見上文）。測試最完整 |
 | Realtek | 筆電內建的 RTL8852BD（`0BDA:B853`） | linux-firmware 沒有這款晶片的韌體：BlueCaster 會從 Realtek 的 Windows 藍牙驅動程式讀取 `rtl8852bd_mp_chip_new.dat`，因此請保留該驅動程式（或將檔案放入韌體資料夾）。尚未在實際硬體上測試 |
 | CSR | 一般的 CSR8510 接收器 | 隨插即用，不需要韌體 |
 | Barrot | Bluetooth 5.4 / 6.0 接收器（`33FA:0010`、`33FA:0012`） | 使用 ROM 韌體運作，不需要韌體。目前只有一份使用者回報 |

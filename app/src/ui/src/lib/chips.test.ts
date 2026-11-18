@@ -10,7 +10,6 @@ import {
   chipStatus,
   firmwareStem,
   REALTEK_CHIPS,
-  realtekDriverFirmwareMissing,
 } from "./chips";
 import { adapterWithFirmware, sampleSnapshot } from "../ipc/mock";
 import { firmwareUrl, LINKS, vendorFirmwareUrl } from "./links";
@@ -233,13 +232,3 @@ describe("chipTargetIndex", () => {
   });
 });
 
-describe("realtekDriverFirmwareMissing", () => {
-  const rtl8761b = { realtek_chip: "RTL8761BU", firmware_present: false };
-  it("tells only when the setting is on and an RTL8761B adapter still lacks firmware", () => {
-    expect(realtekDriverFirmwareMissing(true, [rtl8761b])).toBe(true);
-    expect(realtekDriverFirmwareMissing(false, [rtl8761b])).toBe(false);
-    expect(realtekDriverFirmwareMissing(true, [{ ...rtl8761b, firmware_present: true }])).toBe(false);
-    expect(realtekDriverFirmwareMissing(true, [{ realtek_chip: "RTL8852BU", firmware_present: false }])).toBe(false);
-    expect(realtekDriverFirmwareMissing(true, [])).toBe(false);
-  });
-});

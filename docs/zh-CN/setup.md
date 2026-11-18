@@ -131,6 +131,8 @@ bluecaster-core.exe --cli --scan
 
 其他厂商的适配器没有**蓝牙芯片**选项，而是用标签显示固件的来源：**来自 MediaTek 的驱动程序**或**来自 Qualcomm 的驱动程序**（从厂商的 Windows 驱动程序读取，改用 WinUSB 后该驱动程序仍保留安装），**来自 Wi-Fi 驱动程序**（Marvell；请保持 Wi-Fi 开启），**来自固件文件夹**（Intel，附有**打开下载页面**、**打开固件文件夹**和**设置指南**），**可选**（Broadcom 的 `.hcd`）或**不需要**（CSR、Barrot、Actions）。BlueCaster 通过 WinUSB 加载固件后，标签显示**已加载**；加载失败时显示**未加载**，同时附有**打开下载页面**、**打开固件文件夹**和一行说明固件来源的文字。
 
+如果电脑上安装了 Realtek 的 Windows 驱动程序，RTL8761B 适配器（如 TP-Link UB500）就无需下载固件。BlueCaster 会直接使用该驱动程序附带的固件。适配器改用 WinUSB 后，这些固件仍保留在电脑上。你自己放入固件文件夹的固件文件会优先使用。
+
 对于**蓝牙芯片**列表中的芯片，**下载固件**可以代你完成：确认后，BlueCaster 会从 linux-firmware（kernel.org）下载文件，逐个校验预期的 SHA-256，然后保存到固件文件夹。如果 linux-firmware 中没有某个芯片的 config 文件，BlueCaster 会保存一个空的 `_config.bin`，芯片将使用自身的设置。这些文件不属于 BlueCaster，只在你要求时才会下载。
 
 BlueCaster 会检测适配器的芯片组，并显示需要哪些固件文件。
@@ -166,7 +168,7 @@ BlueCaster 会检测适配器的芯片组，并显示需要哪些固件文件。
 
 | 芯片组 | 产品示例 | 说明 |
 |:--------|:-----------------|:------|
-| Realtek | TP-Link UB500、RTL8761BU | 需要下载固件（见上文）。测试最充分 |
+| Realtek | TP-Link UB500、RTL8761BU | 已安装 Realtek 的 Windows 驱动程序时使用其中的固件，否则需要下载固件（见上文）。测试最充分 |
 | Realtek | 笔记本电脑内置的 RTL8852BD（`0BDA:B853`） | linux-firmware 中没有它的固件：BlueCaster 从 Realtek 的 Windows 蓝牙驱动程序中读取 `rtl8852bd_mp_chip_new.dat`，因此请保留该驱动程序（或将该文件放入固件文件夹）。尚未在实际硬件上测试 |
 | CSR | 通用 CSR8510 适配器 | 开箱即用，无需固件 |
 | Barrot | 蓝牙 5.4 / 6.0 适配器（`33FA:0010`、`33FA:0012`） | 使用 ROM 固件运行，无需固件。目前仅有一份用户报告 |

@@ -892,9 +892,6 @@ pub struct DevDebug {
     /// Restore original driver hands Windows BlueCaster's LE keys too, for
     /// the devices Windows keeps LE keys of (issue #86)
     pub le_keys_to_windows: bool,
-    /// A Realtek chip's firmware from Realtek's Windows driver on this PC
-    /// instead of the firmware folder's (the RTL8761B, issue #427)
-    pub realtek_driver_firmware: bool,
     /// LE Audio CIG: max transport latency C->P / P->C in ms; 0: as planned
     pub le_latency_c_to_p_ms: u16,
     pub le_latency_p_to_c_ms: u16,

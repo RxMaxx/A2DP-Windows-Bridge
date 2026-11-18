@@ -40,6 +40,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::bringup::{Action, ChipLoader, FileReader, HciEvent, LoadError, Outcome, hci_command, parse_event};
+use crate::driver_files::{self, file_name};
 
 /// The chips this loader serves: USB VID, PID, name, the driver's file
 pub const CHIPS: &[(u16, u16, &str, &str)] = &[(0x0BDA, 0xB853, "RTL8852BD", "rtl8852bd_mp_chip_new.dat")];
@@ -419,42 +420,21 @@ fn installed_names(name: &str) -> Vec<String> {
     }
 }
 
-/// Where Realtek's Windows driver keeps the file on this PC, newest first:
-/// any folder of the driver store that has it (OEM packages name their INF
-/// differently), the Windows folder (where the driver's install copies it,
-/// issue #86: the driver store may no longer hold the package), System32
-/// and System32\drivers, and the folder the driver reads updates from. All
-/// stay after the adapter moved to WinUSB.
+/// Where Realtek's Windows driver keeps the file on this PC, newest first
+/// (crate::driver_files): any package of the driver store (OEM packages
+/// name their INF differently), the Windows folder, System32 and its drivers
+/// folder (where the driver's install copies it, also after the package left
+/// the driver store: issue #86), and the folder the driver reads updates from
 fn driver_files(windows: &Path, name: &str) -> Vec<PathBuf> {
-    let mut found: Vec<PathBuf> = Vec::new();
-    let store = windows.join("System32").join("DriverStore").join("FileRepository");
-    if let Ok(entries) = std::fs::read_dir(store) {
-        found.extend(entries.flatten().map(|e| e.path().join(name)).filter(|p| p.is_file()));
-    }
     let program_data =
         std::env::var_os("ProgramData").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
-    let folders = [
-        windows.to_path_buf(),
-        windows.join("System32"),
-        windows.join("System32").join("drivers"),
-        program_data.join("Realtek").join("Patch"),
-    ];
-    for folder in &folders {
-        for n in installed_names(name) {
-            let p = folder.join(n);
-            if p.is_file() {
-                found.push(p);
-            }
-        }
-    }
-    let modified = |p: &PathBuf| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-    found.sort_by_key(|p| std::cmp::Reverse(modified(p)));
-    found
-}
-
-/// The file name of a path, for the log (the folder may hold the user's name)
-fn file_name(p: &Path) -> String {
-    p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    let names = installed_names(name);
+    driver_files::find(
+        windows,
+        driver_files::Names::Exact(&names),
+        &driver_files::any_package,
+        &[program_data.join("Realtek").join("Patch")],
+    )
 }
 
 /// A firmware file from Realtek's Windows driver, if it is installed
@@ -510,24 +490,52 @@ fn epatch_project(data: &[u8]) -> Option<u8> {
     }
 }
 
+/// The version a "Realtech" patch stores after its signature
+fn epatch_version(data: &[u8]) -> Option<u32> {
+    let v = data.get(8..12)?;
+    Some(u32::from_le_bytes([v[0], v[1], v[2], v[3]]))
+}
+
 /// Realtek's Windows driver's firmware for a chip BTstack's Realtek download
-/// loads (Developer > Debug, issue #427): the newest one on this PC that is a
-/// patch for this chip; None for another chip or none there
+/// loads (issue #86): of the copies on this PC that are a patch for this
+/// chip, the one with the highest version its patch stores, then the newest
+/// file; None for another chip or none there
 pub fn driver_firmware(fw_stem: &str) -> Option<PathBuf> {
     let (name, project) = driver_firmware_name(fw_stem)?;
     let windows = std::env::var_os("SystemRoot").map(PathBuf::from)?;
-    let found = driver_files(&windows, name);
-    let pick = found.iter().find(|p| {
-        let ok = std::fs::read(p).ok().and_then(|d| epatch_project(&d)) == Some(project);
-        if !ok {
-            tracing::debug!("realtek: {} of Realtek's driver skipped: not this chip's firmware", file_name(p));
+    pick_patch(name, &driver_files(&windows, name), project)
+}
+
+/// Of `found` (newest first), the patch for `project` with the highest
+/// stored version, the newest file of equal ones
+fn pick_patch(name: &str, found: &[PathBuf], project: u8) -> Option<PathBuf> {
+    // driver_files lists the newest first: max_by_key keeps the last of
+    // equal versions, so the list is walked oldest first
+    let valid: Vec<(u32, &PathBuf)> = found
+        .iter()
+        .rev()
+        .filter_map(|p| {
+            let data = std::fs::read(p).ok()?;
+            if epatch_project(&data) != Some(project) {
+                tracing::debug!("realtek: {} of Realtek's driver skipped: not this chip's firmware", file_name(p));
+                return None;
+            }
+            Some((epatch_version(&data)?, p))
+        })
+        .collect();
+    let pick = valid.iter().max_by_key(|(v, _)| *v).map(|(v, p)| (*v, (*p).clone()));
+    match &pick {
+        Some((v, p)) => tracing::debug!(
+            "realtek: {} of Realtek's driver, version 0x{v:08X} ({} usable of {} copies)",
+            file_name(p),
+            valid.len(),
+            found.len()
+        ),
+        None => {
+            tracing::debug!("realtek: no usable {name} of Realtek's driver on this PC ({} copies found)", found.len())
         }
-        ok
-    });
-    if pick.is_none() {
-        tracing::debug!("realtek: no usable {name} of Realtek's driver on this PC ({} copies found)", found.len());
     }
-    pick.cloned()
+    pick.map(|(_, p)| p)
 }
 
 #[cfg(test)]
@@ -587,6 +595,27 @@ mod tests {
         found.sort();
         let _ = std::fs::remove_dir_all(&windows);
         assert_eq!(found, [stem.to_string(), format!("{stem}.dll")]);
+    }
+
+    #[test]
+    fn the_highest_patch_version_wins_then_the_newest_file() {
+        let dir = std::env::temp_dir().join(format!("bc-rtk-pick-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = |n: &str, version: u32, project: u8| {
+            let mut d = epatch(project);
+            d[8..12].copy_from_slice(&version.to_le_bytes());
+            std::fs::write(dir.join(n), d).unwrap();
+            dir.join(n)
+        };
+        let (old, new, other, twin) =
+            (file("old", 1, 14), file("new", 2, 14), file("other", 9, 20), file("twin", 2, 14));
+        // Newest first, as driver_files lists them
+        let pick = |list: &[PathBuf]| pick_patch("x", list, 14).map(|p| file_name(&p));
+        assert_eq!(pick(&[old.clone(), new.clone(), other.clone()]).as_deref(), Some("new"));
+        assert_eq!(pick(&[twin.clone(), new.clone()]).as_deref(), Some("twin"));
+        assert_eq!(pick(&[new.clone(), twin.clone()]).as_deref(), Some("new"));
+        assert_eq!(pick(&[other]), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The installed Realtek driver of this PC, if it has the RTL8761B's
