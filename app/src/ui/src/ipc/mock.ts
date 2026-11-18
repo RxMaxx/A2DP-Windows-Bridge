@@ -102,6 +102,7 @@ const RTL: AdapterInfo = {
   firmware_files: ["rtl8761bu_fw.bin", "rtl8761bu_config.bin"],
   firmware_invalid: null,
   firmware_download: true,
+  firmware_from_driver: false,
   vendor_note: null,
   restart_needed: false,
   le_audio: null,

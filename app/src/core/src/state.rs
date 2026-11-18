@@ -662,6 +662,7 @@ fn adapter_infos(config_dir: &Path, settings: &CoreSettings) -> (Vec<AdapterInfo
             let files = chips::firmware_files(chip_pid, fw_stem);
             let mut check = chips::firmware_check(&paths::firmware_dir(config_dir), chip_pid, fw_stem);
             let mut file_names = files.clone().map(|(f, c)| vec![f, c]).unwrap_or_default();
+            let mut from_driver = false;
             // Without the folder's files, Realtek's Windows driver's firmware
             // stands in for them, with no config file (issue #86): no
             // download is asked for then
@@ -673,6 +674,7 @@ fn adapter_infos(config_dir: &Path, settings: &CoreSettings) -> (Vec<AdapterInfo
             {
                 check = Some(chips::FirmwareCheck { present: true, invalid_file: None });
                 file_names = vec![name];
+                from_driver = true;
             }
             AdapterInfo {
                 instance_id: a.device.instance_id.clone(),
@@ -687,6 +689,7 @@ fn adapter_infos(config_dir: &Path, settings: &CoreSettings) -> (Vec<AdapterInfo
                 firmware_present: check.as_ref().map(|c| c.present),
                 firmware_download: files.as_ref().is_some_and(|(f, _)| bluecaster_core::firmware::available(f)),
                 firmware_files: file_names,
+                firmware_from_driver: from_driver,
                 firmware_invalid: check.and_then(|c| c.invalid_file),
                 vendor_note: vendor_note(a.vendor, a.device.vid, a.device.pid),
                 restart_needed: a.device.problem_code == Some(CM_PROB_NEED_RESTART),
@@ -4017,6 +4020,7 @@ mod tests {
             firmware_files: vec!["rtl8761bu_fw.bin".into(), "rtl8761bu_config.bin".into()],
             firmware_invalid: invalid.map(str::to_owned),
             firmware_download: true,
+            firmware_from_driver: false,
             vendor_note: None,
             restart_needed: false,
             le_audio: None,

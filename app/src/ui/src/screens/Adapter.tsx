@@ -254,6 +254,12 @@ export function Adapter() {
             const vendorBox = () =>
               vendorFirmware(a) !== null &&
               (isAutoChip(snap().settings) || snap().settings.bt_chip_pid === CHIP_NOT_REALTEK);
+            // Realtek's Windows driver has the firmware (issue #86): nothing
+            // to do, as for MediaTek. A file in the firmware folder still
+            // takes priority, and the chip choice is back once it is set
+            // by hand or the firmware did not load.
+            const driverFirmware = () =>
+              a.firmware_from_driver && isAutoChip(snap().settings) && !adapter().rom_firmware;
             const driverHead = createUniqueId();
             const firmwareHead = createUniqueId();
             return (
@@ -331,15 +337,17 @@ export function Adapter() {
                       </Show>
                     </h3>
                     {/* The chip setting is one for all adapters: with the one it applies to */}
-                    <Show
-                      when={vendorBox()}
-                      fallback={
-                        <Show when={i() === chipCard()}>
-                          <ChipSection files={files()} onChanged={loadFiles} adapter={a} />
-                        </Show>
-                      }
-                    >
-                      <VendorFirmwareBox adapter={a} />
+                    <Show when={!driverFirmware()}>
+                      <Show
+                        when={vendorBox()}
+                        fallback={
+                          <Show when={i() === chipCard()}>
+                            <ChipSection files={files()} onChanged={loadFiles} adapter={a} />
+                          </Show>
+                        }
+                      >
+                        <VendorFirmwareBox adapter={a} />
+                      </Show>
                     </Show>
                     <Show when={!adapterSupported(a)}>
                       <Button icon="arrow_download" disabled>
