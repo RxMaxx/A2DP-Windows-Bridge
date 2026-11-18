@@ -503,6 +503,10 @@ describe("profiles", () => {
     // The last part takes the text after it, but not another path; a trailing separator keeps the folder
     expect(m(String.raw`HCI capture running: C:\x\BlueCaster\hci.pklg (3.0 MB)`)).toBe(String.raw`HCI capture running: <path>\BlueCaster\hci.pklg (3.0 MB)`);
     expect(m(String.raw`moved C:\a\b\x.bin to C:\a\c\x.bin`)).toBe(String.raw`moved <path>\x.bin to <path>\x.bin`);
+    // Issue #86: BTstack's Realtek line, the second path in quotes
+    expect(
+      m(String.raw`Using firmware 'C:\Users\taro\AppData\Roaming\BlueCaster\firmware/rtl8761bu_fw' and config 'C:\Users\taro\AppData\Roaming\BlueCaster\firmware/rtl8761bu_config'`),
+    ).toBe(String.raw`Using firmware '<path>\BlueCaster\firmware/rtl8761bu_fw' and config '<path>\BlueCaster\firmware/rtl8761bu_config'`);
     expect(m("folder C:\\a\\b\\\n")).toBe("folder <path>\\b\\\n");
     expect(m(String.raw`C:\ only`)).toBe(String.raw`<path>\ only`);
     // JSON's doubled '\', '/', a device path, a user's folder at the end (its name as x's)

@@ -977,9 +977,14 @@ fn path_start_at(b: &[u8], i: usize) -> bool {
 
 /// A drive path -> `<path>` and the part from the app's own folder on
 /// ([`APP_FOLDERS`]), or its last part. A part ends at what a file name
-/// cannot contain, or at a space that starts another path.
+/// cannot contain, or at a space that starts another path, also one in
+/// quotes (BTstack's "firmware '<path>' and config '<path>'", issue #86).
 fn mask_path_heads(text: &str) -> String {
     let b = text.as_bytes();
+    let next_path = |j: usize| {
+        b[j].is_ascii_whitespace()
+            && (path_start_at(b, j + 1) || (matches!(b.get(j + 1), Some(b'\'' | b'"')) && path_start_at(b, j + 2)))
+    };
     let is_sep = |c: u8| c == b'\\' || c == b'/';
     let ends = |c: u8| c < 0x20 || b"\\/:*?\"<>|".contains(&c);
     let mut out = String::with_capacity(text.len());
@@ -996,7 +1001,7 @@ fn mask_path_heads(text: &str) -> String {
                     j += 1;
                 }
                 let start = j;
-                while j < b.len() && !ends(b[j]) && !(b[j].is_ascii_whitespace() && path_start_at(b, j + 1)) {
+                while j < b.len() && !ends(b[j]) && !next_path(j) {
                     j += 1;
                 }
                 parts.push((seps, start, j));
@@ -2162,6 +2167,12 @@ mod tests {
             r"HCI capture running: <path>\BlueCaster\hci.pklg (3.0 MB)"
         );
         assert_eq!(m(r"moved C:\a\b\x.bin to C:\a\c\x.bin"), r"moved <path>\x.bin to <path>\x.bin");
+        // Issue #86: BTstack's Realtek line, the second path in quotes
+        let btstack = r"Using firmware 'C:\Users\taro\AppData\Roaming\BlueCaster\firmware/rtl8761bu_fw' and config 'C:\Users\taro\AppData\Roaming\BlueCaster\firmware/rtl8761bu_config'";
+        assert_eq!(
+            m(btstack),
+            r"Using firmware '<path>\BlueCaster\firmware/rtl8761bu_fw' and config '<path>\BlueCaster\firmware/rtl8761bu_config'"
+        );
         assert_eq!(m("folder C:\\a\\b\\\n"), "folder <path>\\b\\\n");
         assert_eq!(m(r"C:\ only"), r"<path>\ only");
         // JSON's doubled '\', '/', a device path, any case, a user's folder
