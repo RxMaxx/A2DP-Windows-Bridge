@@ -5,7 +5,9 @@
 // its Q, right-click changes its type or deletes it. The selected point's
 // values are fields below the graph. A focused point moves with the arrow
 // keys (Shift: bigger steps), Page Up / Page Down change its Q, Delete
-// removes it. Nothing hides (issue #86): while the EQ is off the graph,
+// removes it. A new EQ starts with the classic ten flat bands
+// (lib/eq.ts DEFAULT_POINTS), shown greyed out until it is turned on; Reset
+// puts them back. Saved points are never replaced. Nothing hides (issue #86): while the EQ is off the graph,
 // the fields and the buttons stay, disabled, and the fields are empty while
 // no point is selected. Export saves the points as an Equalizer APO /
 // AutoEq parametric EQ (lib/eq.ts eqApoText).
@@ -22,6 +24,7 @@ import { t } from "../i18n";
 import type { Device, EqBandType, EqPoint, MediaEq } from "../ipc/types";
 import {
   BAND_TYPES,
+  DEFAULT_POINTS,
   eqApoText,
   FREQ_MAX,
   FREQ_MIN,
@@ -29,6 +32,7 @@ import {
   hasGain,
   hasQ,
   heldPoint,
+  isDefaultPoints,
   MAX_POINTS,
   Q_MAX,
   Q_MIN,
@@ -141,7 +145,11 @@ function MediaEqEditor(props: { device: Device }) {
     if (bands.length >= MAX_POINTS) return;
     // Where no point is yet, from 1 kHz outwards
     const taken = (f: number) => bands.some((b) => Math.abs(Math.log2(b.frequency / f)) < 0.5);
-    const free = [1000, 2000, 500, 4000, 250, 8000, 125, 16000, 63, 31].find((f) => !taken(f)) ?? 1000;
+    // Then between the default bands
+    const free =
+      [1000, 2000, 500, 4000, 250, 8000, 125, 16000, 63, 31, 1400, 700, 2800, 350, 5600, 180, 11000, 90, 45].find(
+        (f) => !taken(f),
+      ) ?? 1000;
     setBands([...bands, { frequency: free, gain: 0, q: 1, band_type: "Peaking" }], true);
     setSelected(bands.length);
   };
@@ -151,6 +159,8 @@ function MediaEqEditor(props: { device: Device }) {
   };
   // Editing: on, with a profile to save it in; off, everything stays but disabled
   const active = () => eq().enabled && !!entry();
+  // Off without points: the ones turning it on gives
+  const shownBands = () => (!eq().enabled && eq().bands.length === 0 ? DEFAULT_POINTS : eq().bands);
   createEffect(() => {
     if (!active()) setSelected(null);
   });
@@ -188,10 +198,13 @@ function MediaEqEditor(props: { device: Device }) {
         label={t("eq.enable")}
         checked={eq().enabled}
         disabled={!entry()}
-        onChange={(v) => void commit({ ...eq(), enabled: v })}
+        onChange={(v) =>
+          // A new EQ starts with the default points
+          void commit({ enabled: v, bands: v && eq().bands.length === 0 ? [...DEFAULT_POINTS] : eq().bands })
+        }
       />
       <EqGraph
-        bands={eq().bands}
+        bands={shownBands()}
         selected={selected()}
         disabled={!active()}
         onSelect={setSelected}
@@ -233,6 +246,7 @@ function MediaEqEditor(props: { device: Device }) {
         <NumberField
           label={t("eq.frequency")}
           unit="Hz"
+          wide
           value={sel()?.frequency ?? null}
           min={FREQ_MIN}
           max={FREQ_MAX}
@@ -266,10 +280,10 @@ function MediaEqEditor(props: { device: Device }) {
         </Button>
         <Button
           icon="arrow_reset"
-          disabled={!active() || eq().bands.length === 0}
+          disabled={!active() || isDefaultPoints(eq().bands)}
           onClick={() => {
             setSelected(null);
-            setBands([], true);
+            setBands([...DEFAULT_POINTS], true);
           }}
         >
           {t("eq.reset")}
@@ -292,6 +306,8 @@ function MediaEqEditor(props: { device: Device }) {
 function NumberField(props: {
   label: string;
   unit?: string;
+  /** As wide as the Type box (five digits) */
+  wide?: boolean;
   value: number | null;
   min: number;
   max: number;
@@ -308,6 +324,7 @@ function NumberField(props: {
         <input
           id={id}
           class="input num"
+          classList={{ wide: props.wide }}
           type="number"
           min={props.min}
           max={props.max}
@@ -352,7 +369,7 @@ const dbOf = (y: number) => DB_RANGE - ((y - PLOT.top) / (PLOT.bottom - PLOT.top
 type Menu = { x: number; y: number; point: number | null };
 
 export function EqGraph(props: {
-  bands: EqPoint[];
+  bands: readonly EqPoint[];
   selected: number | null;
   /** Shown greyed out, nothing on it reacts (the EQ is off) */
   disabled?: boolean;
@@ -659,10 +676,10 @@ export function EqGraph(props: {
                   <button
                     type="button"
                     role="menuitem"
-                    disabled={props.bands.length === 0}
+                    disabled={isDefaultPoints(props.bands)}
                     onClick={menuItem(() => {
                       props.onSelect(null);
-                      props.onChange([], true);
+                      props.onChange([...DEFAULT_POINTS], true);
                     })}
                   >
                     {t("eq.reset")}

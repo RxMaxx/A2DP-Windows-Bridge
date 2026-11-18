@@ -1043,10 +1043,12 @@ decoded microphone, before apps get it: gain -> noise suppression -> noise
 gate -> limiter (ceiling -1 dBFS). Off by default; all off, the samples are
 not touched (no float conversion, bit-identical; unit tested).
 
-- **Setting**: `Profile.mic_processing` (`ipc::MicProcessing { gain_db
+- **Setting**: `Profile.mic_processing` (`ipc::MicProcessing { enabled, gain_db
   -12..24, suppression 0 (off)..100 %, gate_db -80 (off)..-20 }`,
   written to profiles.json only when not all off; `merge_profile` clamps;
-  an older file's `noise_suppression: false` reads as suppression 0).
+  `enabled` off bypasses the chain and keeps the values; an older file's
+  `noise_suppression: false` reads as suppression 0, and one without
+  `enabled` is on when any value was set).
   A `profile.save` that changes only it (`only_mic_processing_differs`)
   keeps the stream: `Service::set_mic_processing` stores it in the running
   request and in `Inner::mic_dsp` (`voice_link::MicDsp`, atomics), which the

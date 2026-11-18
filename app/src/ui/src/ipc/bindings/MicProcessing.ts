@@ -8,6 +8,11 @@
  */
 export type MicProcessing = { 
 /**
+ * The switch over all of it: off, the microphone passes untouched and
+ * the values below are kept for the next time
+ */
+enabled: boolean, 
+/**
  * dB, -12 to 24
  */
 gain_db: number, 

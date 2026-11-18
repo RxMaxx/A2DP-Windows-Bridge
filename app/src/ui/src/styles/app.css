@@ -2226,6 +2226,24 @@ option {
   flex: 0 1 18rem;
   padding-right: 0;
 }
+/* Switched off (or the microphone is Off): greyed out, values kept */
+.mic-slider:has(input:disabled) :is(.row-label, .hint, .volume-value) {
+  color: var(--disabled-text);
+}
+.mic-slider input:disabled::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, var(--disabled-text) var(--fill, 0%), var(--surface-3) var(--fill, 0%));
+}
+.mic-slider input:disabled::-webkit-slider-thumb {
+  background: var(--surface-3);
+  border-color: var(--disabled-text);
+}
+.mic-slider input:disabled::-moz-range-progress {
+  background: var(--disabled-text);
+}
+.mic-slider input:disabled::-moz-range-thumb {
+  background: var(--surface-3);
+  border-color: var(--disabled-text);
+}
 .device-global,
 .device-add {
   display: flex;
@@ -4057,7 +4075,7 @@ html.win-flyout body {
 .media-eq {
   display: flex;
   flex-direction: column;
-  gap: var(--s2);
+  gap: var(--s3);
 }
 .media-eq .row {
   padding: 0;
@@ -4217,7 +4235,7 @@ html.win-flyout body {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: var(--s2) var(--s3);
+  gap: var(--s3) var(--s2);
 }
 .eq-field {
   display: flex;
@@ -4227,7 +4245,7 @@ html.win-flyout body {
   color: var(--text-2);
 }
 .eq-field .select {
-  min-width: 7.5rem;
+  min-width: 7rem;
 }
 .eq-point-field .select {
   min-width: 4.5rem;
@@ -4243,15 +4261,24 @@ html.win-flyout body {
   gap: var(--s1);
 }
 .eq-number .input {
-  width: 4.75rem;
+  width: 4.5rem;
+}
+/* Frequency: as wide as the Type box, five digits fit */
+.eq-number .input.wide {
+  width: 7rem;
 }
 .eq-unit {
   color: var(--text-3);
 }
+/* The buttons under a line, at the end as in every dialog */
 .eq-actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--s2);
+  margin-top: var(--s1);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--border);
 }
 @media (forced-colors: active) {
   .eq-curve,

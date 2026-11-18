@@ -1074,6 +1074,7 @@
   "ui.mic_gate_hint": "Coupe le micro tant qu'il est plus faible que ce niveau.",
   "ui.mic_gate_off": "Désactivé",
   "ui.mic_processing": "Réglages du micro",
+  "ui.mic_processing_enable": "Utiliser les réglages du micro",
   "ui.state_on": "Activé",
   "ui.state_off": "Désactivé",
   "ui.headset_mic_quality": "Tant que le micro est ouvert, la qualité de lecture peut baisser.",

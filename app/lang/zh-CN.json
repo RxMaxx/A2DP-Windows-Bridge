@@ -1074,6 +1074,7 @@
   "ui.mic_gate_hint": "麦克风声音低于此音量时静音。",
   "ui.mic_gate_off": "关",
   "ui.mic_processing": "麦克风调整",
+  "ui.mic_processing_enable": "使用麦克风调整",
   "ui.state_on": "开",
   "ui.state_off": "关",
   "ui.headset_mic_quality": "麦克风开启期间，播放音质可能会下降。",

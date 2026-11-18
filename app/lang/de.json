@@ -1074,6 +1074,7 @@
   "ui.mic_gate_hint": "Schaltet das Mikrofon stumm, solange es leiser als dieser Pegel ist.",
   "ui.mic_gate_off": "Aus",
   "ui.mic_processing": "Mikrofon anpassen",
+  "ui.mic_processing_enable": "Mikrofonanpassung verwenden",
   "ui.state_on": "An",
   "ui.state_off": "Aus",
   "ui.headset_mic_quality": "Solange das Mikrofon offen ist, kann die Wiedergabequalität sinken.",

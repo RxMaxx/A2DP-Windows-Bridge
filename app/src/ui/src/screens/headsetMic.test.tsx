@@ -281,7 +281,13 @@ describe("Input Source on Audio Devices", () => {
     const dialog = await screen.findByRole("dialog", { name: t("ui.mic_processing") });
     const gain = within(dialog).getByRole("slider", { name: t("ui.mic_gain") }) as HTMLInputElement;
     const gate = within(dialog).getByRole("slider", { name: t("ui.mic_gate") }) as HTMLInputElement;
-    // All off by default
+    // All off by default: the switch, and the sliders greyed out under it
+    const toggle = within(dialog).getByRole("switch", { name: t("ui.mic_processing_enable") });
+    expect(toggle).not.toBeChecked();
+    expect(gain).toBeDisabled();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(saves().at(-1)?.mic_processing.enabled).toBe(true));
+    await waitFor(() => expect(gain).toBeEnabled());
     expect(gain.value).toBe("0");
     expect(gate).toHaveAttribute("aria-valuetext", t("ui.mic_gate_off"));
     const suppression = within(dialog).getByRole("slider", { name: t("ui.mic_noise_suppression") });
@@ -295,7 +301,7 @@ describe("Input Source on Audio Devices", () => {
       expect(saves().at(-1)).toMatchObject({
         headset_mic: "on",
         mic_device_id: CABLE,
-        mic_processing: { gain_db: 6, suppression: 0, gate_db: -80 },
+        mic_processing: { enabled: true, gain_db: 6, suppression: 0, gate_db: -80 },
       }),
     );
     await waitFor(() => expect(gain).toBeEnabled());
@@ -303,20 +309,29 @@ describe("Input Source on Audio Devices", () => {
     await waitFor(() => expect(suppression).toBeEnabled());
     fireEvent.input(suppression, { target: { value: "70" } });
     fireEvent.change(suppression);
-    await waitFor(() => expect(saves().at(-1)?.mic_processing).toEqual({ gain_db: 6, suppression: 70, gate_db: -80 }));
+    await waitFor(() => expect(saves().at(-1)?.mic_processing).toEqual({ enabled: true, gain_db: 6, suppression: 70, gate_db: -80 }),
+    );
     expect(suppression).toHaveAttribute("aria-valuetext", "70%");
     await waitFor(() => expect(gate).toBeEnabled());
     fireEvent.input(gate, { target: { value: "-50" } });
     fireEvent.change(gate);
     await waitFor(() => expect(saves().at(-1)?.mic_processing.gate_db).toBe(-50));
     await waitFor(() => expect(row).toHaveTextContent(t("ui.state_on")));
+    // Switched off: the values stay, greyed out
+    await waitFor(() => expect(toggle).toBeEnabled());
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(saves().at(-1)?.mic_processing).toEqual({ enabled: false, gain_db: 6, suppression: 70, gate_db: -50 }),
+    );
+    await waitFor(() => expect(gain).toBeDisabled());
+    expect(gain.value).toBe("6");
+    await waitFor(() => expect(row).toHaveTextContent(t("ui.state_off")));
     // Off keeps the line, disabled (the microphone is closed)
     fireEvent.keyDown(dialog, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: t("ui.mic_processing") })).toBeNull());
     await waitFor(() => expect(mode(wh, "off")).toBeEnabled());
     fireEvent.click(mode(wh, "off"));
     await waitFor(() => expect(row).toBeDisabled());
-    expect(row).toHaveTextContent(t("ui.state_on"));
   });
 
   it("makes the microphone's cable the default input while connected, a switch in developer mode", async () => {

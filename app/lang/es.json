@@ -1074,6 +1074,7 @@
   "ui.mic_gate_hint": "Silencia el micrófono mientras suene más bajo que este nivel.",
   "ui.mic_gate_off": "Desactivada",
   "ui.mic_processing": "Ajustes del micrófono",
+  "ui.mic_processing_enable": "Usar los ajustes del micrófono",
   "ui.state_on": "Activado",
   "ui.state_off": "Desactivado",
   "ui.headset_mic_quality": "Mientras el micrófono esté abierto, la calidad de reproducción puede bajar.",

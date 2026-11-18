@@ -731,6 +731,9 @@ pub struct Profile {
 /// does nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 pub struct MicProcessing {
+    /// The switch over all of it: off, the microphone passes untouched and
+    /// the values below are kept for the next time
+    pub enabled: bool,
     /// dB, -12 to 24
     pub gain_db: i8,
     /// Noise suppression: percent of the denoised signal (the rest is the
@@ -747,21 +750,29 @@ impl MicProcessing {
     pub fn is_default(&self) -> bool {
         *self == MicProcessing::default()
     }
+
+    /// Any value away from off (whether or not the switch is on)
+    pub fn any_set(&self) -> bool {
+        self.gain_db != 0 || self.suppression > 0 || self.gate_db > Self::GATE_OFF_DB
+    }
 }
 
 impl Default for MicProcessing {
     fn default() -> Self {
-        MicProcessing { gain_db: 0, suppression: 0, gate_db: Self::GATE_OFF_DB }
+        MicProcessing { enabled: false, gain_db: 0, suppression: 0, gate_db: Self::GATE_OFF_DB }
     }
 }
 
 /// Also reads the settings saved before noise suppression lost its own
 /// switch (issue #86): switched off, the strength is 0; on, the strength
-/// stays (100 when it was never set)
+/// stays (100 when it was never set). Settings saved before the switch over
+/// all of it are on when any value was set, as they worked then.
 impl<'de> Deserialize<'de> for MicProcessing {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
         struct Saved {
+            #[serde(default)]
+            enabled: Option<bool>,
             #[serde(default)]
             gain_db: i8,
             #[serde(default)]
@@ -780,7 +791,9 @@ impl<'de> Deserialize<'de> for MicProcessing {
             Some(true) => s.suppression.unwrap_or(100),
             None => s.suppression.unwrap_or(0),
         };
-        Ok(MicProcessing { gain_db: s.gain_db, suppression, gate_db: s.gate_db })
+        let mut p = MicProcessing { enabled: false, gain_db: s.gain_db, suppression, gate_db: s.gate_db };
+        p.enabled = s.enabled.unwrap_or_else(|| p.any_set());
+        Ok(p)
     }
 }
 
@@ -2587,16 +2600,25 @@ mod tests {
         // Switched off: the strength is 0 whatever was saved
         let off =
             read(serde_json::json!({"gain_db": 6, "noise_suppression": false, "suppression": 70, "gate_db": -50}));
-        assert_eq!(off, MicProcessing { gain_db: 6, suppression: 0, gate_db: -50 });
+        assert_eq!(off, MicProcessing { enabled: true, gain_db: 6, suppression: 0, gate_db: -50 });
         let on = read(serde_json::json!({"noise_suppression": true, "suppression": 70}));
-        assert_eq!(on, MicProcessing { gain_db: 0, suppression: 70, gate_db: MicProcessing::GATE_OFF_DB });
+        assert_eq!(
+            on,
+            MicProcessing { enabled: true, gain_db: 0, suppression: 70, gate_db: MicProcessing::GATE_OFF_DB }
+        );
+        // Saved before the switch over all of it: on when anything was set
+        let nothing =
+            read(serde_json::json!({"gain_db": 0, "noise_suppression": false, "suppression": 100, "gate_db": -80}));
+        assert_eq!(nothing, MicProcessing::default());
+        assert!(read(serde_json::json!({"gate_db": -50})).enabled);
         assert_eq!(read(serde_json::json!({"noise_suppression": true})).suppression, 100);
         // Without the switch: the strength as saved, none at all is off
         assert_eq!(read(serde_json::json!({"suppression": 40})).suppression, 40);
         assert_eq!(read(serde_json::json!({})), MicProcessing::default());
-        let now = MicProcessing { gain_db: -3, suppression: 55, gate_db: -40 };
+        // The switch as saved, off with values kept
+        let now = MicProcessing { enabled: false, gain_db: -3, suppression: 55, gate_db: -40 };
         let j = serde_json::to_value(now).unwrap();
-        assert_eq!(j, serde_json::json!({"gain_db": -3, "suppression": 55, "gate_db": -40}));
+        assert_eq!(j, serde_json::json!({"enabled": false, "gain_db": -3, "suppression": 55, "gate_db": -40}));
         assert_eq!(read(j), now);
     }
 

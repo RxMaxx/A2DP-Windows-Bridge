@@ -229,3 +229,15 @@ export function eqApoText(bands: readonly EqPoint[]): string {
   });
   return lines.join("\r\n") + "\r\n";
 }
+
+/** The points a new EQ starts with, and Reset puts back: the classic ten
+ *  bands an octave apart, flat (the core skips a 0 dB peak, so they change
+ *  nothing and cost nothing until one is moved) */
+export const DEFAULT_POINTS: readonly EqPoint[] = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000].map(
+  (frequency) => ({ frequency, gain: 0, q: 1.41, band_type: "Peaking" }),
+);
+
+/** Whether `bands` are the default points as they come */
+export function isDefaultPoints(bands: readonly EqPoint[]): boolean {
+  return JSON.stringify(bands) === JSON.stringify(DEFAULT_POINTS);
+}

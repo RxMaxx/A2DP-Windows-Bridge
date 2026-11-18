@@ -1074,6 +1074,7 @@
   "ui.mic_gate_hint": "마이크 소리가 이 크기보다 작은 동안 소리를 끕니다.",
   "ui.mic_gate_off": "끔",
   "ui.mic_processing": "마이크 조정",
+  "ui.mic_processing_enable": "마이크 조정 사용",
   "ui.state_on": "켜짐",
   "ui.state_off": "꺼짐",
   "ui.headset_mic_quality": "마이크를 사용하는 동안 재생 음질이 떨어질 수 있습니다.",

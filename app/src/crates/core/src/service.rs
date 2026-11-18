@@ -424,7 +424,8 @@ impl Inner {
         let s = crate::voice::mic_settings(p);
         if s != self.mic_dsp.get() {
             tracing::info!(
-                "microphone processing: gain {} dB, noise suppression {}, gate {}",
+                "microphone processing: {}, gain {} dB, noise suppression {}, gate {}",
+                if p.enabled { "on" } else { "off" },
                 p.gain_db,
                 if s.suppresses() { format!("{} %", p.suppression.min(100)) } else { "off".into() },
                 if p.gate_db > ipc::MicProcessing::GATE_OFF_DB { format!("{} dB", p.gate_db) } else { "off".into() }
@@ -2130,7 +2131,7 @@ mod tests {
     #[test]
     fn mic_processing_applies_now_and_stays_with_the_request() {
         let s = service();
-        let p = ipc::MicProcessing { gain_db: 9, suppression: 50, gate_db: -50 };
+        let p = ipc::MicProcessing { enabled: true, gain_db: 9, suppression: 50, gate_db: -50 };
         // Nothing runs: the next microphone takes it
         s.set_mic_processing(p);
         let got = s.inner.mic_dsp.get();

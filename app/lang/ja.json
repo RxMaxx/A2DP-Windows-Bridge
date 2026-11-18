@@ -1074,6 +1074,7 @@
   "ui.mic_gate_hint": "マイクの音がこの音量より小さい間は無音にします。",
   "ui.mic_gate_off": "オフ",
   "ui.mic_processing": "マイクの調整",
+  "ui.mic_processing_enable": "マイクの調整を使う",
   "ui.state_on": "オン",
   "ui.state_off": "オフ",
   "ui.headset_mic_quality": "マイクを使っている間は、再生の音質が下がることがあります。",

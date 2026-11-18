@@ -328,6 +328,13 @@ mod tests {
         // On, but nothing that changes the audio
         h.set(EqSettings::new(true, &[EqBand::peaking(1000.0, 0.0, 1.0)]));
         assert!(!p.active());
+        // The UI's ten flat points (a new EQ, Reset): no filter, no preamp, no limiter
+        let flat: Vec<EqBand> = [31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0]
+            .iter()
+            .map(|&f| EqBand::peaking(f, 0.0, 1.41))
+            .collect();
+        h.set(EqSettings::new(true, &flat));
+        assert!(!p.active());
         h.set(EqSettings::new(true, &[EqBand::peaking(1000.0, 6.0, 1.0)]));
         assert!(p.active());
     }

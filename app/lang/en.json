@@ -1074,6 +1074,7 @@
   "ui.mic_gate_hint": "Mutes the microphone while it is quieter than this level.",
   "ui.mic_gate_off": "Off",
   "ui.mic_processing": "Microphone adjustments",
+  "ui.mic_processing_enable": "Use microphone adjustments",
   "ui.state_on": "On",
   "ui.state_off": "Off",
   "ui.headset_mic_quality": "Playback quality may drop while the microphone is open.",
