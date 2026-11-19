@@ -1022,6 +1022,11 @@ impl Unicast {
             s.preset.max_transport_latency_ms.max(plan.preset.max_transport_latency_ms)
         });
         let mut latency = [shared; 2];
+        // The servers' preferred RTN caps the preset's: a high-reliability
+        // preset's 13 assumes its 100 ms, not a server's 20 ms. With RTN 13
+        // in 20 ms over 2 CIS, three headphones on a Realtek adapter lost
+        // the ACL while the CIS came up (their preference: RTN 5)
+        let mut rtn_pref = [u8::MAX; 2];
         let mut phy = plan.phy;
         let mut framing = plan.preset.framing | src.map_or(0, |s| s.preset.framing);
         for pa in plan.ases() {
@@ -1051,6 +1056,7 @@ impl Unicast {
             }
             if a.pref_max_latency_ms != 0 {
                 latency[dir] = latency[dir].min(a.pref_max_latency_ms);
+                rtn_pref[dir] = rtn_pref[dir].min(a.pref_rtn);
             }
             if a.pref_phy != 0 && a.pref_phy & phy == 0 {
                 phy = PHY_1M;
@@ -1058,7 +1064,8 @@ impl Unicast {
         }
         let pd = plan.preset.presentation_delay_us.min(range[0].1).max(range[0].0);
         let mut latency = [latency[0].max(5), latency[1].max(5)];
-        let mut rtn = [plan.preset.rtn, src.map_or(plan.preset.rtn, |s| s.preset.rtn)];
+        let mut rtn =
+            [plan.preset.rtn.min(rtn_pref[0]), src.map_or(plan.preset.rtn, |s| s.preset.rtn).min(rtn_pref[1])];
         let mut packing = 0;
         let overrides = env.cig_overrides();
         if apply_overrides(overrides, &mut latency, &mut rtn, &mut packing) {

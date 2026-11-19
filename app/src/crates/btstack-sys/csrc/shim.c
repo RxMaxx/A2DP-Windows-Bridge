@@ -1151,6 +1151,15 @@ int bluecaster_le_init(void) {
 
     gatt_client_init();
 
+    /* Our LE links (BTstack's defaults: interval 10..30 ms, peripheral
+     * latency 4, supervision timeout 720 ms): no peripheral latency, so
+     * GATT discovery and the ASE control point answer every connection
+     * event instead of every 5th, and a 5 s supervision timeout (as Android
+     * uses). The short one dropped the ACL less than a second after the
+     * first CIS came up on a Realtek adapter with three headphones: the
+     * CIG's schedule leaves the ACL few events while it starts. */
+    gap_set_connection_parameters(0x0060, 0x0030, 0x0008, 0x0018, 0, 500, 0, 0);
+
     memset(&le_hci_registration, 0, sizeof(le_hci_registration));
     le_hci_registration.callback = &le_hci_handler;
     hci_add_event_handler(&le_hci_registration);
