@@ -11,9 +11,13 @@ has_toc: false
 Windows 向け Bluetooth A2DP オーディオストリーミングツール（全コーデック対応）
 {: .fs-6 .fw-300 }
 
-BlueCaster は、安価な USB ドングルやノート PC 内蔵の Bluetooth アダプターを Hi-Fi 送信機に変えます。Windows が対応するのは基本的なコーデックだけですが、BlueCaster は **LHDC V5・LDAC・aptX Adaptive** を最大 96 kHz（LHDC V5 は最大 192 kHz）で送信できます。ほかに **aptX HD・aptX・aptX Low Latency・Opus・AAC・SBC XQ・SBC・FastStream** と、LE Audio（LC3、実験的、開発者モードのみ）にも対応しています。アダプターの設定は自動で行われ、ワンクリックで Windows に戻せます（[仕組み](architecture)）。
+BlueCaster は、お使いの Bluetooth アダプターを Hi-Fi オーディオトランスミッターに変えます。**LDAC@96 kHz**、**LHDC V5@192 kHz**、**aptX Adaptive** などの Hi-Fi コーデックで、ヘッドホンやイヤホンに音声を送信できます。これらのコーデックは Windows 単体では使えません。ほかに aptX HD・aptX・aptX Low Latency・Opus・AAC・SBC XQ・SBC・FastStream にも対応しています。
 
-![BlueCaster's Codecs screen, streaming LDAC 990 kbps / 48 kHz to Sony WH-1000XM4](../images/app_sample.png)
+- **今ある Bluetooth をそのまま使えます。** 多くのノート PC に内蔵されている Intel・Realtek・MediaTek の Bluetooth でも、手ごろな USB ドングルでも動作します。BlueCaster はアダプターを専用で使いますが、ワンクリックで Windows に戻せます。
+- **必要なときだけ動くヘッドセットマイク。** マイクはアプリが録音している間だけオンになるので、それ以外の時間は音楽を本来の音質で聴けます。ノイズ抑制とゲイン調整も備えています。
+- **追加のツールは不要です。** BlueCaster がアプリの中でアダプターを準備します（[仕組み](architecture)）。
+
+![BlueCaster の「コーデック」画面。Sony WH-1000XM4 に LDAC 990 kbps / 96 kHz で送信中で、Windows のクイック設定の上に BlueCaster のカードが表示されている](../images/app_sample.png)
 
 [セットアップ](setup){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [GitHub](https://github.com/SeiyaFunaokaJP/BlueCaster){: .btn .fs-5 .mb-4 .mb-md-0 }
@@ -144,7 +148,7 @@ BlueCaster は Windows の Bluetooth スタックをまったく使いません�
 ## 主な機能
 
 - **マルチコーデック**: LHDC V5、LDAC、aptX Adaptive、aptX、AAC、aptX HD、aptX Low Latency、Opus、Opus 05、FastStream、SBC XQ、SBC（接続時に自動でネゴシエーション）
-- **LE Audio（実験的、開発者モードのみ）**: LE Audio のヘッドホン・イヤホンへ LC3 で送信（BAP ユニキャスト、左右一組のイヤホン、ヘッドセットの音量、メディアボタン、GMAP の低遅延）。Bluetooth 5.2 のアイソクロナスチャネルに対応したアダプターが必要です。テストしたのは MediaTek MT7925 1 台だけで、既知の問題があります（[使い方](usage#le-audio)を参照）
+- **LE Audio（実験的、開発者モードのみ）**: LE Audio のヘッドホン・イヤホンへ LC3 で送信（BAP ユニキャスト、左右一組のイヤホン、ヘッドセットの音量、メディアボタン、GMAP の低遅延）。Bluetooth 5.2 のアイソクロナスチャネルに対応したアダプターが必要です。実際のアダプターでは、MediaTek MT7925 も含めてまだ安定して動作しません（[使い方](usage#le-audio)を参照）
 - **3 つのキャプチャモード**: システムループバック、仮想オーディオデバイス経由のルーティング、1 つのアプリの出力
 - **ウィンドウ・トレイ・CLI**: セットアップと診断にはウィンドウ、毎日の接続にはトレイのフライアウトとメニューを使えます。コマンドラインもあります（[使い方](usage)を参照）
 - **アプリ内で WinUSB を割り当て**: アダプターに WinUSB ドライバーを割り当て、元のドライバーに戻すこともできます。Zadig は不要です（[セットアップ](setup#winusb)を参照）。Windows がこのアダプター経由でペアリングしたヘッドホンは、ペアリングし直さずに接続できます

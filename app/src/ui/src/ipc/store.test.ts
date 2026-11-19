@@ -33,6 +33,9 @@ function fakeTransport() {
     async openUrl() {},
     async openFolder() {},
     async revealPath() {},
+    async saveTextFile() {
+      return false;
+    },
     async setTheme() {},
     onNavigate() {},
     onMinimized() {},

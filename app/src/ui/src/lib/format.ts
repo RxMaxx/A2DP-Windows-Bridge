@@ -41,8 +41,9 @@ const QUOTED_NAME = /\u201C([^\u201C\u201D\n]{1,256})\u201D/g;
 const USER_PATH = /([\\/]Users[\\/]+)([^\\/:*?"<>|\x00-\x1f]+)/gi;
 const NOBODY = ["public", "default", "default user", "all users"];
 /** A drive path, X:\ (or '/'), not in a word: its parts, each after separators; a part
- *  stops at what a file name cannot contain, or at a space that starts another path */
-const DRIVE_PATH = /(?<![A-Za-z0-9])[A-Za-z]:((?:[\\/]+(?:(?!\s[A-Za-z]:[\\/])[^\\/:*?"<>|\x00-\x1f])*)+)/g;
+ *  stops at what a file name cannot contain, or at a space that starts another path,
+ *  also one in quotes (BTstack's "firmware '<path>' and config '<path>'", issue #86) */
+const DRIVE_PATH = /(?<![A-Za-z0-9])[A-Za-z]:((?:[\\/]+(?:(?!\s['"]?[A-Za-z]:[\\/])[^\\/:*?"<>|\x00-\x1f])*)+)/g;
 /** The app's own folders: a path is kept from one of these on */
 const APP_FOLDERS = ["bluecaster", "a2dpwb", "a2dp windows bridge"];
 /** A SID with a machine part, S-1-5-21-a-b-c-rid (five or more numbers); not in a longer

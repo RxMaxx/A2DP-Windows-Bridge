@@ -116,6 +116,8 @@ export interface AdapterFirmware {
   firmware_invalid?: string | null;
   /** The core can fetch the files from linux-firmware */
   firmware_download?: boolean;
+  /** The firmware comes from the vendor's Windows driver (a Realtek chip) */
+  firmware_from_driver?: boolean;
   vendor_note: { key: string; args: string[] } | null;
   driver?: "winusb" | "bluetooth" | "other" | "none";
 }
@@ -228,6 +230,10 @@ export function adapterFirmwareTag(
   setting: ChipSetting,
   loader?: { vendor: string; ok?: boolean | null } | null,
 ): { key: string; args?: string[]; status: "good" | "warn" | "bad" } {
+  // Realtek's Windows driver has it (issue #86): as MediaTek's
+  if (a.firmware_present === true && a.firmware_from_driver) {
+    return { key: "ui.adapter.firmware_from_driver", args: [a.vendor], status: "good" };
+  }
   if (a.firmware_present === true) return { key: "firmware.present", status: "good" };
   if (a.firmware_present === false) {
     // Needed once the adapter is on WinUSB: amber before (issue #86)

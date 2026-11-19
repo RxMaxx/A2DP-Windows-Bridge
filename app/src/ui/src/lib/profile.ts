@@ -8,7 +8,7 @@
 // into it at start (crates/core/src/profiles.rs consolidate).
 
 import type { CodecValues } from "../ipc/bindings/CodecValues";
-import type { AudioDevice, Device, ParamsOf, Profile, Snapshot } from "../ipc/types";
+import type { AudioDevice, Device, MicProcessing, ParamsOf, Profile, Snapshot } from "../ipc/types";
 import { cardCodec, cardOf, carryToCodec, fitToCodec, PACKET_DEFAULT, PACKET_MAX, PACKET_MIN, type CodecCaps } from "./codecs";
 import { parseAddress } from "./format";
 
@@ -56,14 +56,31 @@ export function deviceDefaults(profiles: readonly Profile[], address: string): D
  *  switches it */
 export type HeadsetMode = "off" | "auto" | "on";
 
-/** As Codecs offers them */
+/** Every mode a profile may hold */
 export const HEADSET_MODES: readonly HeadsetMode[] = ["off", "auto", "on"];
 
-/** A profile's headset mode; anything unknown reads as Off */
-export function headsetMode(p: Pick<Profile, "headset_mic">): HeadsetMode {
-  const m = p.headset_mic as string;
-  return (HEADSET_MODES as readonly string[]).includes(m) ? (m as HeadsetMode) : "off";
+/** The modes offered: On (the microphone kept open) only in developer mode
+ *  (issue #86) */
+export function headsetModes(developer: boolean): readonly HeadsetMode[] {
+  return developer ? HEADSET_MODES : ["off", "auto"];
 }
+
+/** A profile's headset mode in force; anything unknown reads as Off. On
+ *  outside developer mode works as Auto, as the core takes it, and comes
+ *  back with developer mode (the saved value stays). */
+export function headsetMode(p: Pick<Profile, "headset_mic">, developer: boolean): HeadsetMode {
+  const m = p.headset_mic as string;
+  const mode = (HEADSET_MODES as readonly string[]).includes(m) ? (m as HeadsetMode) : "off";
+  return mode === "on" && !developer ? "auto" : mode;
+}
+
+/** The headset microphone's processing all off: the microphone as it comes */
+export const MIC_PROCESSING_OFF: MicProcessing = {
+  enabled: false,
+  gain_db: 0,
+  suppression: 0,
+  gate_db: -80,
+};
 
 export function newProfile(): Profile {
   return {
@@ -102,6 +119,7 @@ export function newProfile(): Profile {
     mic_default_input: true,
     voice_codec: "",
     mic_rate: 0,
+    mic_processing: { ...MIC_PROCESSING_OFF },
     sbc_bitpool: 0,
     sbcxq_bitpool: 0,
     sbc_min_bitpool: 0,
@@ -112,6 +130,7 @@ export function newProfile(): Profile {
     sbc_channel_mode: "",
     codec_settings: {},
     codec_order: [],
+    media_eq: { enabled: false, bands: [] },
   };
 }
 

@@ -131,6 +131,8 @@ La pantalla **Adaptador** (y el paso **Controlador y firmware** de la configurac
 
 Los adaptadores de otros fabricantes no tienen la opción **Chip Bluetooth**; en su lugar, una etiqueta indica de dónde viene el firmware: **Del controlador de MediaTek** o **Del controlador de Qualcomm** (leído del controlador de Windows del fabricante, que sigue instalado tras WinUSB), **Del controlador Wi-Fi** (Marvell; mantenga el Wi-Fi activado), **De la carpeta de firmware** (Intel, con **Abrir página de descarga**, **Abrir carpeta de firmware** y **Guía de configuración**), **Opcional** (el `.hcd` de Broadcom) o **No necesario** (CSR, Barrot, Actions). Cuando BlueCaster ha cargado el firmware con WinUSB, la etiqueta indica **Cargado**, o **No cargado** si la carga falló, junto con **Abrir página de descarga**, **Abrir carpeta de firmware** y una línea que dice de dónde viene el firmware.
 
+Un adaptador RTL8761B (como el TP-Link UB500) no necesita ninguna descarga si el controlador de Windows de Realtek está instalado en el PC. BlueCaster usa entonces el firmware de ese controlador, que sigue instalado después de pasar el adaptador a WinUSB. Para cargar otro firmware, como el de Linux, seleccione **Usar firmware personalizado** en el recuadro de firmware del adaptador, en la pantalla **Adaptador**. BlueCaster carga entonces los archivos de la carpeta de firmware. Para volver atrás, seleccione **Usar el firmware del controlador**.
+
 Para los chips de la lista **Chip Bluetooth**, **Descargar firmware** lo hace por usted: tras confirmar, BlueCaster descarga los archivos de linux-firmware (kernel.org), comprueba cada uno con el SHA-256 esperado y lo guarda en la carpeta de firmware. Si linux-firmware no tiene archivo config para un chip, BlueCaster guarda un `_config.bin` vacío y el chip usa su propia configuración. Los archivos no forman parte de BlueCaster; solo se descargan cuando usted lo pide.
 
 BlueCaster detecta el chipset del adaptador y muestra qué archivos de firmware se necesitan.
@@ -166,7 +168,7 @@ Los adaptadores y auriculares que se han usado realmente con BlueCaster, con sus
 
 | Chipset | Productos de ejemplo | Notas |
 |:--------|:-----------------|:------|
-| Realtek | TP-Link UB500, RTL8761BU | Requiere descargar firmware (ver arriba). El más probado |
+| Realtek | TP-Link UB500, RTL8761BU | Usa el firmware del controlador de Windows de Realtek si está instalado; si no, descargue el firmware (ver arriba). El más probado |
 | Realtek | RTL8852BD integrado en portátiles (`0BDA:B853`) | linux-firmware no tiene firmware para él: BlueCaster lee `rtl8852bd_mp_chip_new.dat` del controlador Bluetooth de Windows de Realtek, así que no desinstale ese controlador (o coloque el archivo en la carpeta de firmware). Aún no se ha probado en el hardware |
 | CSR | Adaptadores CSR8510 genéricos | Funcionan sin más, sin firmware |
 | Barrot | Adaptadores Bluetooth 5.4 / 6.0 (`33FA:0010`, `33FA:0012`) | Funcionan con el firmware de su ROM, sin firmware adicional. Por ahora, un solo informe de usuario |

@@ -19,7 +19,7 @@ import {
   REALTEK_CHIPS,
 } from "../lib/chips";
 import { FlowTracker, flowView } from "../lib/flow";
-import { leAudioOn as leOn } from "../lib/profile";
+import { leAudioOn as leOn, MIC_PROCESSING_OFF } from "../lib/profile";
 import type {
   ConnStatus,
   Transport,
@@ -75,6 +75,8 @@ export type MockScenario =
   | "capped"
   /** Huawei earbuds that list LDAC only once it is asked for (issue #30) */
   | "huawei"
+  /** Realtek's Windows driver on this PC has the RTL8761BU's firmware (issue #86) */
+  | "realtek_driver"
   /** Headset microphone on for the WH-1000XM5 (to CABLE
    *  Input) and for the LE Audio earbuds: a stream reports its voice link */
   | "voice";
@@ -102,6 +104,8 @@ const RTL: AdapterInfo = {
   firmware_files: ["rtl8761bu_fw.bin", "rtl8761bu_config.bin"],
   firmware_invalid: null,
   firmware_download: true,
+  firmware_from_driver: false,
+  firmware_driver: false,
   vendor_note: null,
   restart_needed: false,
   le_audio: null,
@@ -164,6 +168,7 @@ export function sampleProfile(over: Partial<Profile> = {}): Profile {
     mic_default_input: true,
     voice_codec: "",
     mic_rate: 0,
+    mic_processing: { ...MIC_PROCESSING_OFF },
     sbc_bitpool: 0,
     sbcxq_bitpool: 0,
     sbc_min_bitpool: 0,
@@ -175,6 +180,7 @@ export function sampleProfile(over: Partial<Profile> = {}): Profile {
     ...over,
     codec_settings: over.codec_settings ?? {},
     codec_order: over.codec_order ?? [],
+    media_eq: over.media_eq ?? { enabled: false, bands: [] },
   };
 }
 
@@ -235,7 +241,6 @@ export function sampleSettings(over: Partial<Settings> = {}): Settings {
       mtk_command_before_reset: false,
       mtk_register: "",
       le_keys_to_windows: false,
-      realtek_driver_firmware: false,
       le_latency_c_to_p_ms: 0,
       le_latency_p_to_c_ms: 0,
       le_rtn_c_to_p: null,
@@ -246,6 +251,7 @@ export function sampleSettings(over: Partial<Settings> = {}): Settings {
     },
     bt_chip_pid: 0,
     bt_chip_fw_stem: "",
+    realtek_custom_firmware: false,
     afh: "auto",
     remote_sink: "",
     le_audio_experimental: false,
@@ -371,6 +377,9 @@ const LE_BUDS = sampleDevice({
   le_audio_set: true,
 });
 
+/** The RTL8761B firmware of Realtek's Windows driver (core realtek_btnic) */
+const RTL_DRIVER_FILE = "rtl8761b_mp_chip_bt40_fw_asic_rom_patch_new.dat";
+
 export function sampleSnapshot(scenario: MockScenario = "normal"): Snapshot {
   const fresh = scenario === "fresh";
   // LE Audio on; le_unsupported: an adapter without isochronous channels,
@@ -443,7 +452,9 @@ export function sampleSnapshot(scenario: MockScenario = "normal"): Snapshot {
               firmware_present: false,
             },
           ]
-        : [RTL],
+        : scenario === "realtek_driver"
+          ? [{ ...RTL, firmware_driver: true, firmware_from_driver: true, firmware_files: [RTL_DRIVER_FILE] }]
+          : [RTL],
       error: null,
       le_audio:
         scenario === "le_unsupported" ? false : scenario === "le" ? true : null,
@@ -732,7 +743,7 @@ const FIRMWARE_FILES: FirmwareFile[] = [
  */
 export function adapterWithFirmware(
   a: AdapterInfo,
-  s: ChipSetting,
+  s: ChipSetting & { realtek_custom_firmware?: boolean },
   folder: readonly FirmwareFile[],
 ): AdapterInfo {
   const detected =
@@ -752,12 +763,23 @@ export function adapterWithFirmware(
       firmware_invalid: null,
       firmware_download: false,
     };
+  // As the core: the driver's firmware first, custom firmware the folder's
+  if (a.firmware_driver && !s.realtek_custom_firmware)
+    return {
+      ...a,
+      firmware_present: true,
+      firmware_files: [RTL_DRIVER_FILE],
+      firmware_invalid: null,
+      firmware_from_driver: true,
+      firmware_download: REALTEK_CHIPS.some((c) => c.stem === stem.toLowerCase()),
+    };
   const entry = folder.find((f) => f.stem.toLowerCase() === stem.toLowerCase());
   return {
     ...a,
     firmware_present: entry?.has_config ?? false,
     firmware_files: [`${stem}_fw.bin`, `${stem}_config.bin`],
     firmware_invalid: null,
+    firmware_from_driver: false,
     // core firmware::available: every table chip but Custom
     firmware_download: REALTEK_CHIPS.some((c) => c.stem === stem.toLowerCase()),
   };
@@ -1404,6 +1426,9 @@ export class MockCore implements Transport {
         }
         return null;
       }
+      // Nothing plays in the mock: the curve is all there is to see
+      case "media_eq.preview":
+        return null;
       case "profile.delete":
         this.snap.profiles = this.snap.profiles.filter(
           (x) => x.name !== p.name,
@@ -1454,7 +1479,8 @@ export class MockCore implements Transport {
         }
         if (
           before.bt_chip_pid !== this.snap.settings.bt_chip_pid ||
-          before.bt_chip_fw_stem !== this.snap.settings.bt_chip_fw_stem
+          before.bt_chip_fw_stem !== this.snap.settings.bt_chip_fw_stem ||
+          before.realtek_custom_firmware !== this.snap.settings.realtek_custom_firmware
         ) {
           // As the core's reload_adapter: the firmware state for the new
           // chip, then an idle stack is released so the firmware loads again
@@ -1745,6 +1771,19 @@ export class MockCore implements Transport {
   }
   async revealPath(path: string) {
     console.info("[mock] reveal", path);
+  }
+  /** The files saved (tests); in a browser, also downloaded */
+  savedFiles: { name: string; text: string }[] = [];
+  async saveTextFile(name: string, text: string) {
+    this.savedFiles.push({ name, text });
+    if (typeof URL.createObjectURL === "function") {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+    return true;
   }
   async setTheme() {}
   /** Windows has no virtual device (tests) */
@@ -2518,9 +2557,10 @@ export class MockCore implements Transport {
   private voiceOf(name: string | null): VoiceStatus | null {
     const p = this.snap.profiles.find((x) => x.name === name);
     // Auto: no application records from the cable in the mock, so its
-    // link waits; muted: no link
-    if (!p || p.headset_mic !== "on" || p.mic_muted || !p.mic_device_id)
-      return null;
+    // link waits; muted: no link. On counts only in developer mode (as
+    // Auto otherwise); LE Audio takes Auto as On.
+    const open = p?.headset_mic === "on" && (this.snap.settings.developer_mode || p.le_audio);
+    if (!p || !open || p.mic_muted || !p.mic_device_id) return null;
     const chosen = !this.snap.settings.auto_codec;
     if (p.le_audio) {
       const rate =

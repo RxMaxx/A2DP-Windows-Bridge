@@ -11,9 +11,13 @@ has_toc: false
 모든 코덱을 지원하는 Windows용 고급 Bluetooth 오디오 송신기
 {: .fs-6 .fw-300 }
 
-BlueCaster는 저렴한 USB 동글이나 노트북 내장 어댑터 같은 Bluetooth 어댑터를 Hi-Fi 송신기로 바꿔 줍니다. Windows는 기본 코덱만 지원하지만, BlueCaster는 **LHDC V5, LDAC, aptX Adaptive**를 최대 96 kHz(LHDC V5는 최대 192 kHz)로 전송합니다. **aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC, FastStream**과 LE Audio(LC3, 실험적, 개발자 모드 전용)도 지원합니다. 어댑터는 자동으로 설정되며, 클릭 한 번으로 Windows에 되돌릴 수 있습니다([작동 방식](architecture)).
+BlueCaster는 Bluetooth 어댑터를 Hi-Fi 오디오 송신기로 바꿔 줍니다. **LDAC@96 kHz**, **LHDC V5@192 kHz**, **aptX Adaptive** 같은 Hi-Fi 코덱으로 헤드폰과 이어폰에 음악을 전송합니다. Windows 자체로는 이 코덱들을 사용할 수 없습니다. 그 밖에 aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC, FastStream도 지원합니다.
 
-![BlueCaster's Codecs screen, streaming LDAC 990 kbps / 48 kHz to Sony WH-1000XM4](../images/app_sample.png)
+- **지금 가진 Bluetooth를 그대로 사용합니다.** 많은 노트북에 내장된 Intel, Realtek, MediaTek Bluetooth도, 저렴한 USB 동글도 사용할 수 있습니다. BlueCaster가 어댑터를 전용으로 사용하며, 클릭 한 번으로 Windows에 되돌릴 수 있습니다.
+- **필요할 때만 켜지는 헤드셋 마이크.** 앱이 녹음하는 동안에만 마이크가 켜지므로, 그 밖의 시간에는 음악을 원래 음질로 들을 수 있습니다. 소음 억제와 게인 조절 기능도 들어 있습니다.
+- **별도의 도구가 필요 없습니다.** BlueCaster가 앱 안에서 어댑터를 설정합니다([작동 방식](architecture)).
+
+![BlueCaster의 코덱 화면. Sony WH-1000XM4에 LDAC 990 kbps / 96 kHz로 전송 중이며, Windows 빠른 설정 위에 BlueCaster 카드가 표시되어 있음](../images/app_sample.png)
 
 [시작하기](setup){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [GitHub](https://github.com/SeiyaFunaokaJP/BlueCaster){: .btn .fs-5 .mb-4 .mb-md-0 }
@@ -144,7 +148,7 @@ BlueCaster는 Windows Bluetooth 스택을 전혀 거치지 않습니다. WinUSB�
 ## 주요 기능
 
 - **다중 코덱**: LHDC V5, LDAC, aptX Adaptive, aptX, AAC, aptX HD, aptX Low Latency, Opus, Opus 05, FastStream, SBC XQ, SBC 지원, 코덱 자동 협상
-- **LE Audio (실험적, 개발자 모드 전용)**: LE Audio 헤드폰과 이어폰으로 LC3 전송(BAP 유니캐스트, 양쪽 이어폰 동시 연결, 헤드셋 볼륨, 미디어 버튼, GMAP 저지연). Bluetooth 5.2 등시성 채널을 지원하는 어댑터가 필요합니다. MediaTek MT7925 한 대에서만 시험했으며 알려진 문제가 있습니다([사용법](usage#le-audio) 참고)
+- **LE Audio (실험적, 개발자 모드 전용)**: LE Audio 헤드폰과 이어폰으로 LC3 전송(BAP 유니캐스트, 양쪽 이어폰 동시 연결, 헤드셋 볼륨, 미디어 버튼, GMAP 저지연). Bluetooth 5.2 등시성 채널을 지원하는 어댑터가 필요합니다. 실제 어댑터에서는 MediaTek MT7925를 포함해 아직 안정적으로 작동하지 않습니다([사용법](usage#le-audio) 참고)
 - **세 가지 캡처 모드**: 시스템 루프백, 가상 오디오 장치 라우팅, 특정 응용 프로그램의 출력
 - **창, 트레이, CLI**: 설정과 진단용 창, 평소 연결에 쓰는 트레이 플라이아웃과 메뉴, 명령줄 ([사용법](usage) 참고)
 - **앱에서 WinUSB 할당**: 어댑터에 WinUSB 드라이버를 할당하고 원래 드라이버로 복원할 수 있어 Zadig가 필요 없습니다 ([설정](setup#winusb) 참고). Windows에서 이 어댑터로 페어링한 헤드폰은 다시 페어링하지 않아도 연결됩니다

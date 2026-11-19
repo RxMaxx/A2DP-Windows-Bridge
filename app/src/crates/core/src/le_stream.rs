@@ -183,6 +183,7 @@ impl LeAudioPath {
                 plan: plan.clone(),
                 input: crate::stream::input_format(format),
                 buffer: BufferPreset::Standard,
+                media_eq: Some(crate::media_eq::handle()),
             },
             started.sink.clone(),
             stats,
@@ -256,11 +257,13 @@ pub struct LeMicPath {
 }
 
 impl LeMicPath {
-    /// Opens `target` at the stream's source rate and starts decoding into it
-    pub fn start(rx: LeRxHandle, target: &MicTarget) -> Result<LeMicPath, String> {
+    /// Opens `target` at the stream's source rate and starts decoding into
+    /// it, through the processing `dsp` asks for
+    pub fn start(rx: LeRxHandle, target: &MicTarget, dsp: voice_link::MicDsp) -> Result<LeMicPath, String> {
         let rate = rx.sample_rate;
         let mut output = MicOutput::open(target, rate)?;
-        let producer = output.producer().ok_or("the microphone output has no producer")?;
+        let mut producer = output.producer().ok_or("the microphone output has no producer")?;
+        producer.set_processing(dsp, rate);
         let pipeline = LeRxPipeline::start(rx, Box::new(ProducerOut(producer)))?;
         tracing::info!("LE Audio: microphone to {target} at {rate} Hz");
         Ok(LeMicPath { pipeline: Some(pipeline), output: Some(output), target: target.clone(), rate })
@@ -317,9 +320,14 @@ impl Drop for LeMicPath {
 /// The microphone of a just started stream into `target` (the `stream`th of
 /// the session: [`MicTarget::nth`]). Ok(None): the stream has none (none
 /// asked for, or the plan found none); Err: the output did not open.
-pub fn start_mic(started: &mut LeStreamStarted, target: &MicTarget, stream: u32) -> Result<Option<LeMicPath>, String> {
+pub fn start_mic(
+    started: &mut LeStreamStarted,
+    target: &MicTarget,
+    stream: u32,
+    dsp: voice_link::MicDsp,
+) -> Result<Option<LeMicPath>, String> {
     let Some(rx) = started.rx.take() else { return Ok(None) };
-    LeMicPath::start(rx, &target.nth(stream)).map(Some).inspect_err(|e| {
+    LeMicPath::start(rx, &target.nth(stream), dsp).map(Some).inspect_err(|e| {
         tracing::error!("LE Audio: microphone: {e}");
     })
 }
@@ -405,6 +413,20 @@ pub(crate) fn refusal(le_enabled: bool, developer: bool, source: &SourceRequest)
     }
 }
 
+/// LE Audio is off and `req` is an LE Audio device's: when its LE pairing
+/// gave a classic link key (cross-transport key derivation, stored under its
+/// public address), the classic request for it, with its classic side saved
+/// so it is listed with LE Audio off. Else None (it was paired over LE
+/// only, without a classic key: refused).
+fn classic_instead(config_dir: &std::path::Path, req: &StreamRequest) -> Option<StreamRequest> {
+    let keys = bt_host::link_keys::FileLinkKeyStore::open(&crate::paths::link_keys_file(config_dir));
+    if !keys.entries().iter().any(|e| e.addr == req.device) {
+        return None;
+    }
+    crate::devices::save_classic_sides(config_dir, keys.entries());
+    Some(StreamRequest { le: None, codec: None, codec_forced: false, ..req.clone() })
+}
+
 /// The session thread for `req` (`req.le` is Some). Returns when stopped or
 /// on an error (state reported), as `stream::run` does.
 pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
@@ -414,12 +436,18 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
     let mut le = req.le.clone().unwrap_or_default();
     let addr = bt_host::addr_str(&req.device);
     tracing::info!("LE Audio stream to {addr} ({})", crate::diag::quoted(&req.device_name));
-    tracing::debug!("le stream: request {req:?}");
+    tracing::debug!("le stream: request {:?}", req.redacted());
     let stopped = || inner.stop_requested();
     let ready = || inner.notify(StreamState::Idle, Msg::new("status.ready"));
     let session_start = Instant::now();
 
     if let Some(key) = refusal(inner.le_wanted(), inner.developer(), &req.source) {
+        if key == "error.le_audio_disabled"
+            && let Some(classic) = classic_instead(inner.config_dir(), &req)
+        {
+            tracing::info!("LE Audio is off: streaming over classic with the link key of the LE pairing");
+            return crate::stream::run(inner, classic);
+        }
         tracing::debug!("le stream: refused ({key}), LE wanted {}, source {}", inner.le_wanted(), req.source);
         return inner.notify(StreamState::Error, Msg::new(key));
     }
@@ -554,7 +582,11 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
     let mut mic = open_mic(inner, &mut started, mic_target.as_ref(), mic_streams, &mut mic_note);
 
     let report = |started: &LeStreamStarted, audio: Option<&LeAudioPath>, note: Option<&Msg>| {
-        inner.notify(StreamState::Streaming, note.cloned().unwrap_or_else(|| Msg::new("status.connected")));
+        // A set member left out (not found, or its link went down): say
+        // so, else one earbud plays in mono without a word (a tester's
+        // WF-1000XM6 did)
+        let partial = (host.le_set_members_missing() > 0).then(|| Msg::new("status.le_set_partial"));
+        inner.notify(StreamState::Streaming, note.cloned().or(partial).unwrap_or_else(|| Msg::new("status.connected")));
         let details = LeStreamDetails::of(started);
         let plan = &started.status.plan;
         let channels = plan.channel_count() as u32;
@@ -755,7 +787,7 @@ fn open_mic(
     note: &mut Option<Msg>,
 ) -> Option<LeMicPath> {
     let target = target?;
-    match start_mic(started, target, stream) {
+    match start_mic(started, target, stream, inner.mic_dsp.clone()) {
         Ok(Some(m)) => {
             inner.voice_status(Some(m.status()));
             *note = None;
@@ -813,7 +845,7 @@ fn run_broadcast(inner: &Arc<Inner>, req: StreamRequest) {
     let stopped = || inner.stop_requested();
     let ready = || inner.notify(StreamState::Idle, Msg::new("status.ready"));
     tracing::info!("Auracast (developer mode): broadcast {}", crate::diag::quoted(&req.device_name));
-    tracing::debug!("broadcast: request {req:?}");
+    tracing::debug!("broadcast: request {:?}", req.redacted());
 
     if let Some(key) = refusal(inner.le_wanted(), inner.developer(), &req.source) {
         tracing::debug!("broadcast: refused ({key})");
@@ -1132,7 +1164,7 @@ mod tests {
             preset: "16_2_1".into(),
             stats: Arc::default(),
         };
-        let mic = LeMicPath::start(rx, &MicTarget::Wav(path.clone())).unwrap();
+        let mic = LeMicPath::start(rx, &MicTarget::Wav(path.clone()), voice_link::MicDsp::new()).unwrap();
         assert_eq!(mic.rate(), 16000);
         let status = mic.status();
         assert_eq!((status.codec.as_str(), status.link.as_str(), status.rate), ("lc3", "le", 16000));

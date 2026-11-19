@@ -9,9 +9,13 @@ nav_order: 1
 Advanced Bluetooth Audio Transmitter for Windows, with full codec support.
 {: .fs-6 .fw-300 }
 
-BlueCaster turns your Bluetooth adapter -- a cheap USB dongle or the one built into many laptops -- into a Hi-Fi transmitter. Windows supports only basic codecs; BlueCaster streams **LHDC V5, LDAC and aptX Adaptive** at up to 96 kHz (LHDC V5 up to 192 kHz), plus **aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC and FastStream**, and LE Audio (LC3, experimental, developer mode only). It sets up the adapter automatically, and one click returns the adapter to Windows ([how it works](architecture)).
+BlueCaster turns your Bluetooth adapter into a Hi-Fi audio transmitter. It streams Hi-Fi codecs like **LDAC@96 kHz**, **LHDC V5@192 kHz** and **aptX Adaptive** to your headphones and earbuds. Windows doesn't support any of these codecs on its own. BlueCaster also supports aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC and FastStream.
 
-![BlueCaster's Codecs screen, streaming LDAC 990 kbps / 48 kHz to Sony WH-1000XM4](images/app_sample.png)
+- **Works with the Bluetooth you already have.** The built-in Intel, Realtek or MediaTek Bluetooth on many laptops works, and so does an inexpensive USB dongle. BlueCaster takes over the adapter, and one click gives it back to Windows.
+- **A headset mic that stays out of the way.** The mic turns on only while an app is recording, so your music plays at full quality the rest of the time. Noise suppression and gain control are built in.
+- **No extra tools needed.** BlueCaster sets up the adapter right in the app ([how it works](architecture)).
+
+![BlueCaster's Codecs screen, streaming LDAC 990 kbps / 96 kHz to Sony WH-1000XM4, with its card above Windows Quick Settings](images/app_sample.png)
 
 [Get Started](setup){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [GitHub](https://github.com/SeiyaFunaokaJP/BlueCaster){: .btn .fs-5 .mb-4 .mb-md-0 }
@@ -142,7 +146,7 @@ BlueCaster bypasses the Windows Bluetooth stack entirely. It communicates direct
 ## Features
 
 - **Multi-codec**: LHDC V5, LDAC, aptX Adaptive, aptX, AAC, aptX HD, aptX Low Latency, Opus, Opus 05, FastStream, SBC XQ and SBC with automatic negotiation
-- **LE Audio (experimental, developer mode only)**: LC3 to LE Audio headphones and earbuds (BAP unicast, both earbuds of a pair, headset volume, media buttons, GMAP low latency). Needs an adapter with Bluetooth 5.2 isochronous channels; tested on one MediaTek MT7925 only, with known problems ([Usage](usage#le-audio))
+- **LE Audio (experimental, developer mode only)**: LC3 to LE Audio headphones and earbuds (BAP unicast, both earbuds of a pair, headset volume, media buttons, GMAP low latency). Needs an adapter with Bluetooth 5.2 isochronous channels. LE Audio does not work reliably on real adapters yet, including the MediaTek MT7925 ([Usage](usage#le-audio))
 - **Three capture modes**: System loopback, virtual audio device routing, or one application's output
 - **Window, tray and CLI**: a window for setup and diagnostics, a tray flyout and menu for everyday connecting, and a command line (see [Usage](usage))
 - **WinUSB in the app**: assigns the WinUSB driver to the adapter and restores the original driver, no Zadig needed (see [Setup](setup#winusb)); headphones that Windows paired through the adapter connect without pairing again

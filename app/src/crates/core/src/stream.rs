@@ -86,6 +86,9 @@ pub struct StreamRequest {
     /// the best both sides have. One the headphones lack falls back to the
     /// next lower one.
     pub voice_codec: Option<voice_link::VoiceCodec>,
+    /// What is done to the microphone (the profile's `mic_processing`);
+    /// [`crate::Service::set_mic_processing`] changes it while streaming
+    pub mic_processing: ipc::MicProcessing,
 }
 
 /// The bitpools of a request ([`crate::profiles::Profile::bitpools`]; 0 = Auto)
@@ -98,6 +101,21 @@ pub struct Bitpools {
 }
 
 impl StreamRequest {
+    /// The request for the log: its addresses zeroed and an Auracast
+    /// broadcast code left out. As numbers, the addresses escaped the
+    /// diagnostic bundle's masking (a tester's bundle had them).
+    pub fn redacted(&self) -> StreamRequest {
+        let mut r = self.clone();
+        r.device = [0; 6];
+        if let Some(le) = r.le.as_mut() {
+            le.extra_devices.iter_mut().for_each(|a| *a = [0; 6]);
+            if let Some(code) = le.broadcast.as_mut().and_then(|b| b.code.as_mut()) {
+                *code = "<code>".into();
+            }
+        }
+        r
+    }
+
     /// The bitpools, as a profile saved while streaming has them
     pub fn set_bitpools(&mut self, b: Bitpools) {
         self.sbc_bitpool = b.sbc;
@@ -1318,6 +1336,7 @@ fn start_pipeline(
                 let zero = host.volume_is_zero();
                 move || zero() || crate::mute_output::key_silenced()
             })),
+            media_eq: Some(crate::media_eq::handle()),
         },
         sink,
         host.stats().clone(),
@@ -1413,7 +1432,7 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
         req.sample_rate.map_or("device's".into(), |r| format!("{r} Hz")),
         req.source
     );
-    tracing::debug!("stream: request {req:?}");
+    tracing::debug!("stream: request {:?}", req.redacted());
     let stopped = || inner.stop_requested();
     let session_start = Instant::now();
 

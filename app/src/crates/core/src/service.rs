@@ -145,6 +145,21 @@ impl ScannedDevice {
 const APPEARANCE_PHONE: u16 = 0x001;
 const APPEARANCE_COMPUTER: u16 = 0x002;
 
+/// The addresses of advertisers listed as LE Audio only for their audio
+/// appearance that are a classic device (`classic`: found or saved): a
+/// classic headset's LE side for its app (a Sennheiser HDR 275 advertises
+/// name, battery and the appearance "headset", no LE Audio service). Not
+/// listed, and a saved LE side of them is removed: else "Use LE Audio when
+/// available" connected it over LE, where nothing answers.
+fn classic_appearance_only(results: &[LeScanResult], classic: &[String]) -> Vec<String> {
+    results
+        .iter()
+        .filter(|r| r.le_audio && r.appearance_only)
+        .map(|r| r.identity.unwrap_or(r.addr).to_string())
+        .filter(|a| classic.iter().any(|c| c.eq_ignore_ascii_case(a)))
+        .collect()
+}
+
 /// The LE Audio entries of an LE scan (v1 A2dpService scan thread): LE
 /// Audio advertisers only; a saved LE Audio device is listed (with its new
 /// name); of a coordinated set nobody saved, one member (connecting it
@@ -386,6 +401,9 @@ pub(crate) struct Inner {
     voice_events: Mutex<Vec<bt_host::VoiceEvent>>,
     /// The microphone test (Diagnostics)
     pub mic_test: crate::mic_test::MicTest,
+    /// The microphone's processing in force (the request's, changed in
+    /// place by [`Service::set_mic_processing`])
+    pub mic_dsp: voice_link::MicDsp,
     /// The running stack was started with LE Audio
     le_active: AtomicBool,
     /// A device scan runs
@@ -416,6 +434,21 @@ pub(crate) struct Inner {
 }
 
 impl Inner {
+    /// The microphone's processing in force from the next samples on
+    pub(crate) fn apply_mic_processing(&self, p: &ipc::MicProcessing) {
+        let s = crate::voice::mic_settings(p);
+        if s != self.mic_dsp.get() {
+            tracing::info!(
+                "microphone processing: {}, gain {} dB, noise suppression {}, gate {}",
+                if p.enabled { "on" } else { "off" },
+                p.gain_db,
+                if s.suppresses() { format!("{} %", p.suppression.min(100)) } else { "off".into() },
+                if p.gate_db > ipc::MicProcessing::GATE_OFF_DB { format!("{} dB", p.gate_db) } else { "off".into() }
+            );
+        }
+        self.mic_dsp.set(s);
+    }
+
     /// An event for the state machine (the LE stream's headset volume)
     pub(crate) fn send_event(&self, e: ServiceEvent) {
         let _ = self.events.lock().unwrap_or_else(|e| e.into_inner()).send(e);
@@ -474,8 +507,11 @@ impl Inner {
     pub fn notify(&self, state: StreamState, msg: Msg) {
         tracing::info!("state {state:?}: {}", msg.english());
         *self.state.lock().unwrap_or_else(|e| e.into_inner()) = state;
-        // What went over the air before a failure or a lost connection
-        if matches!(state, StreamState::Error | StreamState::Reconnecting) {
+        // What went over the air before a failure or a lost connection; not
+        // for a refusal by a setting, which sent nothing (a tester's clicks
+        // on a refused device saved 7 and pushed the useful ones out)
+        let refusal = matches!(msg.key, "error.le_audio_disabled" | "error.le_audio_developer");
+        if matches!(state, StreamState::Error | StreamState::Reconnecting) && !refusal {
             let dir = crate::paths::recorder_dir(&self.opts.config_dir);
             let what = format!("{state:?}-{}", msg.key.trim_start_matches("error."));
             self.opts.capture.save_recent(&dir, &crate::paths::local_stamp(), &what, false);
@@ -1132,6 +1168,7 @@ impl Service {
             voice_change: Mutex::new(None),
             voice_events: Mutex::new(Vec::new()),
             mic_test: Default::default(),
+            mic_dsp: voice_link::MicDsp::new(),
             le_active: AtomicBool::new(false),
             scanning: AtomicBool::new(false),
             le_stream: Mutex::new(None),
@@ -1415,6 +1452,16 @@ impl Service {
         self.inner.mic_test.status()
     }
 
+    /// Other processing for the headset microphone: the running microphone
+    /// (classic or LE Audio) takes it with its next samples, and a stream
+    /// started again for the same request keeps it
+    pub fn set_mic_processing(&self, p: ipc::MicProcessing) {
+        if let Some(req) = self.last_request.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            req.mic_processing = p;
+        }
+        self.inner.apply_mic_processing(&p);
+    }
+
     /// Other bitpools for the A2DP stream running, without touching the link
     /// (the session's next tick). False when none runs: the caller starts it
     /// again instead.
@@ -1656,6 +1703,7 @@ impl Service {
         // Before the stack starts: one that offers HFP audio
         self.inner.voice_wanted.store(req.headset_mic.is_on() && req.le.is_none(), Ordering::Release);
         self.inner.unlisted_keeps.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self.inner.apply_mic_processing(&req.mic_processing);
         *self.last_request.lock().unwrap_or_else(|e| e.into_inner()) = Some(req.clone());
         self.inner.turned_off.store(false, Ordering::Release);
         self.inner.stop.store(false, Ordering::Release);
@@ -1815,7 +1863,12 @@ impl Service {
         let classic = host.scan_with(seconds, &mut |found| {
             let mut list: Vec<ScannedDevice> = found.iter().map(ScannedDevice::classic).collect();
             if le_scan {
-                let mut le = le_scan_entries(&host.le_scan_results(), &saved_le, &own).0;
+                let results = host.le_scan_results();
+                let mut le = le_scan_entries(&results, &saved_le, &own).0;
+                let classic: Vec<String> =
+                    list.iter().map(|d| d.address.clone()).chain(saved.iter().map(|d| d.address.clone())).collect();
+                let drop = classic_appearance_only(&results, &classic);
+                le.retain(|e| !drop.contains(&e.address));
                 let known: Vec<(String, String)> = list
                     .iter()
                     .map(|d| (d.address.clone(), d.name.clone()))
@@ -1865,6 +1918,18 @@ impl Service {
                 );
             }
             let (mut entries, found) = le_scan_entries(&results, &saved_le, &own);
+            let classic: Vec<String> =
+                list.iter().map(|d| d.address.clone()).chain(saved.iter().map(|d| d.address.clone())).collect();
+            let drop = classic_appearance_only(&results, &classic);
+            entries.retain(|e| !drop.contains(&e.address));
+            for a in drop.iter().filter(|a| saved_le.iter().any(|d| d.address.eq_ignore_ascii_case(a))) {
+                tracing::info!(
+                    "LE scan: a classic device's LE side without LE Audio removed from the LE Audio devices"
+                );
+                if let Err(e) = crate::devices::remove_le(&self.inner.opts.config_dir, a) {
+                    tracing::warn!("LE scan: removing that LE side: {e}");
+                }
+            }
             tracing::info!(
                 "LE scan: {} advertiser(s) in {:.1} s, {found} LE Audio, {} listed",
                 results.len(),
@@ -2096,6 +2161,36 @@ mod tests {
         }
         .to_request(1000)
         .unwrap()
+    }
+
+    #[test]
+    fn the_logged_request_has_no_address_or_broadcast_code() {
+        let mut req = request();
+        req.le = Some(bt_host::LeRequest {
+            extra_devices: vec![[0x66; 6]],
+            broadcast: Some(bt_host::LeBroadcast { code: Some("secret12".into()), ..Default::default() }),
+            ..Default::default()
+        });
+        let logged = format!("{:?}", req.redacted());
+        for leak in ["17, 34, 51, 68, 85", "102, 102", "secret12"] {
+            assert!(!logged.contains(leak), "{leak} in {logged}");
+        }
+        assert_eq!(req.redacted().device_name, req.device_name);
+    }
+
+    #[test]
+    fn mic_processing_applies_now_and_stays_with_the_request() {
+        let s = service();
+        let p = ipc::MicProcessing { enabled: true, gain_db: 9, suppression: 50, gate_db: -50 };
+        // Nothing runs: the next microphone takes it
+        s.set_mic_processing(p);
+        let got = s.inner.mic_dsp.get();
+        assert_eq!((got.gain_db, got.suppression, got.gate_db), (9.0, 0.5, -50.0));
+        *s.last_request.lock().unwrap() = Some(request());
+        s.set_mic_processing(ipc::MicProcessing::default());
+        assert!(!s.inner.mic_dsp.get().is_active());
+        s.set_mic_processing(p);
+        assert_eq!(s.last_request.lock().unwrap().as_ref().unwrap().mic_processing, p);
     }
 
     #[test]
@@ -2419,6 +2514,18 @@ mod tests {
         let got: Vec<_> = list.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(got, ["Earbuds", "Speaker"]);
         assert_eq!(found, 2);
+    }
+
+    #[test]
+    fn a_classic_headsets_appearance_only_le_side_is_not_le_audio() {
+        let guess = |addr, name| LeScanResult { appearance: 0x0942, appearance_only: true, ..le(addr, name, None) };
+        let results = [
+            guess("00:A2:D0:00:00:60", "HDR 275"),
+            guess("00:A2:D0:00:00:61", "LE-only buds"),
+            le("00:A2:D0:00:00:62", "Dual-mode buds", None),
+        ];
+        let classic = ["00:a2:d0:00:00:60".to_string(), "00:A2:D0:00:00:62".to_string()];
+        assert_eq!(classic_appearance_only(&results, &classic), ["00:A2:D0:00:00:60"]);
     }
 
     #[test]

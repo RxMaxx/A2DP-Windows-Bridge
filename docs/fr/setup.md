@@ -131,6 +131,8 @@ L'écran **Adaptateur** (et l'étape **Pilote et firmware** de la configuration)
 
 Les adaptateurs d'autres fabricants n'ont pas de choix **Puce Bluetooth** ; une étiquette indique à la place d'où vient le firmware : **Du pilote de MediaTek** ou **Du pilote de Qualcomm** (lu dans le pilote Windows du fabricant, qui reste installé après WinUSB), **Du pilote Wi-Fi** (Marvell ; laissez le Wi-Fi activé), **Du dossier du firmware** (Intel, avec **Ouvrir la page de téléchargement**, **Ouvrir le dossier du firmware** et **Guide de configuration**), **Facultatif** (le `.hcd` de Broadcom) ou **Inutile** (CSR, Barrot, Actions). Une fois que BlueCaster a chargé le firmware sous WinUSB, l'étiquette indique **Chargé**, ou **Non chargé** si le chargement a échoué, accompagnée de **Ouvrir la page de téléchargement**, **Ouvrir le dossier du firmware** et d'une ligne qui indique d'où vient le firmware.
 
+Un adaptateur RTL8761B (comme le TP-Link UB500) n'a besoin d'aucun téléchargement si le pilote Windows de Realtek est installé sur le PC. BlueCaster utilise alors le firmware de ce pilote, qui reste installé après le passage de l'adaptateur à WinUSB. Pour charger un autre firmware, comme celui de Linux, sélectionnez **Utiliser un firmware personnalisé** dans le cadre Firmware de l'adaptateur, sur l'écran **Adaptateur**. BlueCaster charge alors les fichiers du dossier du firmware. Pour revenir en arrière, sélectionnez **Utiliser le firmware du pilote**.
+
 Pour les puces de la liste **Puce Bluetooth**, **Télécharger le firmware** fait tout cela pour vous : après confirmation, BlueCaster télécharge les fichiers depuis linux-firmware (kernel.org), vérifie le SHA-256 attendu de chacun et les enregistre dans le dossier du firmware. Si linux-firmware n'a pas de fichier de configuration pour une puce, BlueCaster enregistre un `_config.bin` vide, et la puce utilise ses propres réglages. Les fichiers ne font pas partie de BlueCaster ; ils ne sont téléchargés que si vous le demandez.
 
 BlueCaster détecte la puce de l'adaptateur et indique quels fichiers de firmware sont nécessaires.
@@ -166,7 +168,7 @@ Pour les adaptateurs et casques réellement utilisés avec BlueCaster, avec les 
 
 | Puce | Exemples de produits | Remarques |
 |:--------|:-----------------|:------|
-| Realtek | TP-Link UB500, RTL8761BU | Nécessite le téléchargement du firmware (voir ci-dessus). Le mieux testé |
+| Realtek | TP-Link UB500, RTL8761BU | Utilise le firmware du pilote Windows de Realtek s'il est installé ; sinon, téléchargez le firmware (voir ci-dessus). Le mieux testé |
 | Realtek | RTL8852BD intégré aux portables (`0BDA:B853`) | linux-firmware n'a pas de firmware pour lui : BlueCaster lit `rtl8852bd_mp_chip_new.dat` dans le pilote Bluetooth Windows de Realtek : gardez donc ce pilote installé (ou placez le fichier dans le dossier du firmware). Pas encore testé sur le matériel |
 | CSR | Dongles CSR8510 génériques | Fonctionne d'emblée, sans firmware |
 | Barrot | Dongles Bluetooth 5.4 / 6.0 (`33FA:0010`, `33FA:0012`) | Fonctionne avec son firmware en ROM, aucun fichier de firmware nécessaire. Un seul retour d'utilisateur pour l'instant |

@@ -500,7 +500,7 @@ license files are unchanged. Crates under other licenses:
 |---------|----------------------------------|------|
 | Unicode-3.0 | `unicode-ident`, the ICU4X crates (`icu_*`, `zerovec`, ...) used by `idna` | Unicode data files license; notice in `rust-crates.txt` |
 | ISC | `ring` (also Apache-2.0 parts), `untrusted`, `rustls-webpki` | Permissive |
-| BSD-3-Clause | `brotli` (with MIT), `alloc-no-stdlib`, `alloc-stdlib`, `subtle` | Permissive |
+| BSD-3-Clause | `brotli` (with MIT), `alloc-no-stdlib`, `alloc-stdlib`, `subtle`, `nnnoiseless` (RNNoise in Rust, with its model, for the microphone's noise suppression) | Permissive |
 | Zlib | `foldhash` | Permissive |
 | CDLA-Permissive-2.0 | `webpki-roots` (Mozilla's list of root certificates, as data) | Permissive data license; the notice is in `rust-crates.txt` |
 | MPL-2.0 | `cssparser`, `cssparser-macros`, `selectors`, `dtoa-short` (Tauri's HTML handling), `option-ext` (via `dirs`) | File-level copyleft, see below |

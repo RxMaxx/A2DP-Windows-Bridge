@@ -8,10 +8,12 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 
+use dsp::EqBand;
 use le_audio::defs::{LOCATION_FRONT_LEFT, LOCATION_FRONT_RIGHT};
 use le_audio::plan::{ChannelPlan, ChannelSource, CisPlan, StreamPlan};
 use le_audio::presets::StreamPreset;
 use le_audio::sdu_queue::SduQueue;
+use pipeline::eq::{EqHandle, EqSettings};
 use pipeline::le::{LeEncoder, silence_set};
 use pipeline::le_rx::{MicConfig, MicDecoder, MicStats, PcmOut};
 use pipeline::{InputFormat, SampleType};
@@ -119,9 +121,24 @@ fn capture_block(n0: usize) -> Vec<u8> {
 
 #[test]
 fn le_rounds_do_not_allocate() {
+    le_rounds(None);
+}
+
+/// The same with the playback EQ on, changed while it runs
+#[test]
+fn le_rounds_with_eq_do_not_allocate() {
+    let eq = EqHandle::default();
+    eq.set(EqSettings::new(true, &[EqBand::peaking(1000.0, 6.0, 1.0)]));
+    le_rounds(Some(eq));
+}
+
+fn le_rounds(eq: Option<EqHandle>) {
     let plan = plan();
     let input = InputFormat { sample_rate: 44100, channels: 6, sample: SampleType::F32 };
     let mut encoder = LeEncoder::new(&plan, input).unwrap();
+    if let Some(h) = &eq {
+        encoder = encoder.with_eq(h.clone());
+    }
     let queue = Arc::new(Mutex::new(SduQueue::new()));
     queue.lock().unwrap().configure(2, silence_set(&plan));
 
@@ -155,7 +172,14 @@ fn le_rounds_do_not_allocate() {
         round(block);
     }
     let allocations = allocations_in(|| {
-        for block in &blocks[20..] {
+        for (i, block) in blocks[20..].iter().enumerate() {
+            if let Some(h) = eq.as_ref().filter(|_| i % 50 == 25) {
+                // A point dragged: picked up between two rounds
+                h.set(EqSettings::new(
+                    true,
+                    &[EqBand::peaking(1000.0 + i as f32, 6.0, 1.0), EqBand::peaking(80.0, -3.0, 0.7)],
+                ));
+            }
             round(block);
         }
     });

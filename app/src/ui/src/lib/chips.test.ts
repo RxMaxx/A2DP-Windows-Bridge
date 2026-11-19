@@ -151,6 +151,12 @@ describe("firmware state", () => {
     const s = setting(CHIP_AUTO);
     expect(adapterFirmwareTag(rtl(true), s)).toEqual({ key: "firmware.present", status: "good" });
     expect(adapterFirmwareTag(rtl(false), s)).toEqual({ key: "firmware.missing_short", status: "bad" });
+    // Realtek's Windows driver has it (issue #86): as MediaTek's
+    expect(adapterFirmwareTag({ ...rtl(true), firmware_from_driver: true }, s)).toEqual({
+      key: "ui.adapter.firmware_from_driver",
+      args: ["Realtek"],
+      status: "good",
+    });
     // Not on WinUSB yet (Windows runs it, or it is disabled): amber
     expect(adapterFirmwareTag({ ...rtl(false), driver: "bluetooth" }, s)).toEqual({ key: "firmware.missing_short", status: "warn" });
     // Another vendor's: where its firmware comes from (issue #86), how its
@@ -231,3 +237,4 @@ describe("chipTargetIndex", () => {
     expect(chipTargetIndex([note, base, { ...base, realtek_chip: "RTL8761BU" }])).toBe(2);
   });
 });
+

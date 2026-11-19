@@ -248,7 +248,15 @@ async fn sampler(state: Arc<CoreState>) {
         n += 1;
         let now = Instant::now();
         if n.is_multiple_of(RATE_TICKS) {
-            let (total, _, _) = crate::state::link_totals(&stats);
+            let (mut total, _, _) = crate::state::link_totals(&stats);
+            // LE Audio: its sender's SDUs, not the A2DP counters (they stood
+            // still, and the flow's Audio step warned "no packets sent")
+            let le = state.with_snapshot(|s| s.stream.info.as_ref().is_some_and(|i| i.le.is_some()));
+            if let Some(h) = state.service.host().filter(|_| le) {
+                let s = h.le_stream_stats();
+                total.packets = s.sdus_sent;
+                total.bytes = s.bytes_sent;
+            }
             if let Some((t, prev)) = last_rates {
                 let d = total.since(&prev);
                 let secs = now.duration_since(t).as_secs_f64();

@@ -132,6 +132,14 @@ pub fn usb_known_ids(vendor_class: &[(u16, u16)]) -> Vec<(u16, u16)> {
     ids
 }
 
+/// The firmware of Realtek's Windows driver that stands in for the firmware
+/// folder's `fw_stem` ("rtl8761bu_fw", ".bin" allowed) where the driver on
+/// this PC has the chip's in a format BTstack's download reads (issue #86).
+/// No config file is needed with it.
+pub fn realtek_driver_firmware(fw_stem: &str) -> Option<std::path::PathBuf> {
+    bt_host::realtek_btnic::driver_firmware(fw_stem.strip_suffix(".bin").unwrap_or(fw_stem))
+}
+
 /// Fills the chipset part of `config` from the settings and the present
 /// adapters
 pub fn configure(config: &mut HostConfig, settings: &Settings, _config_dir: &Path) {
@@ -218,14 +226,18 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, _config_dir: &Pat
         (stem(fw), stem(cfg))
     });
     tracing::debug!("adapter: realtek pid {pid:04X}, firmware files {:?}", config.realtek_files);
-    // Developer > Debug (issue #427): Realtek's Windows driver's firmware
-    // instead of the folder's, where it has the chip's in a format BTstack's
-    // download reads (the RTL8761B)
-    if pid != 0 && settings.debug_mode && settings.dev_debug.realtek_driver_firmware {
-        config.realtek_firmware_file =
-            config.realtek_files.as_ref().and_then(|(fw, _)| bt_host::realtek_btnic::driver_firmware(fw));
-        if config.realtek_firmware_file.is_none() {
-            tracing::info!("no firmware for this chip in Realtek's Windows driver: the firmware folder's is loaded");
+    // Realtek's Windows driver's firmware first (issue #86), else the
+    // firmware folder's; custom firmware: the folder's only
+    if pid != 0
+        && let Some((fw, _)) = &config.realtek_files
+    {
+        if settings.realtek_custom_firmware {
+            tracing::info!("custom firmware: the firmware folder's {fw}");
+        } else {
+            config.realtek_firmware_file = realtek_driver_firmware(fw);
+            if config.realtek_firmware_file.is_none() {
+                tracing::info!("no firmware for this chip in Realtek's Windows driver on this PC: the folder's {fw}");
+            }
         }
     }
     if pid == 0 {

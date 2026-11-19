@@ -929,6 +929,15 @@ UI:
 
 ## UI: Off / Auto / On and the mute chip
 
+- On is a developer-mode mode (issue #86, 2026-11-18: no use case for
+  users). The UI offers `headsetModes(developer)` (Off / Auto outside
+  developer mode); `headsetMode(p, developer)` and the core's
+  `headset_mic_in_force(p, debug_mode)` take a saved On as Auto. The saved
+  value stays, so turning developer mode on brings On back; turning it on
+  or off switches a classic stream of such a profile in place
+  (`SettingsSet`). LE Audio takes Auto as On anyway; the CLI's
+  `--headset-mic on` is not gated.
+
 - Audio Devices, each device's Input Source (`components/InputSource.tsx`,
   issue #86 round 35; previously on Codecs): a `Segmented` Off / Auto / On on
   the right of its label saves `headset_mic` (and `mic_muted: false`); the
@@ -1035,3 +1044,54 @@ microphone and plays it back to the headphones.
 - **Not covered**: LE Audio entries (their microphone path would need its
   own tap and a playback into the LC3 encoder); the emulator run of the
   test (only unit tests and the UI test); hardware.
+
+## Microphone processing (gain, noise suppression, gate)
+
+A chain from Easy-MIC-Booster (same author, MIT OR Apache-2.0) on the
+decoded microphone, before apps get it: gain -> noise suppression -> noise
+gate -> limiter (ceiling -1 dBFS). Off by default; all off, the samples are
+not touched (no float conversion, bit-identical; unit tested).
+
+- **Setting**: `Profile.mic_processing` (`ipc::MicProcessing { enabled, gain_db
+  -12..24, suppression 0 (off)..100 %, gate_db -80 (off)..-20 }`,
+  written to profiles.json only when not all off; `merge_profile` clamps;
+  `enabled` off bypasses the chain and keeps the values; an older file's
+  `noise_suppression: false` reads as suppression 0, and one without
+  `enabled` is on when any value was set).
+  A `profile.save` that changes only it (`only_mic_processing_differs`)
+  keeps the stream: `Service::set_mic_processing` stores it in the running
+  request and in `Inner::mic_dsp` (`voice_link::MicDsp`, atomics), which the
+  chain reads on every block, so a change applies within one render period.
+  `Service::start` applies the request's own (`StreamRequest.mic_processing`
+  from `Profile::to_request`). CLI: `--mic-gain <dB>`,
+  `--mic-noise-suppression`.
+- **Where it runs**: `PcmProducer::set_processing` hands a `Processor` to
+  whoever reads the queue: the render thread (`Feeder::step`, after the
+  prefill / drift control, before `upmix`) or the WAV writer
+  (`PcmConsumer::pop`). Not on the pushing thread: on the BTstack thread the
+  SCO sends wait for it, and noise suppression there cost about 2 % of the
+  packets sent (emulator, msbc: 658 instead of 675 in 5 s). The microphone
+  test's tap moves with it (after the processing), so the test records what
+  apps hear; the test-only link (`MicTarget::Test`, headset mode off, a queue
+  nobody reads) gets no processing and keeps its tap on the push.
+- **Rates**: gain, gate and limiter run at the voice rate (8, 16, 32 kHz HFP;
+  LE Audio's 16..48 kHz). RNNoise (`nnnoiseless`, BSD-3-Clause, about 0.6 %
+  of one core with everything on) needs 480-sample frames at 48 kHz:
+  `dsp::denoise::Denoiser` collects 10 ms at the voice rate, resamples it to
+  48 kHz (`dsp::resample::BlockResampler`, exact rational polyphase, 32 taps
+  at the lower rate), denoises, mixes with the delayed dry signal by the
+  strength, and resamples back. Rates without whole 10 ms (none in use) get
+  no noise suppression.
+- **Latency added**: limiter 1.5 ms whenever anything is on; noise
+  suppression adds a 10 ms block, RNNoise's 10 ms frame and the resamplers'
+  look-ahead: 22 ms at 16 kHz (352 samples), 24 ms at 8 kHz, 20 ms at 48 kHz.
+  Turning noise suppression on or off shifts the timing once (a short
+  click), turning the strength does not.
+- **UI**: `components/MicProcessing.tsx` under Input Source while it is not
+  Off: Gain, Noise suppression (+ Strength), Noise gate (left end: Off);
+  sliders save when let go.
+- **Emulator**: `run_test.py --voice msbc-gain` (`--mic-gain 6`: mic.wav's
+  tone 6 dB louder). With `--mic-noise-suppression` the steady 1.5 kHz test
+  tone is removed (as noise), so no case checks it.
+- **Not verified**: real headsets (the sound of noise suppression on CVSD's
+  narrow band, the gate's hold on speech), CPU on slow ARM64 machines.
