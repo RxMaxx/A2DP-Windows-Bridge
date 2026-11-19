@@ -148,7 +148,7 @@ BlueCaster contourne entièrement la pile Bluetooth de Windows. Il communique di
 ## Fonctionnalités
 
 - **Multi-codec** : LHDC V5, LDAC, aptX Adaptive, aptX, AAC, aptX HD, aptX Low Latency, Opus, Opus 05, FastStream, SBC XQ et SBC, avec négociation automatique
-- **LE Audio (expérimental, en mode développeur uniquement)** : LC3 vers des casques et écouteurs LE Audio (BAP unicast, les deux écouteurs d'une paire, volume du casque, boutons multimédia, faible latence GMAP). Nécessite un adaptateur avec canaux isochrones Bluetooth 5.2 ; testé seulement sur un MediaTek MT7925, avec des problèmes connus ([Utilisation](usage#le-audio))
+- **LE Audio (expérimental, en mode développeur uniquement)** : LC3 vers des casques et écouteurs LE Audio (BAP unicast, les deux écouteurs d'une paire, volume du casque, boutons multimédia, faible latence GMAP). Nécessite un adaptateur avec canaux isochrones Bluetooth 5.2. LE Audio ne fonctionne pas encore de manière fiable sur les adaptateurs physiques, y compris sur le MediaTek MT7925 ([Utilisation](usage#le-audio))
 - **Trois modes de capture** : bouclage système, routage via un périphérique audio virtuel, ou sortie d'une seule application
 - **Fenêtre, zone de notification et CLI** : une fenêtre pour la configuration et le diagnostic, un volet et un menu dans la zone de notification pour se connecter au quotidien, et une ligne de commande (voir [Utilisation](usage))
 - **WinUSB depuis l'application** : attribue le pilote WinUSB à l'adaptateur et restaure le pilote d'origine, sans Zadig (voir [Installation](setup#winusb)) ; les casques que Windows avait associés avec cet adaptateur se connectent sans nouvelle association

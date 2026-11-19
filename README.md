@@ -49,7 +49,7 @@ See the [Setup guide](https://seiyafunaokajp.github.io/BlueCaster/setup) and the
 ## Features
 
 - **Codec choice**: uses the best codec your headphones support, or the one you choose; ABR for LHDC V5, LDAC and aptX Adaptive
-- **LE Audio (developer mode only)**: LC3 to LE Audio headphones and earbuds with a Bluetooth 5.2 adapter; tested on one MediaTek MT7925 only ([details](https://seiyafunaokajp.github.io/BlueCaster/usage#le-audio))
+- **LE Audio (experimental, developer mode only)**: LC3 to LE Audio headphones and earbuds with a Bluetooth 5.2 adapter. LE Audio does not work reliably on real adapters yet, including the MediaTek MT7925 ([details](https://seiyafunaokajp.github.io/BlueCaster/usage#le-audio))
 - **Capture**: all system audio, a virtual audio device (e.g. VB-CABLE), or one application
 - **Runs in the tray**: keeps streaming when the window is closed, and reconnects after a dropped link or sleep
 - **Driver setup in the app**: switches the adapter to WinUSB and back without Zadig; headphones that Windows paired through the adapter connect without pairing again

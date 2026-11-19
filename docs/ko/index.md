@@ -148,7 +148,7 @@ BlueCaster는 Windows Bluetooth 스택을 전혀 거치지 않습니다. WinUSB�
 ## 주요 기능
 
 - **다중 코덱**: LHDC V5, LDAC, aptX Adaptive, aptX, AAC, aptX HD, aptX Low Latency, Opus, Opus 05, FastStream, SBC XQ, SBC 지원, 코덱 자동 협상
-- **LE Audio (실험적, 개발자 모드 전용)**: LE Audio 헤드폰과 이어폰으로 LC3 전송(BAP 유니캐스트, 양쪽 이어폰 동시 연결, 헤드셋 볼륨, 미디어 버튼, GMAP 저지연). Bluetooth 5.2 등시성 채널을 지원하는 어댑터가 필요합니다. MediaTek MT7925 한 대에서만 시험했으며 알려진 문제가 있습니다([사용법](usage#le-audio) 참고)
+- **LE Audio (실험적, 개발자 모드 전용)**: LE Audio 헤드폰과 이어폰으로 LC3 전송(BAP 유니캐스트, 양쪽 이어폰 동시 연결, 헤드셋 볼륨, 미디어 버튼, GMAP 저지연). Bluetooth 5.2 등시성 채널을 지원하는 어댑터가 필요합니다. 실제 어댑터에서는 MediaTek MT7925를 포함해 아직 안정적으로 작동하지 않습니다([사용법](usage#le-audio) 참고)
 - **세 가지 캡처 모드**: 시스템 루프백, 가상 오디오 장치 라우팅, 특정 응용 프로그램의 출력
 - **창, 트레이, CLI**: 설정과 진단용 창, 평소 연결에 쓰는 트레이 플라이아웃과 메뉴, 명령줄 ([사용법](usage) 참고)
 - **앱에서 WinUSB 할당**: 어댑터에 WinUSB 드라이버를 할당하고 원래 드라이버로 복원할 수 있어 Zadig가 필요 없습니다 ([설정](setup#winusb) 참고). Windows에서 이 어댑터로 페어링한 헤드폰은 다시 페어링하지 않아도 연결됩니다

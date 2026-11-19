@@ -148,7 +148,7 @@ BlueCaster 完全不經過 Windows 藍牙堆疊。它透過 WinUSB 直接與 USB
 ## 功能
 
 - **多種編解碼器**：LHDC V5、LDAC、aptX Adaptive、aptX、AAC、aptX HD、aptX Low Latency、Opus、Opus 05、FastStream、SBC XQ 及 SBC，自動協商
-- **LE Audio（實驗性，僅限開發人員模式）**：以 LC3 傳送到 LE Audio 耳機與耳塞式耳機（BAP 單播、同一對耳塞式耳機的左右兩耳、耳機音量、媒體按鍵、GMAP 低延遲）。需要支援 Bluetooth 5.2 等時通道的介面卡；只在一台 MediaTek MT7925 上測試過，且有已知問題（[使用方式](usage#le-audio)）
+- **LE Audio（實驗性，僅限開發人員模式）**：以 LC3 傳送到 LE Audio 耳機與耳塞式耳機（BAP 單播、同一對耳塞式耳機的左右兩耳、耳機音量、媒體按鍵、GMAP 低延遲）。需要支援 Bluetooth 5.2 等時通道的介面卡。LE Audio 在實體介面卡上（包括 MediaTek MT7925）尚無法穩定運作（[使用方式](usage#le-audio)）
 - **三種擷取模式**：系統回送、虛擬音訊裝置路由，或單一應用程式的輸出
 - **視窗、系統匣與 CLI**：用於設定與診斷的視窗、日常連線用的系統匣視窗與選單，以及命令列（請參閱 [使用方式](usage)）
 - **在應用程式中設定 WinUSB**：為介面卡指派 WinUSB 驅動程式，也能還原原本的驅動程式，不需要 Zadig（請參閱 [安裝設定](setup#winusb)）；Windows 先前透過這張介面卡配對的耳機，不必重新配對即可連線

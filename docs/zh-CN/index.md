@@ -148,7 +148,7 @@ BlueCaster 完全绕过 Windows 的蓝牙堆栈。它通过 WinUSB 直接与 USB
 ## 功能
 
 - **多编解码器**：LHDC V5、LDAC、aptX Adaptive、aptX、AAC、aptX HD、aptX Low Latency、Opus、Opus 05、FastStream、SBC XQ 和 SBC，自动协商
-- **LE Audio（实验性，仅限开发者模式）**：通过 LC3 向 LE Audio 耳机传输（BAP 单播、一对耳机的左右两只、耳机音量、媒体按键、GMAP 低延迟）。需要支持蓝牙 5.2 等时通道的适配器；只在一台 MediaTek MT7925 上测试过，存在已知问题（请参阅[使用方法](usage#le-audio)）
+- **LE Audio（实验性，仅限开发者模式）**：通过 LC3 向 LE Audio 耳机传输（BAP 单播、一对耳机的左右两只、耳机音量、媒体按键、GMAP 低延迟）。需要支持蓝牙 5.2 等时通道的适配器。LE Audio 在真实适配器上（包括 MediaTek MT7925）尚不能稳定工作（请参阅[使用方法](usage#le-audio)）
 - **三种捕获模式**：系统环回、虚拟音频设备路由，或单个应用的输出
 - **窗口、托盘和 CLI**：用于设置和诊断的窗口、用于日常连接的托盘浮出窗口和菜单，以及命令行（请参阅[使用方法](usage)）
 - **在应用内分配 WinUSB**：为适配器分配 WinUSB 驱动程序，也能恢复原来的驱动程序，无需 Zadig（请参阅[安装与设置](setup#winusb)）；Windows 曾通过该适配器配对的耳机无需重新配对即可连接
