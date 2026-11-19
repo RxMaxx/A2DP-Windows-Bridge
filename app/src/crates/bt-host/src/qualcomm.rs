@@ -43,7 +43,7 @@
 //! [`from_windows_driver`]): a PC with such an adapter has them even after
 //! it moved to WinUSB.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::bringup::{
@@ -602,44 +602,30 @@ impl ChipLoader for Loader {
 
 // ---- Qualcomm's Windows driver ----
 
-/// Where Qualcomm's Windows driver keeps its files on this PC, newest
-/// first: System32\drivers (its INF copies them there), then its folders in
-/// the driver store (atheros_bth.inf for ROME, btfilter.inf for the
-/// WCN6855). Both stay after the adapter moved to WinUSB.
-fn driver_dirs(windows: &Path) -> Vec<PathBuf> {
-    let mut found = vec![windows.join("System32").join("drivers")];
-    let store = windows.join("System32").join("DriverStore").join("FileRepository");
-    let mut stored: Vec<PathBuf> = std::fs::read_dir(store)
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter(|e| {
-                    let n = e.file_name().to_string_lossy().to_ascii_lowercase();
-                    n.starts_with("atheros_bth.inf") || n.starts_with("btfilter.inf")
-                })
-                .map(|e| e.path())
-                .collect()
-        })
-        .unwrap_or_default();
-    let modified = |p: &PathBuf| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-    stored.sort_by_key(|p| std::cmp::Reverse(modified(p)));
-    found.extend(stored);
-    found
-}
-
 /// A firmware file from Qualcomm's Windows driver, if it is installed. Its
 /// files are the Windows names (`.dfu`); linux-firmware's are not there.
+/// Newest first (crate::driver_files): its packages in the driver store
+/// (atheros_bth.inf for ROME, btfilter.inf for the WCN6855), and the copies
+/// its INF puts in System32\drivers (also the Windows folder and System32).
+/// All stay after the adapter moved to WinUSB.
 pub fn from_windows_driver(name: &str) -> Option<Vec<u8>> {
     if !name.to_ascii_lowercase().ends_with(".dfu") || name.contains(['\\', '/']) {
         return None;
     }
     let windows = std::env::var_os("SystemRoot").map(PathBuf::from)?;
-    driver_dirs(&windows).iter().find_map(|dir| {
-        let path = dir.join(name);
-        let data = std::fs::read(&path).ok()?;
-        tracing::info!("qualcomm: {name} from Qualcomm's driver ({}), {} bytes", path.display(), data.len());
-        Some(data)
-    })
+    let names = [name.to_string()];
+    let package = |n: &str| n.starts_with("atheros_bth.inf") || n.starts_with("btfilter.inf");
+    crate::driver_files::find(&windows, crate::driver_files::Names::Exact(&names), &package, &[]).iter().find_map(
+        |path| {
+            let data = std::fs::read(path).ok().filter(|d| !d.is_empty())?;
+            tracing::info!(
+                "qualcomm: {name} from Qualcomm's driver ({}), {} bytes",
+                crate::driver_files::file_name(path),
+                data.len()
+            );
+            Some(data)
+        },
+    )
 }
 
 #[cfg(test)]

@@ -109,6 +109,30 @@ describe("Adapter firmware", () => {
     await waitFor(() => expect(calls.filter((c) => c.method === "adapter.firmware_files").length).toBeGreaterThan(1));
   });
 
+  it("loads Realtek's driver firmware first, custom firmware on request and back (issue #86)", async () => {
+    const { calls } = start("realtek_driver");
+    const box = await screen.findByRole("group", { name: "Firmware: From Realtek's driver" });
+    // Nothing to do: no chip choice, no download
+    expect(screen.queryByLabelText("Bluetooth Chip")).toBeNull();
+    expect(within(box).queryByRole("button", { name: "Download Firmware" })).toBeNull();
+    fireEvent.click(within(box).getByRole("button", { name: t("ui.adapter.custom_firmware") }));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === "settings.set").at(-1)?.params).toMatchObject({
+        settings: { realtek_custom_firmware: true },
+      }),
+    );
+    // The firmware folder's files as before, and the way back
+    const custom = await screen.findByRole("group", { name: "Firmware: Firmware OK" });
+    expect(within(custom).getByLabelText("Bluetooth Chip")).toBeInTheDocument();
+    expect(within(custom).getByRole("button", { name: "Download Firmware" })).toBeInTheDocument();
+    expect(within(custom).queryByRole("button", { name: t("ui.adapter.custom_firmware") })).toBeNull();
+    fireEvent.click(within(custom).getByRole("button", { name: t("ui.adapter.driver_firmware") }));
+    expect(await screen.findByRole("group", { name: "Firmware: From Realtek's driver" })).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "settings.set").at(-1)?.params).toMatchObject({
+      settings: { realtek_custom_firmware: false },
+    });
+  });
+
   it("names the adapter as Device Manager does, with its driver and firmware side by side (issue #86)", async () => {
     // The first run's adapters (that scenario opens the setup instead)
     const { mock } = start();

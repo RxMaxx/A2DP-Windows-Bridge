@@ -214,6 +214,10 @@ pub struct Settings {
     pub bt_chip_pid: u16,
     /// Firmware stem for chips not in the chip table (e.g. "rtl8761bu")
     pub bt_chip_fw_stem: String,
+    /// A Realtek chip loads the firmware folder's files even where Realtek's
+    /// Windows driver on this PC has its firmware, which is loaded by
+    /// default (issue #86; adapter::configure)
+    pub realtek_custom_firmware: bool,
 
     /// AFH host channel classification: "auto", "off" or Wi-Fi channels "6,11"
     #[serde(default = "default_afh")]
@@ -288,10 +292,6 @@ pub struct DevDebug {
     /// Restore original driver writes BlueCaster's LE keys to Windows too
     /// (core driver.rs; only where Windows keeps LE keys of the device)
     pub le_keys_to_windows: bool,
-    /// A Realtek chip's firmware from Realtek's Windows driver on this PC
-    /// instead of the firmware folder's, where the driver has it (the
-    /// RTL8761B, issue #427; adapter::configure)
-    pub realtek_driver_firmware: bool,
     /// LE Audio CIG (bt_host::CigOverrides): max transport latency C->P
     /// and P->C in ms, 0: as planned
     pub le_latency_c_to_p_ms: u16,
@@ -407,6 +407,7 @@ impl Default for Settings {
             dev_debug: DevDebug::default(),
             bt_chip_pid: 0,
             bt_chip_fw_stem: String::new(),
+            realtek_custom_firmware: false,
             afh: default_afh(),
             remote_sink: String::new(),
             last_profile: String::new(),
@@ -687,6 +688,18 @@ mod tests {
         let out = serde_json::to_value(&s).unwrap();
         assert_eq!(out["dev_overrides"]["ignore_sink_max"], true);
         assert!(out["dev_overrides"].get("lhdcv5_ignore_sink_max").is_none());
+    }
+
+    #[test]
+    fn the_removed_realtek_driver_setting_still_loads() {
+        // Developer > Debug until issue #86 made the driver's firmware the
+        // default: a saved file keeps loading, the key is dropped
+        let s: Settings =
+            serde_json::from_str(r#"{"dev_debug":{"realtek_driver_firmware":true,"le_keys_to_windows":true}}"#)
+                .unwrap();
+        assert!(s.dev_debug.le_keys_to_windows);
+        let out = serde_json::to_value(&s).unwrap();
+        assert!(out["dev_debug"].get("realtek_driver_firmware").is_none());
     }
 
     #[test]

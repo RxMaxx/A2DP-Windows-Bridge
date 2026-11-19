@@ -130,6 +130,8 @@ The **Adapters** screen (and the setup's **Driver and firmware** step) shows the
 
 Adapters from other vendors have no **Bluetooth Chip** choice; instead, a tag shows where the firmware comes from: **From MediaTek's driver** or **From Qualcomm's driver** (read from the vendor's Windows driver, which stays installed after WinUSB), **From the Wi-Fi driver** (Marvell; keep Wi-Fi on), **From the firmware folder** (Intel, with **Open Download Page**, **Open Firmware Folder** and **Setup guide**), **Optional** (Broadcom's `.hcd`) or **Not needed** (CSR, Barrot, Actions). Once BlueCaster has loaded the firmware over WinUSB, the tag reads **Loaded**, or **Not loaded** if loading failed, along with **Open Download Page**, **Open Firmware Folder** and a line saying where the firmware comes from.
 
+An RTL8761B adapter (such as the TP-Link UB500) needs no download if Realtek's Windows driver is installed on the PC. BlueCaster then uses that driver's firmware. The driver stays installed after the adapter switches to WinUSB. To load other firmware, such as the Linux firmware, select **Use custom firmware** in the adapter's firmware box on the **Adapters** screen. BlueCaster then loads the files in the firmware folder. To switch back, select **Use the driver's firmware**.
+
 For the chips in the **Bluetooth Chip** list, **Download Firmware** does this for you: after you confirm, BlueCaster downloads the files from linux-firmware (kernel.org), checks each one against the SHA-256 it expects and saves it in the firmware folder. If linux-firmware has no config file for a chip, BlueCaster saves an empty `_config.bin` and the chip uses its own settings. The files are not part of BlueCaster; they are downloaded only when you ask for them.
 
 BlueCaster detects the adapter's chipset and shows which firmware files are needed.
@@ -165,7 +167,7 @@ For the adapters and headphones actually used with BlueCaster, with codecs and r
 
 | Chipset | Example Products | Notes |
 |:--------|:-----------------|:------|
-| Realtek | TP-Link UB500, RTL8761BU | Requires firmware download (see above). Best tested |
+| Realtek | TP-Link UB500, RTL8761BU | Uses the firmware from Realtek's Windows driver if it is installed; otherwise download the firmware (see above). Best tested |
 | Realtek | RTL8852BD built into laptops (`0BDA:B853`) | linux-firmware has no firmware for it: BlueCaster reads `rtl8852bd_mp_chip_new.dat` from Realtek's Windows Bluetooth driver, so keep that driver installed (or put the file in the firmware folder). Not yet tested on the hardware |
 | CSR | Generic CSR8510 dongles | Works out of the box, no firmware needed |
 | Barrot | Bluetooth 5.4 / 6.0 dongles (`33FA:0010`, `33FA:0012`) | Runs on ROM firmware, no firmware needed. One user report so far |

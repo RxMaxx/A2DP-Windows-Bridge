@@ -37,11 +37,6 @@ mtk_register: string,
  */
 le_keys_to_windows: boolean, 
 /**
- * A Realtek chip's firmware from Realtek's Windows driver on this PC
- * instead of the firmware folder's (the RTL8761B, issue #427)
- */
-realtek_driver_firmware: boolean, 
-/**
  * LE Audio CIG: max transport latency C->P / P->C in ms; 0: as planned
  */
 le_latency_c_to_p_ms: number, le_latency_p_to_c_ms: number, 

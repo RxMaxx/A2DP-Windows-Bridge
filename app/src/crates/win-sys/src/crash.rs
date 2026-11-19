@@ -1,7 +1,7 @@
 //! Crash reports: a minidump and a short text file in a folder when the
 //! process crashes in native code (an access violation in BTstack or a
-//! codec library, the C runtime's abort()), and on request ([`write`], the
-//! panic hooks).
+//! codec library, the C runtime's abort() or an invalid parameter to it),
+//! and on request ([`write`], the panic hooks).
 //!
 //! Files: `<dir>\<prefix>-YYYYMMDD-HHMMSS-mmm.dmp` and `.txt` beside it; the
 //! last [`KEEP`] reports of a prefix are kept. The dump holds every thread's
@@ -46,7 +46,16 @@ unsafe extern "C" {
     /// The C runtime's signal(): abort() raises SIGABRT before it ends the
     /// process
     fn signal(sig: i32, handler: usize) -> usize;
+    /// The C runtime's handler for an invalid parameter (fclose(NULL) and
+    /// the like). Its default ends the process at once with a fast fail,
+    /// which no exception filter sees (issue #86: no report, no last log
+    /// lines).
+    fn _set_invalid_parameter_handler(handler: usize) -> usize;
 }
+
+/// How long the log writer (a background thread) gets to write what it
+/// still holds before the process ends
+const LOG_DRAIN: std::time::Duration = std::time::Duration::from_millis(300);
 
 /// Writes crash reports to `dir` from now on. Call once, early in main.
 pub fn install(dir: &Path, prefix: &str, about: &str) {
@@ -58,6 +67,7 @@ pub fn install(dir: &Path, prefix: &str, about: &str) {
     unsafe {
         SetUnhandledExceptionFilter(Some(on_exception));
         signal(SIGABRT, on_abort as extern "C" fn(i32) as usize);
+        _set_invalid_parameter_handler(on_invalid_parameter as InvalidParameterHandler as usize);
     }
 }
 
@@ -84,6 +94,21 @@ unsafe extern "system" fn on_exception(info: *const EXCEPTION_POINTERS) -> i32 {
     };
     write_report(&reason, "", info);
     CONTINUE_SEARCH
+}
+
+/// The release C runtime passes no expression, function or file
+type InvalidParameterHandler = extern "C" fn(*const u16, *const u16, *const u16, u32, usize);
+
+/// A C library passed the C runtime an invalid parameter: a report and a
+/// log line, then the process ends as the runtime's default would end it
+extern "C" fn on_invalid_parameter(_: *const u16, _: *const u16, _: *const u16, _: u32, _: usize) {
+    let report = write_report("invalid parameter passed to a C runtime function", "", std::ptr::null());
+    tracing::error!(
+        "invalid parameter passed to a C runtime function: ending the process ({})",
+        if report.is_some() { "crash report written" } else { "no crash report" }
+    );
+    std::thread::sleep(LOG_DRAIN);
+    std::process::abort();
 }
 
 extern "C" fn on_abort(_sig: i32) {
@@ -209,6 +234,46 @@ mod tests {
         assert_eq!(names[0], "other-20200101-000000-000.txt");
         assert!(names[1].starts_with("x-20261021-120002"), "{names:?}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Run by [`an_invalid_parameter_writes_a_report`] in a child process
+    #[test]
+    #[ignore = "ends its process; run by an_invalid_parameter_writes_a_report"]
+    fn invalid_parameter_child() {
+        let Some(dir) = std::env::var_os("BLUECASTER_CRASH_TEST_DIR") else { return };
+        unsafe extern "C" {
+            fn fclose(file: *mut core::ffi::c_void) -> i32;
+        }
+        install(Path::new(&dir), "child", "crash test");
+        // SAFETY: none; this is the crash under test (fclose(NULL))
+        unsafe { fclose(std::ptr::null_mut()) };
+        unreachable!("the C runtime returned from an invalid parameter");
+    }
+
+    /// Issue #86: fclose(NULL) in BTstack ended the core without a report
+    #[test]
+    fn an_invalid_parameter_writes_a_report() {
+        let dir = std::env::temp_dir().join(format!("bluecaster-invalid-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "crash::tests::invalid_parameter_child", "--ignored", "--nocapture"])
+            .env("BLUECASTER_CRASH_TEST_DIR", &dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        let texts: Vec<String> = std::fs::read_dir(&dir)
+            .map(|e| {
+                e.flatten()
+                    .filter(|e| e.file_name().to_string_lossy().ends_with(".txt"))
+                    .map(|e| std::fs::read_to_string(e.path()).unwrap_or_default())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!status.success());
+        assert_eq!(texts.len(), 1, "{texts:?}");
+        assert!(texts[0].contains("invalid parameter"), "{}", texts[0]);
     }
 
     #[test]

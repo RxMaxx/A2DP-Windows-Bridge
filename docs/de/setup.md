@@ -133,6 +133,8 @@ Die Seite **Adapter** (und der Einrichtungsschritt **Treiber und Firmware**) zei
 
 Bei Adaptern anderer Hersteller gibt es keine Auswahl **Bluetooth-Chip**. Stattdessen zeigt ein Etikett, woher die Firmware kommt: **Aus dem Treiber von MediaTek** oder **Aus dem Treiber von Qualcomm** (aus dem Windows-Treiber des Herstellers gelesen, der nach der Umstellung auf WinUSB installiert bleibt), **Aus dem WLAN-Treiber** (Marvell; WLAN eingeschaltet lassen), **Aus dem Firmware-Ordner** (Intel, mit **Downloadseite öffnen**, **Firmware-Ordner öffnen** und **Einrichtungsanleitung**), **Optional** (die `.hcd`-Datei von Broadcom) oder **Nicht nötig** (CSR, Barrot, Actions). Hat BlueCaster die Firmware über WinUSB geladen, steht auf dem Etikett **Geladen**, oder **Nicht geladen**, wenn das Laden fehlgeschlagen ist. Daneben stehen **Downloadseite öffnen**, **Firmware-Ordner öffnen** und eine Zeile, woher die Firmware kommt.
 
+Ein RTL8761B-Adapter (z. B. TP-Link UB500) braucht keinen Download, wenn der Windows-Treiber von Realtek auf dem PC installiert ist. BlueCaster verwendet dann die Firmware aus diesem Treiber, der nach der Umstellung auf WinUSB installiert bleibt. Um eine andere Firmware zu laden, etwa die von Linux, wählen Sie auf der Seite **Adapter** im Firmware-Bereich des Adapters **Eigene Firmware verwenden**. BlueCaster lädt dann die Dateien im Firmware-Ordner. Mit **Firmware des Treibers verwenden** wechseln Sie zurück.
+
 Für die Chips in der Liste **Bluetooth-Chip** erledigt **Firmware herunterladen** das für Sie. Nach Ihrer Bestätigung lädt BlueCaster die Dateien von linux-firmware (kernel.org) herunter, prüft jede gegen die erwartete SHA-256-Prüfsumme und speichert sie im Firmware-Ordner. Hat linux-firmware für einen Chip keine Config-Datei, speichert BlueCaster eine leere `_config.bin`, und der Chip verwendet seine eigenen Einstellungen. Die Dateien sind nicht Teil von BlueCaster und werden nur heruntergeladen, wenn Sie es veranlassen.
 
 BlueCaster erkennt den Chipsatz des Adapters und zeigt an, welche Firmwaredateien benötigt werden.
@@ -168,7 +170,7 @@ Welche Adapter und Kopfhörer tatsächlich mit BlueCaster im Einsatz waren, mit 
 
 | Chipsatz | Beispielprodukte | Hinweise |
 |:---------|:-----------------|:---------|
-| Realtek | TP-Link UB500, RTL8761BU | Firmware-Download erforderlich (siehe oben). Am besten getestet |
+| Realtek | TP-Link UB500, RTL8761BU | Verwendet die Firmware aus dem Windows-Treiber von Realtek, falls dieser installiert ist; sonst die Firmware herunterladen (siehe oben). Am besten getestet |
 | Realtek | In Notebooks eingebauter RTL8852BD (`0BDA:B853`) | linux-firmware hat keine Firmware dafür. BlueCaster liest `rtl8852bd_mp_chip_new.dat` aus dem Windows-Bluetooth-Treiber von Realtek. Lassen Sie diesen Treiber also installiert (oder legen Sie die Datei in den Firmware-Ordner). Noch nicht auf der Hardware getestet |
 | CSR | Generische CSR8510-Dongles | Funktioniert sofort, keine Firmware nötig |
 | Barrot | Bluetooth-5.4-/6.0-Dongles (`33FA:0010`, `33FA:0012`) | Läuft mit der Firmware im ROM, keine Firmware nötig. Bisher ein Nutzerbericht |

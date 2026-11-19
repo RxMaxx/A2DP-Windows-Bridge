@@ -416,7 +416,6 @@ fn to_ipc_settings(s: &CoreSettings) -> Settings {
             mtk_command_before_reset: s.dev_debug.mtk_command_before_reset,
             mtk_register: s.dev_debug.mtk_register.clone(),
             le_keys_to_windows: s.dev_debug.le_keys_to_windows,
-            realtek_driver_firmware: s.dev_debug.realtek_driver_firmware,
             le_latency_c_to_p_ms: s.dev_debug.le_latency_c_to_p_ms,
             le_latency_p_to_c_ms: s.dev_debug.le_latency_p_to_c_ms,
             le_rtn_c_to_p: s.dev_debug.le_rtn_c_to_p,
@@ -427,6 +426,7 @@ fn to_ipc_settings(s: &CoreSettings) -> Settings {
         },
         bt_chip_pid: s.bt_chip_pid,
         bt_chip_fw_stem: s.bt_chip_fw_stem.clone(),
+        realtek_custom_firmware: s.realtek_custom_firmware,
         afh: s.afh.clone(),
         remote_sink: s.remote_sink.clone(),
         le_audio_experimental: s.le_audio_experimental,
@@ -526,7 +526,6 @@ fn merge_settings(base: &CoreSettings, s: &Settings) -> CoreSettings {
         mtk_command_before_reset: s.dev_debug.mtk_command_before_reset,
         mtk_register: s.dev_debug.mtk_register.trim().to_string(),
         le_keys_to_windows: s.dev_debug.le_keys_to_windows,
-        realtek_driver_firmware: s.dev_debug.realtek_driver_firmware,
         le_latency_c_to_p_ms: s.dev_debug.le_latency_c_to_p_ms.min(4000),
         le_latency_p_to_c_ms: s.dev_debug.le_latency_p_to_c_ms.min(4000),
         le_rtn_c_to_p: s.dev_debug.le_rtn_c_to_p.map(|r| r.min(15)),
@@ -537,6 +536,7 @@ fn merge_settings(base: &CoreSettings, s: &Settings) -> CoreSettings {
     };
     c.bt_chip_pid = s.bt_chip_pid;
     c.bt_chip_fw_stem = s.bt_chip_fw_stem.clone();
+    c.realtek_custom_firmware = s.realtek_custom_firmware;
     c.afh = s.afh.clone();
     c.remote_sink = s.remote_sink.clone();
     c.le_audio_experimental = s.le_audio_experimental;
@@ -662,7 +662,20 @@ fn adapter_infos(config_dir: &Path, settings: &CoreSettings) -> (Vec<AdapterInfo
             };
             let (chip_pid, fw_stem) = adapter_chip(a.vendor, a.realtek_pid, settings);
             let files = chips::firmware_files(chip_pid, fw_stem);
-            let check = chips::firmware_check(&paths::firmware_dir(config_dir), chip_pid, fw_stem);
+            let mut check = chips::firmware_check(&paths::firmware_dir(config_dir), chip_pid, fw_stem);
+            let mut file_names = files.clone().map(|(f, c)| vec![f, c]).unwrap_or_default();
+            // Realtek's Windows driver's firmware comes first, with no config
+            // file (issue #86): no download is asked for then. Custom
+            // firmware: the folder's files as before.
+            let driver_fw = files
+                .as_ref()
+                .and_then(|(fw, _)| bluecaster_core::adapter::realtek_driver_firmware(fw))
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
+            let from_driver = driver_fw.is_some() && !settings.realtek_custom_firmware;
+            if let Some(name) = driver_fw.as_ref().filter(|_| from_driver) {
+                check = Some(chips::FirmwareCheck { present: true, invalid_file: None });
+                file_names = vec![name.clone()];
+            }
             AdapterInfo {
                 instance_id: a.device.instance_id.clone(),
                 vid: a.device.vid,
@@ -675,7 +688,9 @@ fn adapter_infos(config_dir: &Path, settings: &CoreSettings) -> (Vec<AdapterInfo
                 realtek_chip: a.realtek_pid.and_then(chips::realtek_chip_name).map(str::to_owned),
                 firmware_present: check.as_ref().map(|c| c.present),
                 firmware_download: files.as_ref().is_some_and(|(f, _)| bluecaster_core::firmware::available(f)),
-                firmware_files: files.map(|(f, c)| vec![f, c]).unwrap_or_default(),
+                firmware_files: file_names,
+                firmware_from_driver: from_driver,
+                firmware_driver: driver_fw.is_some(),
                 firmware_invalid: check.and_then(|c| c.invalid_file),
                 vendor_note: vendor_note(a.vendor, a.device.vid, a.device.pid),
                 restart_needed: a.device.problem_code == Some(CM_PROB_NEED_RESTART),
@@ -1265,7 +1280,9 @@ fn autostart_changed(before: &CoreSettings, after: &CoreSettings) -> bool {
 
 /// The chip or firmware setting changed: the stack must load firmware anew
 fn chip_changed(before: &CoreSettings, after: &CoreSettings) -> bool {
-    before.bt_chip_pid != after.bt_chip_pid || before.bt_chip_fw_stem != after.bt_chip_fw_stem
+    before.bt_chip_pid != after.bt_chip_pid
+        || before.bt_chip_fw_stem != after.bt_chip_fw_stem
+        || before.realtek_custom_firmware != after.realtek_custom_firmware
 }
 
 /// The codec and what it runs with: "LDAC 990 kbps | 96 kHz | 24-bit | ABR"
@@ -4006,6 +4023,8 @@ mod tests {
             firmware_files: vec!["rtl8761bu_fw.bin".into(), "rtl8761bu_config.bin".into()],
             firmware_invalid: invalid.map(str::to_owned),
             firmware_download: true,
+            firmware_from_driver: false,
+            firmware_driver: false,
             vendor_note: None,
             restart_needed: false,
             le_audio: None,
@@ -5558,6 +5577,7 @@ mod tests {
         assert!(!chip_changed(&a, &a.clone()));
         assert!(chip_changed(&a, &CoreSettings { bt_chip_pid: 0x8771, ..a.clone() }));
         assert!(chip_changed(&a, &CoreSettings { bt_chip_fw_stem: "rtl8761bu".into(), ..a.clone() }));
+        assert!(chip_changed(&a, &CoreSettings { realtek_custom_firmware: true, ..a.clone() }));
     }
 
     #[test]

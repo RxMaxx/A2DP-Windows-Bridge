@@ -112,6 +112,15 @@ pub struct AdapterInfo {
     /// (adapter.download_firmware)
     #[serde(default)]
     pub firmware_download: bool,
+    /// The firmware comes from the vendor's Windows driver on this PC
+    /// instead of the firmware folder (a Realtek chip, issue #86):
+    /// firmware_files names the driver's file, nothing is to be done
+    #[serde(default)]
+    pub firmware_from_driver: bool,
+    /// The vendor's Windows driver on this PC has this chip's firmware, also
+    /// while Settings::realtek_custom_firmware loads the folder's instead
+    #[serde(default)]
+    pub firmware_driver: bool,
     /// What to tell about other vendors' firmware (firmware.vendor_intel,
     /// _broadcom, _csr, _unsupported); None for Realtek and unknown chips
     #[serde(default)]
@@ -892,9 +901,6 @@ pub struct DevDebug {
     /// Restore original driver hands Windows BlueCaster's LE keys too, for
     /// the devices Windows keeps LE keys of (issue #86)
     pub le_keys_to_windows: bool,
-    /// A Realtek chip's firmware from Realtek's Windows driver on this PC
-    /// instead of the firmware folder's (the RTL8761B, issue #427)
-    pub realtek_driver_firmware: bool,
     /// LE Audio CIG: max transport latency C->P / P->C in ms; 0: as planned
     pub le_latency_c_to_p_ms: u16,
     pub le_latency_p_to_c_ms: u16,
@@ -1032,6 +1038,10 @@ pub struct Settings {
     /// 0 = auto, a Realtek PID, 0xFFFE = not Realtek
     pub bt_chip_pid: u16,
     pub bt_chip_fw_stem: String,
+    /// A Realtek chip loads the firmware folder's files instead of Realtek's
+    /// Windows driver's (AdapterInfo::firmware_driver)
+    #[serde(default)]
+    pub realtek_custom_firmware: bool,
     /// auto, off, or Wi-Fi channels such as "6,11"
     pub afh: String,
     pub remote_sink: String,
