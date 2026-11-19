@@ -1,7 +1,8 @@
 // The playback EQ on Audio Devices: on and off, points added on the graph
 // (double-click, the button), moved by keyboard and by dragging (tried out
 // on the stream while dragged, saved when let go), their type changed from
-// the right-click menu, edited in the fields, and reset
+// the right-click menu, picked and edited in the fields, reset and exported.
+// Nothing hides: off, the graph, the fields and the buttons stay, disabled.
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,6 +11,7 @@ import { setLanguage, t } from "../i18n";
 import { MockCore } from "../ipc/mock";
 import type { MediaEq, Profile } from "../ipc/types";
 import { createCore } from "../ipc/store";
+import { DEFAULT_POINTS } from "../lib/eq";
 import { endSettle } from "./Codecs";
 
 let mock: MockCore | null = null;
@@ -54,7 +56,8 @@ function layOut(svg: SVGSVGElement) {
   svg.hasPointerCapture = () => true;
 }
 
-async function eqOn() {
+/** The EQ turned on (with the default points; `empty`: then deleted) */
+async function eqOn(empty = false) {
   const env = start();
   const entry = await deviceEntry(/WH-1000XM5/);
   // A line on the device, the EQ itself in a dialog
@@ -65,12 +68,16 @@ async function eqOn() {
   const wh = await screen.findByRole("dialog", { name: t("eq.title") });
   const toggle = within(wh).getByRole("switch", { name: t("eq.enable") });
   expect(toggle).not.toBeChecked();
-  expect(wh.querySelector(".eq-graph")).toBeNull();
+  // Off: shown, but disabled, with the points turning it on gives
+  expect(wh.querySelector(".eq-graph.disabled")).toBeTruthy();
+  expect(within(wh).getAllByRole("button", { name: /^Point \d+:/ })).toHaveLength(10);
+  expect(within(wh).getByRole("button", { name: t("eq.add_point") })).toBeDisabled();
+  expect(within(wh).getByRole("spinbutton", { name: t("eq.frequency") })).toBeDisabled();
   fireEvent.click(toggle);
-  await waitFor(() => expect(env.lastEq()).toEqual({ enabled: true, bands: [] }));
+  await waitFor(() => expect(env.lastEq()).toEqual({ enabled: true, bands: DEFAULT_POINTS }));
   await waitFor(() => expect(row).toHaveTextContent(t("ui.state_on")));
   const svg = await waitFor(() => {
-    const s = wh.querySelector<SVGSVGElement>(".eq-graph svg");
+    const s = wh.querySelector<SVGSVGElement>(".eq-graph:not(.disabled) svg");
     expect(s).toBeTruthy();
     return s!;
   });
@@ -83,12 +90,20 @@ async function eqOn() {
         env.lastEq(),
       ),
     );
+  if (empty) {
+    for (let n = DEFAULT_POINTS.length; n > 0; n--) {
+      await synced();
+      fireEvent.keyDown(within(wh).getByRole("button", { name: /^Point 1:/ }), { key: "Delete" });
+      await waitFor(() => expect(env.lastEq().bands).toHaveLength(n - 1));
+    }
+    await synced();
+  }
   return { ...env, wh, svg, synced };
 }
 
 describe("Playback EQ", () => {
   it("is off until turned on, and adds a point where the graph is double-clicked", async () => {
-    const { wh, svg, lastEq } = await eqOn();
+    const { wh, svg, lastEq } = await eqOn(true);
     // 1 kHz is 2/3 of the way along the log axis; +6 dB a quarter from the top
     fireEvent.dblClick(svg, { clientX: 38 + (592 * Math.log10(50)) / 3, clientY: 10 + 208 * 0.25 });
     await waitFor(() => expect(lastEq().bands).toHaveLength(1));
@@ -103,7 +118,7 @@ describe("Playback EQ", () => {
   });
 
   it("moves a focused point with the keyboard and deletes it", async () => {
-    const { wh, lastEq, synced } = await eqOn();
+    const { wh, lastEq, synced } = await eqOn(true);
     fireEvent.click(within(wh).getByRole("button", { name: t("eq.add_point") }));
     const point = await within(wh).findByRole("button", { name: /^Point 1:/ });
     point.focus();
@@ -119,7 +134,7 @@ describe("Playback EQ", () => {
   });
 
   it("changes a point's type from its menu, and resets", async () => {
-    const { wh, lastEq, synced } = await eqOn();
+    const { wh, lastEq, synced } = await eqOn(true);
     fireEvent.click(within(wh).getByRole("button", { name: t("eq.add_point") }));
     const point = await within(wh).findByRole("button", { name: /^Point 1:/ });
     fireEvent.keyDown(point, { key: "ArrowUp", shiftKey: true });
@@ -134,11 +149,30 @@ describe("Playback EQ", () => {
     expect(within(wh).getByRole("combobox", { name: t("eq.type") })).toHaveValue("HighPass");
     await synced();
     fireEvent.click(within(wh).getByRole("button", { name: t("eq.reset") }));
-    await waitFor(() => expect(lastEq()).toEqual({ enabled: true, bands: [] }));
+    await waitFor(() => expect(lastEq()).toEqual({ enabled: true, bands: DEFAULT_POINTS }));
+  });
+
+  it("starts with ten flat points, which Reset puts back and Export writes", async () => {
+    const { wh, lastEq, synced } = await eqOn();
+    const reset = within(wh).getByRole("button", { name: t("eq.reset") });
+    expect(reset).toBeDisabled();
+    fireEvent.keyDown(within(wh).getByRole("button", { name: /^Point 6:/ }), { key: "ArrowUp" });
+    await waitFor(() => expect(lastEq().bands[5]).toMatchObject({ frequency: 1000, gain: 0.5 }));
+    await synced();
+    fireEvent.click(within(wh).getByRole("button", { name: t("eq.export") }));
+    await waitFor(() => expect(mock!.savedFiles).toHaveLength(1));
+    const lines = mock!.savedFiles[0].text.split(String.fromCharCode(13, 10));
+    expect(lines).toHaveLength(12);
+    expect(lines[1]).toBe("Filter 1: ON PK Fc 31 Hz Gain 0.0 dB Q 1.41");
+    expect(lines[6]).toBe("Filter 6: ON PK Fc 1000 Hz Gain 0.5 dB Q 1.41");
+    expect(lines[10]).toBe("Filter 10: ON PK Fc 16000 Hz Gain 0.0 dB Q 1.41");
+    expect(reset).toBeEnabled();
+    fireEvent.click(reset);
+    await waitFor(() => expect(lastEq().bands).toEqual(DEFAULT_POINTS));
   });
 
   it("takes typed values held to their range", async () => {
-    const { wh, lastEq } = await eqOn();
+    const { wh, lastEq } = await eqOn(true);
     fireEvent.click(within(wh).getByRole("button", { name: t("eq.add_point") }));
     await within(wh).findByRole("button", { name: /^Point 1:/ });
     const gain = within(wh).getByRole("spinbutton", { name: t("eq.gain") });
@@ -149,7 +183,7 @@ describe("Playback EQ", () => {
   });
 
   it("saves a dragged point once it is let go", async () => {
-    const { wh, svg, saved, lastEq } = await eqOn();
+    const { wh, svg, saved, lastEq } = await eqOn(true);
     fireEvent.click(within(wh).getByRole("button", { name: t("eq.add_point") }));
     const point = await within(wh).findByRole("button", { name: /^Point 1:/ });
     const before = saved().length;
@@ -166,12 +200,66 @@ describe("Playback EQ", () => {
   });
 
   it("turns off and keeps its points", async () => {
-    const { wh, lastEq } = await eqOn();
+    const { wh, lastEq } = await eqOn(true);
     fireEvent.click(within(wh).getByRole("button", { name: t("eq.add_point") }));
     await waitFor(() => expect(lastEq().bands).toHaveLength(1));
     fireEvent.click(within(wh).getByRole("switch", { name: t("eq.enable") }));
     await waitFor(() => expect(lastEq().enabled).toBe(false));
     expect(lastEq().bands).toHaveLength(1);
-    await waitFor(() => expect(wh.querySelector(".eq-graph")).toBeNull());
+    // Still there, greyed out
+    await waitFor(() => expect(wh.querySelector(".eq-graph.disabled")).toBeTruthy());
+    expect(within(wh).getByRole("button", { name: /^Point 1:/ })).toHaveAttribute("aria-disabled", "true");
+    for (const name of [t("eq.add_point"), t("eq.reset"), t("eq.export")]) {
+      expect(within(wh).getByRole("button", { name })).toBeDisabled();
+    }
+    expect(within(wh).getByRole("combobox", { name: t("eq.point") })).toBeDisabled();
+  });
+
+  it("keeps its fields empty until a point is picked, from the graph or the Point box", async () => {
+    const { wh, lastEq, synced } = await eqOn(true);
+    const point = () => within(wh).getByRole("combobox", { name: t("eq.point") }) as HTMLSelectElement;
+    const freq = () => within(wh).getByRole("spinbutton", { name: t("eq.frequency") }) as HTMLInputElement;
+    // No points: everything below the graph is there, disabled and empty
+    expect(point()).toBeDisabled();
+    expect(within(wh).getByRole("combobox", { name: t("eq.type") })).toBeDisabled();
+    expect(freq()).toBeDisabled();
+    expect(freq().value).toBe("");
+    expect(within(wh).getByRole("button", { name: t("eq.delete_point") })).toBeDisabled();
+    fireEvent.click(within(wh).getByRole("button", { name: t("eq.add_point") }));
+    await waitFor(() => expect(lastEq().bands).toHaveLength(1));
+    await synced();
+    fireEvent.click(within(wh).getByRole("button", { name: t("eq.add_point") }));
+    await waitFor(() => expect(lastEq().bands).toHaveLength(2));
+    await synced();
+    // The new point is selected; a click on the graph's background lets go
+    await waitFor(() => expect(point().value).toBe("1"));
+    expect(freq()).toHaveValue(2000);
+    fireEvent.pointerDown(wh.querySelector(".eq-graph svg")!, { button: 0 });
+    await waitFor(() => expect(freq()).toBeDisabled());
+    expect(freq().value).toBe("");
+    expect(point().selectedOptions[0]?.textContent).toBe("");
+    // The Point box picks one
+    expect(point()).toBeEnabled();
+    fireEvent.change(point(), { target: { value: "0" } });
+    await waitFor(() => expect(freq()).toHaveValue(1000));
+    expect(within(wh).getByRole("button", { name: /^Point 1:/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(wh).getByRole("combobox", { name: t("eq.type") })).toHaveValue("Peaking");
+  });
+
+  it("exports its points for Equalizer APO", async () => {
+    const { wh, lastEq } = await eqOn(true);
+    const exportButton = within(wh).getByRole("button", { name: t("eq.export") });
+    expect(exportButton).toBeDisabled();
+    fireEvent.click(within(wh).getByRole("button", { name: t("eq.add_point") }));
+    await waitFor(() => expect(lastEq().bands).toHaveLength(1));
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    fireEvent.click(exportButton);
+    await waitFor(() => expect(mock!.savedFiles).toHaveLength(1));
+    expect(mock!.savedFiles[0].name).toBe("BlueCaster EQ.txt");
+    expect(mock!.savedFiles[0].text.split(String.fromCharCode(13, 10))).toEqual([
+      "Preamp: 0.0 dB",
+      "Filter 1: ON PK Fc 1000 Hz Gain 0.0 dB Q 1.00",
+      "",
+    ]);
   });
 });

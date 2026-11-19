@@ -514,11 +514,13 @@ impl VoiceRx for ShellRx {
 }
 
 /// A profile's microphone processing as the chain takes it (out-of-range
-/// values clamped there)
+/// values clamped there; switched off: nothing at all)
 pub(crate) fn mic_settings(p: &ipc::MicProcessing) -> voice_link::MicSettings {
+    if !p.enabled {
+        return voice_link::MicSettings::default();
+    }
     voice_link::MicSettings {
         gain_db: f32::from(p.gain_db),
-        noise_suppression: p.noise_suppression,
         suppression: f32::from(p.suppression.min(100)) / 100.0,
         gate_db: f32::from(p.gate_db),
     }
@@ -1436,11 +1438,13 @@ mod tests {
     #[test]
     fn a_profiles_mic_processing_reaches_the_chain() {
         assert!(!mic_settings(&ipc::MicProcessing::default()).is_active());
-        let s =
-            mic_settings(&ipc::MicProcessing { gain_db: 30, noise_suppression: true, suppression: 250, gate_db: -10 });
-        assert_eq!((s.gain_db, s.noise_suppression, s.suppression, s.gate_db), (24.0, true, 1.0, -20.0));
+        let on = ipc::MicProcessing { enabled: true, gain_db: 30, suppression: 250, gate_db: -10 };
+        let s = mic_settings(&on);
+        assert_eq!((s.gain_db, s.suppression, s.gate_db), (24.0, 1.0, -20.0));
+        // Switched off: nothing runs, whatever the values
+        assert!(!mic_settings(&ipc::MicProcessing { enabled: false, ..on }).is_active());
         // A gate below its lowest threshold is off
-        assert!(!mic_settings(&ipc::MicProcessing { gate_db: -100, ..Default::default() }).is_active());
+        assert!(!mic_settings(&ipc::MicProcessing { enabled: true, gate_db: -100, ..Default::default() }).is_active());
     }
 
     #[test]

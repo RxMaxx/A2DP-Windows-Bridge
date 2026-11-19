@@ -5,7 +5,12 @@
 // its Q, right-click changes its type or deletes it. The selected point's
 // values are fields below the graph. A focused point moves with the arrow
 // keys (Shift: bigger steps), Page Up / Page Down change its Q, Delete
-// removes it.
+// removes it. A new EQ starts with the classic ten flat bands
+// (lib/eq.ts DEFAULT_POINTS), shown greyed out until it is turned on; Reset
+// puts them back. Saved points are never replaced. Nothing hides (issue #86): while the EQ is off the graph,
+// the fields and the buttons stay, disabled, and the fields are empty while
+// no point is selected. Export saves the points as an Equalizer APO /
+// AutoEq parametric EQ (lib/eq.ts eqApoText).
 //
 // While a point is dragged the stream plays it at once (media_eq.preview);
 // the profile is saved when it is let go. The curve is the core's own
@@ -19,12 +24,15 @@ import { t } from "../i18n";
 import type { Device, EqBandType, EqPoint, MediaEq } from "../ipc/types";
 import {
   BAND_TYPES,
+  DEFAULT_POINTS,
+  eqApoText,
   FREQ_MAX,
   FREQ_MIN,
   GAIN_LIMIT,
   hasGain,
   hasQ,
   heldPoint,
+  isDefaultPoints,
   MAX_POINTS,
   Q_MAX,
   Q_MIN,
@@ -41,6 +49,8 @@ import { saveMediaEq } from "../screens/Codecs";
 import { Button, Dialog, IconButton, NavRow, Select, Toggle, type Option } from "./controls";
 
 const OFF: MediaEq = { enabled: false, bands: [] };
+/** The exported file's suggested name */
+const EXPORT_NAME = "BlueCaster EQ.txt";
 /** Shortest time between two previews sent while dragging */
 const PREVIEW_MS = 40;
 
@@ -135,7 +145,11 @@ function MediaEqEditor(props: { device: Device }) {
     if (bands.length >= MAX_POINTS) return;
     // Where no point is yet, from 1 kHz outwards
     const taken = (f: number) => bands.some((b) => Math.abs(Math.log2(b.frequency / f)) < 0.5);
-    const free = [1000, 2000, 500, 4000, 250, 8000, 125, 16000, 63, 31].find((f) => !taken(f)) ?? 1000;
+    // Then between the default bands
+    const free =
+      [1000, 2000, 500, 4000, 250, 8000, 125, 16000, 63, 31, 1400, 700, 2800, 350, 5600, 180, 11000, 90, 45].find(
+        (f) => !taken(f),
+      ) ?? 1000;
     setBands([...bands, { frequency: free, gain: 0, q: 1, band_type: "Peaking" }], true);
     setSelected(bands.length);
   };
@@ -143,8 +157,40 @@ function MediaEqEditor(props: { device: Device }) {
     const i = selected();
     return i === null ? null : (eq().bands[i] ?? null);
   };
+  // Editing: on, with a profile to save it in; off, everything stays but disabled
+  const active = () => eq().enabled && !!entry();
+  // Off without points: the ones turning it on gives
+  const shownBands = () => (!eq().enabled && eq().bands.length === 0 ? DEFAULT_POINTS : eq().bands);
+  createEffect(() => {
+    if (!active()) setSelected(null);
+  });
+  const deleteSelected = () => {
+    const i = selected();
+    if (i === null) return;
+    setSelected(null);
+    setBands(
+      eq().bands.filter((_, j) => j !== i),
+      true,
+    );
+  };
+  const [exportError, setExportError] = createSignal<string | null>(null);
+  const exportPoints = async () => {
+    setExportError(null);
+    try {
+      await app.core.transport.saveTextFile(EXPORT_NAME, eqApoText(eq().bands));
+    } catch (e) {
+      setExportError(t("eq.export_failed", String(e)));
+    }
+  };
+  const pointId = createUniqueId();
   const typeId = createUniqueId();
-  const typeOptions = (): Option<EqBandType>[] => BAND_TYPES.map((b) => ({ value: b, label: typeLabel(b) }));
+  // While none is selected, a blank first entry: the box shows nothing
+  const pointOptions = (): Option<number>[] => [
+    ...(selected() === null ? [{ value: -1, label: "", disabled: true }] : []),
+    ...eq().bands.map((_, i) => ({ value: i, label: String(i + 1) })),
+  ];
+  const typeOptions = (): Option<EqBandType>[] =>
+    sel() ? BAND_TYPES.map((b) => ({ value: b, label: typeLabel(b) })) : [];
 
   return (
     <div class="media-eq">
@@ -152,98 +198,117 @@ function MediaEqEditor(props: { device: Device }) {
         label={t("eq.enable")}
         checked={eq().enabled}
         disabled={!entry()}
-        onChange={(v) => void commit({ ...eq(), enabled: v })}
+        onChange={(v) =>
+          // A new EQ starts with the default points
+          void commit({ enabled: v, bands: v && eq().bands.length === 0 ? [...DEFAULT_POINTS] : eq().bands })
+        }
       />
-      <Show when={eq().enabled}>
-        <EqGraph
-          bands={eq().bands}
-          selected={selected()}
-          onSelect={setSelected}
-          onChange={setBands}
-        />
-        <p class="hint">{t("eq.graph_hint")}</p>
-        <div class="eq-fields">
-          <Show when={sel()}>
-            {(b) => (
-              <>
-                <div class="eq-field">
-                  <label for={typeId}>{t("eq.type")}</label>
-                  <Select
-                    id={typeId}
-                    value={b().band_type}
-                    options={typeOptions()}
-                    onChange={(v) => editSelected(withType(b(), v))}
-                  />
-                </div>
-                <NumberField
-                  label={t("eq.frequency")}
-                  unit="Hz"
-                  value={b().frequency}
-                  min={FREQ_MIN}
-                  max={FREQ_MAX}
-                  step={1}
-                  onChange={(v) => editSelected({ frequency: v })}
-                />
-                <NumberField
-                  label={t("eq.gain")}
-                  unit="dB"
-                  value={b().gain}
-                  min={-GAIN_LIMIT}
-                  max={GAIN_LIMIT}
-                  step={0.1}
-                  disabled={!hasGain(b().band_type)}
-                  onChange={(v) => editSelected({ gain: v })}
-                />
-                <NumberField
-                  label="Q"
-                  value={b().q}
-                  min={Q_MIN}
-                  max={Q_MAX}
-                  step={0.01}
-                  disabled={!hasQ(b().band_type)}
-                  onChange={(v) => editSelected({ q: v })}
-                />
-                <IconButton
-                  icon="delete"
-                  label={t("eq.delete_point")}
-                  onClick={() => {
-                    const i = selected()!;
-                    setSelected(null);
-                    setBands(
-                      eq().bands.filter((_, j) => j !== i),
-                      true,
-                    );
-                  }}
-                />
-              </>
-            )}
-          </Show>
-          <span class="eq-actions">
-            <Button icon="add" disabled={eq().bands.length >= MAX_POINTS} onClick={addPoint}>
-              {t("eq.add_point")}
-            </Button>
-            <Button
-              icon="arrow_reset"
-              disabled={eq().bands.length === 0}
-              onClick={() => {
-                setSelected(null);
-                setBands([], true);
-              }}
-            >
-              {t("eq.reset")}
-            </Button>
+      <EqGraph
+        bands={shownBands()}
+        selected={selected()}
+        disabled={!active()}
+        onSelect={setSelected}
+        onChange={setBands}
+      />
+      <p class="hint">{t("eq.graph_hint")}</p>
+      <div class="eq-fields">
+        <div class="eq-field eq-point-field">
+          <label for={pointId}>{t("eq.point")}</label>
+          <span class="eq-point-pick">
+            <IconButton
+              icon="delete"
+              label={t("eq.delete_point")}
+              disabled={!active() || !sel()}
+              onClick={deleteSelected}
+            />
+            <Select
+              id={pointId}
+              value={selected() ?? -1}
+              options={pointOptions()}
+              disabled={!active() || eq().bands.length === 0}
+              onChange={(i) => setSelected(i)}
+            />
           </span>
         </div>
-      </Show>
+        <div class="eq-field">
+          <label for={typeId}>{t("eq.type")}</label>
+          <Select
+            id={typeId}
+            value={sel()?.band_type ?? "Peaking"}
+            options={typeOptions()}
+            disabled={!active() || !sel()}
+            onChange={(v) => {
+              const b = sel();
+              if (b) editSelected(withType(b, v));
+            }}
+          />
+        </div>
+        <NumberField
+          label={t("eq.frequency")}
+          unit="Hz"
+          wide
+          value={sel()?.frequency ?? null}
+          min={FREQ_MIN}
+          max={FREQ_MAX}
+          step={1}
+          disabled={!active()}
+          onChange={(v) => editSelected({ frequency: v })}
+        />
+        <NumberField
+          label={t("eq.gain")}
+          unit="dB"
+          value={sel()?.gain ?? null}
+          min={-GAIN_LIMIT}
+          max={GAIN_LIMIT}
+          step={0.1}
+          disabled={!active() || !hasGain(sel()?.band_type ?? "Peaking")}
+          onChange={(v) => editSelected({ gain: v })}
+        />
+        <NumberField
+          label="Q"
+          value={sel()?.q ?? null}
+          min={Q_MIN}
+          max={Q_MAX}
+          step={0.01}
+          disabled={!active() || !hasQ(sel()?.band_type ?? "Peaking")}
+          onChange={(v) => editSelected({ q: v })}
+        />
+      </div>
+      <div class="eq-actions">
+        <Button icon="add" disabled={!active() || eq().bands.length >= MAX_POINTS} onClick={addPoint}>
+          {t("eq.add_point")}
+        </Button>
+        <Button
+          icon="arrow_reset"
+          disabled={!active() || isDefaultPoints(eq().bands)}
+          onClick={() => {
+            setSelected(null);
+            setBands([...DEFAULT_POINTS], true);
+          }}
+        >
+          {t("eq.reset")}
+        </Button>
+        <Button
+          icon="arrow_download"
+          disabled={!active() || eq().bands.length === 0}
+          onClick={() => void exportPoints()}
+        >
+          {t("eq.export")}
+        </Button>
+      </div>
+      <Show when={exportError()}>{(e) => <p class="field-warn">{e()}</p>}</Show>
     </div>
   );
 }
 
-/** A number typed in, taken when it is left or Enter is pressed */
+/** A number typed in, taken when it is left or Enter is pressed; empty
+ *  (and disabled) while there is no value */
 function NumberField(props: {
   label: string;
   unit?: string;
-  value: number;
+  /** As wide as the Type box (five digits) */
+  wide?: boolean;
+  value: number | null;
   min: number;
   max: number;
   step: number;
@@ -251,6 +316,7 @@ function NumberField(props: {
   onChange: (v: number) => void;
 }) {
   const id = createUniqueId();
+  const off = () => props.disabled || props.value === null;
   return (
     <div class="eq-field">
       <label for={id}>{props.label}</label>
@@ -258,14 +324,16 @@ function NumberField(props: {
         <input
           id={id}
           class="input num"
+          classList={{ wide: props.wide }}
           type="number"
           min={props.min}
           max={props.max}
           step={props.step}
-          disabled={props.disabled}
-          value={props.disabled ? "" : String(props.value)}
+          disabled={off()}
+          value={off() ? "" : String(props.value)}
           onChange={(e) => {
             const v = Number(e.currentTarget.value);
+            if (props.value === null) return;
             if (e.currentTarget.value === "" || !Number.isFinite(v)) {
               e.currentTarget.value = String(props.value);
               return;
@@ -301,8 +369,10 @@ const dbOf = (y: number) => DB_RANGE - ((y - PLOT.top) / (PLOT.bottom - PLOT.top
 type Menu = { x: number; y: number; point: number | null };
 
 export function EqGraph(props: {
-  bands: EqPoint[];
+  bands: readonly EqPoint[];
   selected: number | null;
+  /** Shown greyed out, nothing on it reacts (the EQ is off) */
+  disabled?: boolean;
   onSelect: (i: number | null) => void;
   /** New points; `done`: the change is complete (save it), else it is
    *  being dragged */
@@ -344,7 +414,7 @@ export function EqGraph(props: {
   };
 
   const onPointDown = (i: number, e: PointerEvent) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || props.disabled) return;
     e.stopPropagation();
     setMenu(null);
     props.onSelect(i);
@@ -376,14 +446,14 @@ export function EqGraph(props: {
   };
   const onWheel = (i: number, e: WheelEvent) => {
     const b = props.bands[i];
-    if (!b || !hasQ(b.band_type)) return;
+    if (!b || !hasQ(b.band_type) || props.disabled) return;
     e.preventDefault();
     const q = roundQ(b.q * Math.pow(1.0015, -e.deltaY));
     if (q !== b.q) props.onChange(replace(i, { ...b, q }), true);
   };
   const onKey = (i: number, e: KeyboardEvent) => {
     const b = props.bands[i];
-    if (!b) return;
+    if (!b || props.disabled) return;
     const big = e.shiftKey;
     let next: EqPoint | null = null;
     switch (e.key) {
@@ -435,7 +505,7 @@ export function EqGraph(props: {
     );
   // The hovered or dragged point's values (not over its menu)
   const shown = () => {
-    if (menu()) return null;
+    if (menu() || props.disabled) return null;
     const i = drag() ?? hover();
     return i === null ? null : (props.bands[i] ? { i, b: props.bands[i] } : null);
   };
@@ -446,6 +516,13 @@ export function EqGraph(props: {
     if (e.type === "pointerdown" && (e.target as Element | null)?.closest?.(".eq-menu")) return;
     setMenu(null);
   };
+  createEffect(() => {
+    if (props.disabled) {
+      setMenu(null);
+      setDrag(null);
+      dragged = null;
+    }
+  });
   createEffect(() => {
     if (!menu()) return;
     document.addEventListener("pointerdown", closeMenu, true);
@@ -461,28 +538,32 @@ export function EqGraph(props: {
   };
 
   return (
-    <div class="eq-graph">
+    <div class="eq-graph" classList={{ disabled: props.disabled }}>
       <svg
         ref={svg}
         viewBox={`0 0 ${W} ${H}`}
         role="group"
         aria-label={t("eq.graph_label")}
+        aria-disabled={props.disabled ? "true" : undefined}
         classList={{ dragging: drag() !== null }}
         onPointerMove={onMove}
         onPointerUp={onUp}
         onPointerCancel={onUp}
         onPointerDown={(e) => {
+          if (props.disabled) return;
           if (e.button === 0) {
             setMenu(null);
             props.onSelect(null);
           }
         }}
         onDblClick={(e) => {
+          if (props.disabled) return;
           const { x, y } = at(e);
           addAt(x, y);
         }}
         onContextMenu={(e) => {
           e.preventDefault();
+          if (props.disabled) return;
           const { x, y } = at(e);
           setMenu({ x, y, point: null });
         }}
@@ -523,21 +604,26 @@ export function EqGraph(props: {
               class="eq-point"
               classList={{ on: props.selected === i() }}
               transform={`translate(${xOf(b.frequency).toFixed(1)},${pointY(b).toFixed(1)})`}
-              tabindex="0"
+              tabindex={props.disabled ? -1 : 0}
               role="button"
               aria-label={pointLabel(b, i())}
               aria-pressed={props.selected === i()}
-              onFocus={() => props.onSelect(i())}
+              aria-disabled={props.disabled ? "true" : undefined}
+              onFocus={() => {
+                if (!props.disabled) props.onSelect(i());
+              }}
               onPointerDown={(e) => onPointDown(i(), e)}
               onPointerEnter={() => setHover(i())}
               onPointerLeave={() => setHover((h) => (h === i() ? null : h))}
               onDblClick={(e) => {
                 e.stopPropagation();
+                if (props.disabled) return;
                 if (hasGain(b.band_type) && b.gain !== 0) props.onChange(replace(i(), { ...b, gain: 0 }), true);
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                if (props.disabled) return;
                 props.onSelect(i());
                 setMenu({ x: xOf(b.frequency), y: pointY(b), point: i() });
               }}
@@ -590,10 +676,10 @@ export function EqGraph(props: {
                   <button
                     type="button"
                     role="menuitem"
-                    disabled={props.bands.length === 0}
+                    disabled={isDefaultPoints(props.bands)}
                     onClick={menuItem(() => {
                       props.onSelect(null);
-                      props.onChange([], true);
+                      props.onChange([...DEFAULT_POINTS], true);
                     })}
                   >
                     {t("eq.reset")}

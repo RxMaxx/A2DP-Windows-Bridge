@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EqPoint } from "../ipc/types";
-import { eqResponseDb, formatFreq, formatGain, heldPoint, responseCurve, roundFreq, withType } from "./eq";
+import { eqApoText, eqResponseDb, formatFreq, formatGain, heldPoint, maxBoostDb, responseCurve, roundFreq, withType } from "./eq";
 
 describe("EQ response", () => {
   // The same points and values as the core's test
@@ -74,5 +74,42 @@ describe("EQ points", () => {
     expect(formatGain(3)).toBe("+3.0 dB");
     expect(formatGain(-2.5)).toBe("−2.5 dB");
     expect(formatGain(0)).toBe("0.0 dB");
+  });
+});
+
+describe("EQ export", () => {
+  const CRLF = String.fromCharCode(13, 10);
+  it("writes Equalizer APO's parametric format, with the core's preamp", () => {
+    const bands: EqPoint[] = [
+      { frequency: 105, gain: 4.5, q: 3, band_type: "LowShelf" },
+      { frequency: 250, gain: -3, q: 1.4, band_type: "Peaking" },
+      { frequency: 1250.5, gain: 2, q: 1, band_type: "Peaking" },
+      { frequency: 9000, gain: -5, q: 1, band_type: "HighShelf" },
+      { frequency: 30, gain: 0, q: 0.71, band_type: "HighPass" },
+      { frequency: 18000, gain: 0, q: 0.9, band_type: "LowPass" },
+    ];
+    const lines = eqApoText(bands).split(CRLF);
+    const preamp = Math.ceil(maxBoostDb(bands) * 10) / 10;
+    expect(preamp).toBeGreaterThan(0);
+    expect(lines).toEqual([
+      `Preamp: -${preamp.toFixed(1)} dB`,
+      "Filter 1: ON LSC Fc 105 Hz Gain 4.5 dB Q 0.71",
+      "Filter 2: ON PK Fc 250 Hz Gain -3.0 dB Q 1.40",
+      "Filter 3: ON PK Fc 1250.5 Hz Gain 2.0 dB Q 1.00",
+      "Filter 4: ON HSC Fc 9000 Hz Gain -5.0 dB Q 0.71",
+      "Filter 5: ON HPQ Fc 30 Hz Q 0.71",
+      "Filter 6: ON LPQ Fc 18000 Hz Q 0.90",
+      "",
+    ]);
+  });
+
+  it("lowers the level by the highest boost only", () => {
+    expect(eqApoText([{ frequency: 1000, gain: 6, q: 1, band_type: "Peaking" }])).toBe(
+      `Preamp: -6.0 dB${CRLF}Filter 1: ON PK Fc 1000 Hz Gain 6.0 dB Q 1.00${CRLF}`,
+    );
+    expect(eqApoText([{ frequency: 1000, gain: -6, q: 1, band_type: "Peaking" }]).split(CRLF)[0]).toBe(
+      "Preamp: 0.0 dB",
+    );
+    expect(eqApoText([])).toBe(`Preamp: 0.0 dB${CRLF}`);
   });
 });

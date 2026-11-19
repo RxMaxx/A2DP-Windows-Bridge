@@ -1772,6 +1772,19 @@ export class MockCore implements Transport {
   async revealPath(path: string) {
     console.info("[mock] reveal", path);
   }
+  /** The files saved (tests); in a browser, also downloaded */
+  savedFiles: { name: string; text: string }[] = [];
+  async saveTextFile(name: string, text: string) {
+    this.savedFiles.push({ name, text });
+    if (typeof URL.createObjectURL === "function") {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+    return true;
+  }
   async setTheme() {}
   /** Windows has no virtual device (tests) */
   noVirtual = false;
@@ -2544,9 +2557,10 @@ export class MockCore implements Transport {
   private voiceOf(name: string | null): VoiceStatus | null {
     const p = this.snap.profiles.find((x) => x.name === name);
     // Auto: no application records from the cable in the mock, so its
-    // link waits; muted: no link
-    if (!p || p.headset_mic !== "on" || p.mic_muted || !p.mic_device_id)
-      return null;
+    // link waits; muted: no link. On counts only in developer mode (as
+    // Auto otherwise); LE Audio takes Auto as On.
+    const open = p?.headset_mic === "on" && (this.snap.settings.developer_mode || p.le_audio);
+    if (!p || !open || p.mic_muted || !p.mic_device_id) return null;
     const chosen = !this.snap.settings.auto_codec;
     if (p.le_audio) {
       const rate =

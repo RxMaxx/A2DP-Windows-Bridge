@@ -997,9 +997,10 @@ option {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  /* Room so focus rings at the edges are not clipped by the scroller */
-  margin: 0 calc(-1 * var(--s1));
-  padding: 0 var(--s1);
+  /* Room so focus rings at the edges are not clipped by the scroller, and a
+     pressed button (moved down 1px) does not flash a scrollbar */
+  margin: calc(-1 * var(--s1));
+  padding: var(--s1);
 }
 .dialog-actions {
   display: flex;
@@ -2225,6 +2226,24 @@ option {
 .mic-slider .volume {
   flex: 0 1 18rem;
   padding-right: 0;
+}
+/* Switched off (or the microphone is Off): greyed out, values kept */
+.mic-slider:has(input:disabled) :is(.row-label, .hint, .volume-value) {
+  color: var(--disabled-text);
+}
+.mic-slider input:disabled::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, var(--disabled-text) var(--fill, 0%), var(--surface-3) var(--fill, 0%));
+}
+.mic-slider input:disabled::-webkit-slider-thumb {
+  background: var(--surface-3);
+  border-color: var(--disabled-text);
+}
+.mic-slider input:disabled::-moz-range-progress {
+  background: var(--disabled-text);
+}
+.mic-slider input:disabled::-moz-range-thumb {
+  background: var(--surface-3);
+  border-color: var(--disabled-text);
 }
 .device-global,
 .device-add {
@@ -4051,11 +4070,13 @@ html.win-flyout body {
   gap: var(--s1);
 }
 /* Playback EQ (Audio Devices): the graph follows the Windows accent, as
-   every control does; the grid and labels are the page's quiet colours */
+   every control does; the grid and labels are the page's quiet colours.
+   The selected point is filled, the others only ringed. Off, the graph is
+   greyed out and takes no input. */
 .media-eq {
   display: flex;
   flex-direction: column;
-  gap: var(--s2);
+  gap: var(--s3);
 }
 .media-eq .row {
   padding: 0;
@@ -4107,6 +4128,11 @@ html.win-flyout body {
   cursor: grabbing;
 }
 .eq-dot {
+  fill: var(--surface);
+  stroke: var(--accent-fill);
+  stroke-width: 2;
+}
+.eq-point.on .eq-dot {
   fill: var(--accent-fill);
   stroke: var(--surface);
   stroke-width: 1.5;
@@ -4125,10 +4151,35 @@ html.win-flyout body {
   stroke-width: 2;
 }
 .eq-num {
-  fill: var(--on-accent);
+  fill: var(--accent-fill);
   font-size: 10px;
   font-weight: 700;
   pointer-events: none;
+}
+.eq-point.on .eq-num {
+  fill: var(--on-accent);
+}
+.eq-graph.disabled .eq-curve {
+  stroke: var(--disabled-text);
+}
+.eq-graph.disabled .eq-fill {
+  fill: var(--disabled-text);
+  fill-opacity: 0.08;
+}
+.eq-graph.disabled .eq-point {
+  cursor: default;
+  pointer-events: none;
+}
+.eq-graph.disabled .eq-dot {
+  fill: var(--surface);
+  stroke: var(--disabled-text);
+}
+.eq-graph.disabled .eq-num {
+  fill: var(--disabled-text);
+}
+.eq-graph.disabled .eq-halo {
+  fill-opacity: 0;
+  stroke: none;
 }
 .eq-tip {
   position: absolute;
@@ -4181,11 +4232,14 @@ html.win-flyout body {
   border: 0;
   border-top: 1px solid var(--border);
 }
+/* Spread over the graph's width: the first field under its left edge, the
+   last under its right edge */
 .eq-fields {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: var(--s2) var(--s3);
+  justify-content: space-between;
+  gap: var(--s3) var(--s4);
 }
 .eq-field {
   display: flex;
@@ -4195,7 +4249,15 @@ html.win-flyout body {
   color: var(--text-2);
 }
 .eq-field .select {
-  min-width: 9rem;
+  min-width: 7rem;
+}
+.eq-point-field .select {
+  min-width: 4.5rem;
+}
+.eq-point-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
 }
 .eq-number {
   display: inline-flex;
@@ -4203,15 +4265,24 @@ html.win-flyout body {
   gap: var(--s1);
 }
 .eq-number .input {
-  width: 5.5rem;
+  width: 4.5rem;
+}
+/* Frequency: as wide as the Type box, five digits fit */
+.eq-number .input.wide {
+  width: 7rem;
 }
 .eq-unit {
   color: var(--text-3);
 }
+/* The buttons under a line, at the end as in every dialog */
 .eq-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--s2);
-  margin-left: auto;
+  margin-top: var(--s1);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--border);
 }
 @media (forced-colors: active) {
   .eq-curve,
@@ -4228,12 +4299,28 @@ html.win-flyout body {
   .eq-fill {
     fill: Highlight;
   }
-  .eq-dot {
+  .eq-dot,
+  .eq-graph.disabled .eq-dot {
+    fill: Canvas;
+    stroke: ButtonText;
+  }
+  .eq-num {
+    fill: ButtonText;
+  }
+  .eq-point.on .eq-dot {
     fill: ButtonText;
     stroke: Canvas;
   }
-  .eq-num {
+  .eq-point.on .eq-num {
     fill: Canvas;
+  }
+  .eq-graph.disabled .eq-curve,
+  .eq-graph.disabled .eq-dot {
+    stroke: GrayText;
+  }
+  .eq-graph.disabled .eq-fill,
+  .eq-graph.disabled .eq-num {
+    fill: GrayText;
   }
   .eq-grid {
     stroke: GrayText;

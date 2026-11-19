@@ -1293,7 +1293,7 @@ mod tests {
         let p = Profile { name: "WH".into(), device_address: "00:11:22:33:44:55".into(), ..Profile::default() };
         assert!(serde_json::to_value(&p).unwrap().get("mic_processing").is_none());
         let on = Profile {
-            mic_processing: ipc::MicProcessing { gain_db: 6, noise_suppression: true, ..Default::default() },
+            mic_processing: ipc::MicProcessing { enabled: true, gain_db: 6, suppression: 100, ..Default::default() },
             ..p.clone()
         };
         assert!(p.only_mic_processing_differs(&on));
@@ -2163,7 +2163,10 @@ mod tests {
         assert!(!p.only_media_eq_differs(&p));
         assert!(!p.only_media_eq_differs(&Profile { sbc_bitpool: 30, ..eq.clone() }));
         // The EQ and the microphone processing saved together: both in place
-        let both = Profile { mic_processing: ipc::MicProcessing { gain_db: 6, ..Default::default() }, ..eq.clone() };
+        let both = Profile {
+            mic_processing: ipc::MicProcessing { enabled: true, gain_db: 6, ..Default::default() },
+            ..eq.clone()
+        };
         assert!(p.only_live_processing_differs(&eq));
         assert!(p.only_live_processing_differs(&both));
         assert!(!p.only_live_processing_differs(&p));
