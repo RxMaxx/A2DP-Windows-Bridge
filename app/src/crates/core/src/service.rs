@@ -507,8 +507,11 @@ impl Inner {
     pub fn notify(&self, state: StreamState, msg: Msg) {
         tracing::info!("state {state:?}: {}", msg.english());
         *self.state.lock().unwrap_or_else(|e| e.into_inner()) = state;
-        // What went over the air before a failure or a lost connection
-        if matches!(state, StreamState::Error | StreamState::Reconnecting) {
+        // What went over the air before a failure or a lost connection; not
+        // for a refusal by a setting, which sent nothing (a tester's clicks
+        // on a refused device saved 7 and pushed the useful ones out)
+        let refusal = matches!(msg.key, "error.le_audio_disabled" | "error.le_audio_developer");
+        if matches!(state, StreamState::Error | StreamState::Reconnecting) && !refusal {
             let dir = crate::paths::recorder_dir(&self.opts.config_dir);
             let what = format!("{state:?}-{}", msg.key.trim_start_matches("error."));
             self.opts.capture.save_recent(&dir, &crate::paths::local_stamp(), &what, false);
