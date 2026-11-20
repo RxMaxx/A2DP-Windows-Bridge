@@ -32,6 +32,9 @@ def add_arguments(parser):
     parser.add_argument('--cis-up-after', type=float, metavar='SECONDS',
                         help='with --refuse-cis: the other CIS come up this much later, '
                              "on BlueCaster's side only")
+    parser.add_argument('--reencrypt-fail', choices=['drop', 'key-missing'],
+                        help="the first re-encryption with BlueCaster's stored key fails once: the sink ends the "
+                             'link (drop) or has no key (key-missing, 0x06)')
     for module in MODULES:
         if hasattr(module, 'add_arguments'):
             module.add_arguments(parser)
@@ -42,6 +45,7 @@ def configure_sink(sink, args):
         controller.NO_ISO_BUFFERS.add('BlueCaster')   # the controller served over H4 (emu_le_audio_sink.py)
     if args.refuse_cis is not None:
         controller.REFUSE_CIS = (args.refuse_cis, args.cis_up_after)
+    controller.REENCRYPT_FAIL = args.reencrypt_fail
     for module in MODULES:
         if hasattr(module, 'configure_sink'):
             module.configure_sink(sink, args)

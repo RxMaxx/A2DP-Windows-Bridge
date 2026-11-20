@@ -29,6 +29,9 @@ between the two controllers of a LocalLink. LeEmuController adds that:
     come up; with --cis-up-after they come up that much later, on the
     central's side only (the sink has released its ASEs by then and would
     not accept them).
+  - with --reencrypt-fail the central's controller fails its first
+    re-encryption with the stored key once: the sink ends the link (drop)
+    or has no key (key-missing).
 
 PacketLoggerSnooper also writes ISO data (PacketLogger types 0x0c / 0x0d),
 which bluecaster_decode --le-audio reads.
@@ -97,6 +100,13 @@ NO_ISO_BUFFERS = set()
 # --refuse-cis / --cis-up-after: (index of the refused CIS in LE Create CIS,
 # seconds until the others are up or None for the usual way), or None
 REFUSE_CIS = None
+# --reencrypt-fail: what the "BlueCaster" controller makes of the first
+# re-encryption with a stored key (its second LE Enable Encryption, the first
+# being the pairing's): 'drop' the sink ends the link instead (0x13),
+# 'key-missing' the sink has no key (Encryption Change 0x06, encryption off,
+# as a controller reports LL_REJECT_EXT_IND with PIN or Key Missing); None:
+# every encryption succeeds
+REENCRYPT_FAIL = None
 
 
 class LeEmuController(EmuController):
@@ -113,6 +123,7 @@ class LeEmuController(EmuController):
         self.stalls = []           # (from, to) loop times this event loop did not run (recent ones)
         self.heartbeat = None
         self.heartbeat_due = 0.0
+        self.encryptions = 0       # LE Enable Encryption commands (--reencrypt-fail)
 
     def _heartbeat(self, due):
         """Every HEARTBEAT_S while ISO data flows: when this timer fires more
@@ -165,6 +176,31 @@ class LeEmuController(EmuController):
             # Command Complete (with the status) is what most commands get
             self.send_hci_packet(hci.HCI_Command_Complete_Event(
                 num_hci_command_packets=1, command_opcode=command.op_code, return_parameters=result))
+        return None
+
+    def on_hci_le_enable_encryption_command(self, command):
+        if self.name != 'BlueCaster' or REENCRYPT_FAIL is None:
+            return super().on_hci_le_enable_encryption_command(command)
+        self.encryptions += 1
+        connection = self.find_le_connection_by_handle(command.connection_handle)
+        if self.encryptions != 2 or connection is None:
+            return super().on_hci_le_enable_encryption_command(command)
+        self._send_hci_command_status(hci.HCI_COMMAND_STATUS_PENDING, command.op_code)
+        if REENCRYPT_FAIL == 'drop':
+            def fail():
+                if self.le_connections.get(connection.peer_address) is not connection:
+                    return
+                log.info('%s: the sink ends the link during re-encryption (--reencrypt-fail drop)', self.name)
+                reason = hci.HCI_ErrorCode.REMOTE_USER_TERMINATED_CONNECTION_ERROR
+                connection.send_ll_control_pdu(ll.TerminateInd(reason))
+                self.on_le_disconnected(connection, reason)
+        else:
+            def fail():
+                log.info('%s: the sink has no key for the re-encryption (--reencrypt-fail key-missing)', self.name)
+                self.send_hci_packet(hci.HCI_Encryption_Change_Event(
+                    status=hci.HCI_ErrorCode.PIN_OR_KEY_MISSING_ERROR, connection_handle=connection.handle,
+                    encryption_enabled=0))
+        asyncio.get_running_loop().call_later(0.05, fail)
         return None
 
     def on_hci_set_afh_host_channel_classification_command(self, _command):
