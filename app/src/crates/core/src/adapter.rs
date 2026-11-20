@@ -262,12 +262,16 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, _config_dir: &Pat
                 && chips::chip_supported(a.vendor, a.device.vid, a.device.pid)
                 && !a.device.in_use()
         });
-        // Qualcomm: the same
+        // Qualcomm: the same; the AR30xx have a loader of their own
+        let ar30xx = |a: &Adapter| chips::QUALCOMM_AR30XX.contains(&(a.device.vid, a.device.pid));
         config.qualcomm_loader = winusb.iter().any(|a| {
             a.vendor == ChipVendor::Qualcomm
+                && !ar30xx(a)
                 && chips::chip_supported(a.vendor, a.device.vid, a.device.pid)
                 && !a.device.in_use()
         });
+        config.atheros_loader =
+            winusb.iter().any(|a| a.vendor == ChipVendor::Qualcomm && ar30xx(a) && !a.device.in_use());
         // A Realtek chip whose firmware comes from Realtek's Windows driver
         // (the RTL8852BD): the first one present, never one in use
         config.realtek_driver_chip = winusb
@@ -281,10 +285,11 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, _config_dir: &Pat
         config.broadcom_ids =
             winusb.iter().filter(|a| a.vendor == ChipVendor::Broadcom).map(|a| (a.device.vid, a.device.pid)).collect();
         tracing::debug!(
-            "adapter: intel bootloader download {}, mediatek download {}, qualcomm download {}, realtek driver chip {:04X?}, broadcom patchram ids {:04X?}",
+            "adapter: intel bootloader download {}, mediatek download {}, qualcomm download {}, atheros download {}, realtek driver chip {:04X?}, broadcom patchram ids {:04X?}",
             config.intel_loader,
             config.mediatek_loader,
             config.qualcomm_loader,
+            config.atheros_loader,
             config.realtek_driver_chip,
             config.broadcom_ids
         );
