@@ -499,6 +499,7 @@ describe("Auracast tab", () => {
       code: "secret",
       quality: "sq",
       mono: true,
+      split: false,
       source: "tone",
     });
     expect(screen.getByText(/1 ch over 1 BIS, 24_2_2/)).toBeInTheDocument();

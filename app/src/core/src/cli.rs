@@ -109,6 +109,8 @@ LE Audio (experimental, LC3 over LE isochronous channels):
   --auracast-code <code>
                         encrypt the broadcast with this code (4-16 bytes)
   --auracast-mono       one mono channel instead of left and right
+  --auracast-split      left and right as two broadcasts of their own
+                        (<name> L / <name> R, a mono channel each)
 
 Headset microphone:
   --headset-mic [on|auto]
@@ -237,6 +239,8 @@ struct LeArgs {
     broadcast_code: Option<String>,
     /// --auracast-mono
     broadcast_mono: bool,
+    /// --auracast-split
+    broadcast_split: bool,
 }
 
 /// --le-scan without a time (v1 scan_seconds)
@@ -457,6 +461,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
             }
             "--auracast-code" => a.le.broadcast_code = Some(value(&mut it, "--auracast-code")?),
             "--auracast-mono" => a.le.broadcast_mono = true,
+            "--auracast-split" => a.le.broadcast_split = true,
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown option {other}")),
         }
@@ -1158,6 +1163,7 @@ fn le_broadcast(a: &Args, service: &Service, rx: &mpsc::Receiver<ServiceEvent>, 
         code: le.broadcast_code.clone(),
         quality: "hq".into(),
         mono: Some(le.broadcast_mono),
+        split: Some(le.broadcast_split),
         source: "tone".into(),
         ..Default::default()
     };
@@ -1599,7 +1605,8 @@ mod tests {
             parse(&args("--cli --hci-tcp 127.0.0.1:9900 --auracast BlueCaster-test --test-tone --duration 5")).unwrap();
         assert!(a.le.on && a.test_tone && a.device.is_none());
         assert_eq!(a.le.broadcast.as_deref(), Some("BlueCaster-test"));
-        assert!(a.le.broadcast_code.is_none() && !a.le.broadcast_mono);
+        assert!(a.le.broadcast_code.is_none() && !a.le.broadcast_mono && !a.le.broadcast_split);
+        assert!(parse(&args("--cli --auracast Speakers --auracast-split")).unwrap().le.broadcast_split);
         let a = parse(&[
             "--cli".into(),
             "--auracast".into(),

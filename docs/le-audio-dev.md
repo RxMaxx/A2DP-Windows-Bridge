@@ -553,6 +553,28 @@ it.
   stopped"). A BIG the controller ends counts as a lost stream
   (error.auracast). `BtHost::le_start_broadcast` / `le_stop_broadcast`.
 - core `le_stream::run_broadcast`: no device; capture as for unicast.
+- Split (`--auracast-split`, the Auracast tab's "Left / right separately",
+  `stream.start_broadcast`'s `split`): left and right as two broadcasts of
+  their own, "<name> L" and "<name> R" (Broadcast_ID + 1 for R), each an
+  advertising set (SID 1 / 2) and a BIG (handle 0 / 1) of one mono BIS
+  without a location, for a pair of speakers that each tune to one
+  broadcast (as FlooGoo's "true wireless stereo" firmware does).
+  `le_audio::broadcast::groups` lists the broadcasts, `group_plan` /
+  `group_adv_data` give each its BASE and announcements; the shim holds
+  `BLUECASTER_BROADCASTS` (4) slots, a slot's index being its BIG handle;
+  bt-host creates every BIG and starts sending once all are up
+  (`IsoSender::start_bigs`: one SDU set per interval across the BIGs, each
+  BIG asked for BIS can-send-now, the round ends when every BIS got its
+  SDU). A BIG that fails or ends takes the others with it. Every slot after
+  the first advertises from a static random address of its own (derived
+  from the public one): Android lists broadcasters by address and showed
+  two sets from one address as one broadcast whose name kept changing.
+  Tried on 2026-11-20 on an ASUS BT600 (Realtek, 0B05:1D70) with two JBL
+  GO 4, one on L and one on R, at 24_2_2 and 48_4_2: a good stereo image,
+  no audible offset between the two, now and then a short stutter, on the
+  whole it works fairly well. Open: the cause of the stutters, and how far
+  apart in time the BIGs' anchors are on other controllers (each receiver
+  renders relative to its own BIG).
 
 BTstack 1.8.1 pitfalls found along the way:
 - `HCI_EVENT_BIS_CAN_SEND_NOW` is emitted only 4 bytes long, so the BIS handle

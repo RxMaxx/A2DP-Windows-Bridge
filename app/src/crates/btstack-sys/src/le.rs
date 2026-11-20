@@ -69,9 +69,15 @@ pub struct CigParams {
     pub cis: Vec<CisParams>,
 }
 
+/// Broadcasts (advertising set + BIG) the shim holds at once
+/// (BLUECASTER_BROADCASTS in shim.c); a broadcast's slot is its BIG handle
+pub const BROADCAST_SLOTS: u8 = 4;
+
 /// LE Create BIG (le_audio_big_params_t; packing sequential)
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BigParams {
+    /// Also the broadcast slot (0..[`BROADCAST_SLOTS`]) whose advertising
+    /// set the BIG goes on
     pub big_handle: u8,
     /// 1..=2 (MAX_NR_BIS)
     pub num_bis: u8,
@@ -808,11 +814,13 @@ impl Stack {
     // ---- Broadcast: advertising and BIG (after le_init) ----
 
     /// Starts extended advertising (non-connectable, non-scannable, `adv`)
-    /// with periodic advertising (`pa`, the BASE) on one advertising set;
-    /// intervals in 0.625 ms (extended) / 1.25 ms (periodic) units. One set
-    /// at a time. Ok: the advertising handle.
+    /// with periodic advertising (`pa`, the BASE) on the advertising set of
+    /// broadcast slot `slot` (0..[`BROADCAST_SLOTS`], the handle of the BIG
+    /// [`Stack::big_create`] then puts on it); intervals in 0.625 ms
+    /// (extended) / 1.25 ms (periodic) units. Ok: the advertising handle.
     pub fn broadcast_advertise(
         &self,
+        slot: u8,
         sid: u8,
         adv_interval: (u16, u16),
         pa_interval: (u16, u16),
@@ -830,6 +838,7 @@ impl Stack {
         // data into its static buffers.
         let status = unsafe {
             ffi::bluecaster_broadcast_advertise(
+                slot,
                 sid,
                 adv_interval.0,
                 adv_interval.1,
@@ -842,19 +851,19 @@ impl Stack {
                 &mut handle,
             )
         };
-        tracing::debug!(target: "le", "broadcast advertising (SID {sid}, adv {adv:02X?}, periodic {pa:02X?}): 0x{status:02X}, handle {handle}");
+        tracing::debug!(target: "le", "broadcast advertising (slot {slot}, SID {sid}, adv {adv:02X?}, periodic {pa:02X?}): 0x{status:02X}, handle {handle}");
         if status == ERROR_CODE_SUCCESS { Ok(handle) } else { Err(status) }
     }
 
-    /// Stops the advertising of [`Stack::broadcast_advertise`] and removes
-    /// its set
-    pub fn broadcast_advertise_stop(&self) -> u8 {
+    /// Stops the advertising of [`Stack::broadcast_advertise`] in `slot` and
+    /// removes its set
+    pub fn broadcast_advertise_stop(&self, slot: u8) -> u8 {
         if !self.le_initialized() {
             return ERROR_CODE_COMMAND_DISALLOWED;
         }
         // SAFETY: on the BTstack thread after le_init.
-        let status = unsafe { ffi::bluecaster_broadcast_advertise_stop() };
-        tracing::debug!(target: "le", "broadcast advertising stop: 0x{status:02X}");
+        let status = unsafe { ffi::bluecaster_broadcast_advertise_stop(slot) };
+        tracing::debug!(target: "le", "broadcast advertising stop (slot {slot}): 0x{status:02X}");
         status
     }
 
@@ -889,7 +898,8 @@ impl Stack {
                 code,
             )
         };
-        tracing::debug!(target: "le", "BIG create {} BIS, SDU {} us / {} bytes, latency {} ms, RTN {}, PHY {}, framing {}, encrypted {}: 0x{status:02X}",
+        tracing::debug!(target: "le", "BIG create {}: {} BIS, SDU {} us / {} bytes, latency {} ms, RTN {}, PHY {}, framing {}, encrypted {}: 0x{status:02X}",
+            params.big_handle,
             params.num_bis,
             params.sdu_interval_us,
             params.max_sdu,

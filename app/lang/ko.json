@@ -523,6 +523,7 @@
   "ui.dev.auracast_channels": "채널",
   "ui.dev.auracast_stereo": "스테레오",
   "ui.dev.auracast_mono": "모노",
+  "ui.dev.auracast_split": "왼쪽 / 오른쪽 따로",
   "ui.dev.chip_script": "칩 스크립트",
   "ui.dev.chip_format": "스크립트 형식",
   "ui.dev.chip_open": "파일 열기",

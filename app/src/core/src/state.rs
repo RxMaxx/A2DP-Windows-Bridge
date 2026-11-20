@@ -1032,6 +1032,8 @@ pub struct BroadcastStream {
     /// "hq" or "sq"
     pub quality: String,
     pub mono: Option<bool>,
+    /// Left and right as two broadcasts of their own
+    pub split: Option<bool>,
     pub source: String,
     pub source_id: Option<String>,
     pub source_name: Option<String>,
@@ -1063,6 +1065,7 @@ pub fn broadcast_request(b: &BroadcastStream, legacy_max_media_payload: u16) -> 
             name: b.name.clone(),
             code: b.code.clone(),
             mono: b.mono.unwrap_or(false),
+            split: b.split.unwrap_or(false),
         }),
         ..bt_host::LeRequest::default()
     });
@@ -3042,8 +3045,8 @@ impl CoreState {
                 };
                 self.start_custom(&c).map(|()| Value::Null)
             }
-            Method::StreamStartBroadcast { name, code, quality, mono, source, source_id, source_name } => {
-                let b = BroadcastStream { name, code, quality, mono, source, source_id, source_name };
+            Method::StreamStartBroadcast { name, code, quality, mono, split, source, source_id, source_name } => {
+                let b = BroadcastStream { name, code, quality, mono, split, source, source_id, source_name };
                 self.start_broadcast(&b).map(|()| Value::Null)
             }
             Method::StreamStop => {

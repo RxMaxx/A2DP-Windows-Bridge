@@ -276,6 +276,7 @@ unsafe extern "C" {
     // ---- shim.c: broadcast ----
     #[allow(clippy::too_many_arguments)]
     pub fn bluecaster_broadcast_advertise(
+        slot: u8,
         sid: u8,
         adv_interval_min: u16,
         adv_interval_max: u16,
@@ -287,7 +288,7 @@ unsafe extern "C" {
         pa_len: u16,
         out_handle: *mut u8,
     ) -> u8;
-    pub fn bluecaster_broadcast_advertise_stop() -> u8;
+    pub fn bluecaster_broadcast_advertise_stop(slot: u8) -> u8;
     #[allow(clippy::too_many_arguments)]
     pub fn bluecaster_big_create(
         big_handle: u8,
