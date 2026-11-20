@@ -500,6 +500,9 @@ fn parse(args: &[String]) -> Result<Args, String> {
             other => return Err(format!("unknown option {other}")),
         }
     }
+    if a.le.broadcast_mono && a.le.broadcast_split {
+        return Err("--auracast-mono and --auracast-split cannot be used together".into());
+    }
     Ok(a)
 }
 
@@ -1727,6 +1730,13 @@ mod tests {
         assert!(a.le.broadcast_mono);
         assert_eq!(a.le.preset.as_deref(), Some("24_2_2"));
         assert_eq!(parse(&args("--cli --auracast")).err().as_deref(), Some("--auracast needs a value"));
+        // Mono and split exclude each other, in either order
+        for both in ["--auracast-mono --auracast-split", "--auracast-split --auracast-mono"] {
+            assert_eq!(
+                parse(&args(&format!("--cli --auracast Speakers {both}"))).err().as_deref(),
+                Some("--auracast-mono and --auracast-split cannot be used together")
+            );
+        }
     }
 
     #[test]
