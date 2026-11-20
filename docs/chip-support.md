@@ -60,7 +60,9 @@ From the command line, with the adapter's VID:PID or instance ID (the adapter ca
 
 Quit BlueCaster from the tray first, since only one of them can use the adapter at a time.
 
-**Sending a report**: after **Read chip info**, the adapter's card shows what was read and a **Report on GitHub** button. The button opens a new issue pre-filled with the version, the adapter, that summary and your Windows build, and shows the report file in Explorer: drag the file into the issue and say where the adapter came from (for a laptop's built-in adapter, the laptop model). The report contains the adapter's Bluetooth address and name; it does not contain anything about your headphones. A **diagnostic bundle** (Diagnostics screen) with HCI captures included also contains the probe reports, under `probe/`.
+**Sending a report**: after **Read chip info**, the adapter's card shows what was read and a **Report on GitHub** button. The button opens a new issue with the version, the adapter, that summary, your Windows build and the report itself already filled in. Add where the adapter came from (for a laptop's built-in adapter, the laptop model).
+
+If the report is too long for the issue, the **Probe report** field stays empty and Explorer shows the file instead. Drag the file into that field; GitHub won't create the issue without it. The reports are in `%APPDATA%\BlueCaster\logs\probe`, and the newest one has the latest date in its name. The report contains the adapter's Bluetooth address and name; it does not contain anything about your headphones. A **diagnostic bundle** (Diagnostics screen) with HCI captures included also contains the probe reports, under `probe/`.
 
 ## Step 3: Record what Windows' driver does
 

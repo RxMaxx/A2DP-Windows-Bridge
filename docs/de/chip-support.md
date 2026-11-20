@@ -61,7 +61,9 @@ Außerdem zeichnet sie die USB-Konfiguration auf, die Windows meldet (Interfaces
 
 Beenden Sie BlueCaster vorher über den Infobereich, da App und Befehlszeile den Adapter nicht gleichzeitig nutzen können.
 
-**Einen Bericht senden**: Nach **Chip-Infos lesen** zeigt die Karte des Adapters die gelesenen Daten und eine Schaltfläche **Auf GitHub melden**. Sie öffnet ein neues Issue, in dem Version, Adapter, diese Zusammenfassung und Ihr Windows-Build bereits eingetragen sind, und zeigt die Berichtsdatei im Explorer. Ziehen Sie die Datei in das Issue und ergänzen Sie, woher der Adapter stammt (bei einem eingebauten Adapter: das Notebookmodell). Der Bericht enthält die Bluetooth-Adresse und den Namen des Adapters, aber nichts über Ihre Kopfhörer. Ein **Diagnosepaket** (Seite **Diagnose**) mit eingeschlossenen HCI-Mitschnitten enthält die Abfrageberichte ebenfalls, unter `probe/`.
+**Einen Bericht senden**: Nach **Chip-Infos lesen** zeigt die Karte des Adapters die gelesenen Daten und eine Schaltfläche **Auf GitHub melden**. Sie öffnet ein neues Issue, in dem Version, Adapter, diese Zusammenfassung, Ihr Windows-Build und der Bericht selbst bereits eingetragen sind. Ergänzen Sie, woher der Adapter stammt (bei einem eingebauten Adapter: das Notebookmodell).
+
+Ist der Bericht für das Issue zu lang, bleibt das Feld **Probe report** leer, und der Explorer zeigt stattdessen die Datei. Ziehen Sie die Datei in dieses Feld; ohne sie erstellt GitHub das Issue nicht. Die Berichte liegen in `%APPDATA%\BlueCaster\logs\probe`; der neueste hat das jüngste Datum im Namen. Der Bericht enthält die Bluetooth-Adresse und den Namen des Adapters, aber nichts über Ihre Kopfhörer. Ein **Diagnosepaket** (Seite **Diagnose**) mit eingeschlossenen HCI-Mitschnitten enthält die Abfrageberichte ebenfalls, unter `probe/`.
 
 ## Schritt 3: Mitschneiden, was der Windows-Treiber tut
 

@@ -1519,6 +1519,10 @@ export class MockCore implements Transport {
           path: `${this.snap.log_dir}\\probe\\probe-20261103_161445.json`,
           summary:
             "Intel, Bluetooth 5.3 (HCI 12), LMP subversion 0x3102, 8 of 8 commands answered",
+          report: JSON.stringify({
+            bluecaster: this.snap.update.current_version,
+            steps: [{ name: "Read Local Version Information", command: "011000", answer: "0e0c0201100000c00c0200023102" }],
+          }),
         };
       case "adapter.check_script":
         return mockCheckScript(String(p.script));
