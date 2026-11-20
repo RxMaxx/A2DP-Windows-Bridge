@@ -147,6 +147,30 @@ pub fn reveal_path(path: String) -> Result<(), String> {
     tauri_plugin_opener::reveal_item_in_dir(p).map_err(|e| e.to_string())
 }
 
+/// Longest text [`save_text_file`] writes
+const SAVE_TEXT_MAX: usize = 1 << 20;
+
+/// Writes `text` to a .txt file the user picks in Windows' Save As dialog
+/// (`name`: the file name suggested; an exported EQ) -> false when the
+/// dialog was cancelled. Only where the user chose: the page names no path.
+#[tauri::command]
+pub async fn save_text_file(window: WebviewWindow, name: String, text: String) -> Result<bool, String> {
+    if text.len() > SAVE_TEXT_MAX || name.is_empty() || name.contains(['\\', '/', ':']) {
+        return Err("not a file name, or too long".into());
+    }
+    let owner = window.hwnd().map(|h| h.0 as isize).unwrap_or(0);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    // The dialog blocks: a thread of its own, the window's event loop runs on
+    std::thread::spawn(move || {
+        let _ = tx.send(win_sys::file_dialog::save_file(owner, &name, "txt"));
+    });
+    let picked = rx.await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+    let Some(path) = picked else { return Ok(false) };
+    std::fs::write(&path, &text).map_err(|e| e.to_string())?;
+    tracing::info!("[{}] text file saved ({} bytes)", window.label(), text.len());
+    Ok(true)
+}
+
 /// The in-app update's state (also sent as `update://phase`)
 #[tauri::command]
 pub fn update_status(updates: State<'_, Arc<Updates>>) -> Phase {

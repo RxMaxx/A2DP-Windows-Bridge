@@ -16,6 +16,7 @@ use bt_host::HeadsetMic;
 use bt_host::media::clamp_media_payload_limit;
 use codec::{CodecKind, Quality};
 
+use crate::media_eq::MediaEq;
 use crate::stream::{Bitpools, SourceRequest, StreamRequest, VolumeSync};
 
 fn auto() -> String {
@@ -202,6 +203,10 @@ pub struct Profile {
     /// (Hz; 0 = none, written only when chosen)
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub mic_rate: u32,
+    /// The microphone's gain, noise suppression and gate (written only when
+    /// not all off); a change applies to the running microphone in place
+    #[serde(default, skip_serializing_if = "ipc::MicProcessing::is_default")]
+    pub mic_processing: ipc::MicProcessing,
     /// The settings of the other codecs, by codec key, as they were last
     /// chosen: choosing one of them again brings them back (the codec in
     /// use has its own in the fields above)
@@ -213,6 +218,10 @@ pub struct Profile {
     /// it the device offers. Empty: highest sound quality first.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub codec_order: Vec<String>,
+    /// The playback EQ for this device (written only when on or with
+    /// points)
+    #[serde(skip_serializing_if = "MediaEq::is_default")]
+    pub media_eq: MediaEq,
     #[serde(flatten)]
     pub other: BTreeMap<String, serde_json::Value>,
 }
@@ -258,8 +267,10 @@ impl Default for Profile {
             mic_default_input: true,
             voice_codec: String::new(),
             mic_rate: 0,
+            mic_processing: ipc::MicProcessing::default(),
             codec_settings: BTreeMap::new(),
             codec_order: Vec::new(),
+            media_eq: MediaEq::default(),
             other: BTreeMap::new(),
         }
     }
@@ -531,6 +542,26 @@ impl Profile {
         same == *new && *self != *new
     }
 
+    /// `new` is this profile with another playback EQ and nothing else
+    /// changed: the stream goes on and takes it in place
+    pub fn only_media_eq_differs(&self, new: &Profile) -> bool {
+        self.media_eq != new.media_eq && Profile { media_eq: new.media_eq.clone(), ..self.clone() } == *new
+    }
+
+    /// `new` is this profile with other microphone processing and nothing
+    /// else changed: the running microphone takes it in place
+    pub fn only_mic_processing_differs(&self, new: &Profile) -> bool {
+        self.mic_processing != new.mic_processing
+            && Profile { mic_processing: new.mic_processing, ..self.clone() } == *new
+    }
+
+    /// `new` differs only in what a running stream takes in place: the
+    /// playback EQ, the microphone processing, or both
+    pub fn only_live_processing_differs(&self, new: &Profile) -> bool {
+        *self != *new
+            && Profile { media_eq: new.media_eq.clone(), mic_processing: new.mic_processing, ..self.clone() } == *new
+    }
+
     /// `new` is this profile with "Set as Windows default input while
     /// connected" turned and nothing else changed: the stream goes on (the
     /// core's state follows it, default_input.rs)
@@ -645,6 +676,7 @@ impl Profile {
             headset_mic: HeadsetMic::Off,
             mic_output: None,
             voice_codec: None,
+            mic_processing: self.mic_processing,
         })
     }
 }
@@ -1254,6 +1286,25 @@ mod tests {
         assert!(is_vb_cable("CABLE In 16ch (VB-Audio Virtual Cable)", true));
         assert!(!is_hifi_cable("CABLE Input (VB-Audio Virtual Cable)"));
         assert!(!is_vb_cable("CABLE Input (VB-Audio Virtual Cable)", false));
+    }
+
+    #[test]
+    fn mic_processing_changes_alone_and_is_written_only_when_set() {
+        let p = Profile { name: "WH".into(), device_address: "00:11:22:33:44:55".into(), ..Profile::default() };
+        assert!(serde_json::to_value(&p).unwrap().get("mic_processing").is_none());
+        let on = Profile {
+            mic_processing: ipc::MicProcessing { enabled: true, gain_db: 6, suppression: 100, ..Default::default() },
+            ..p.clone()
+        };
+        assert!(p.only_mic_processing_differs(&on));
+        assert!(!p.only_mic_processing_differs(&p));
+        assert!(!p.only_mic_processing_differs(&Profile { codec: "sbc".into(), ..on.clone() }));
+        assert!(!p.only_headset_mic_differs(&on));
+        let v = serde_json::to_value(&on).unwrap();
+        assert_eq!(v["mic_processing"]["gain_db"], 6);
+        let back: Profile = serde_json::from_value(v).unwrap();
+        assert_eq!(back.mic_processing, on.mic_processing);
+        assert_eq!(on.to_request(679).unwrap().mic_processing, on.mic_processing);
     }
 
     const VB: &str = "CABLE Input (VB-Audio Virtual Cable)";
@@ -2104,6 +2155,22 @@ mod tests {
         // "Show only options it supports" turned, nothing else (issue #86)
         let unlisted = Profile { unlisted_options: !p.unlisted_options, ..p.clone() };
         assert!(p.only_unlisted_differs(&unlisted));
+        let eq = Profile {
+            media_eq: crate::media_eq::MediaEq { enabled: true, bands: vec![dsp::EqBand::peaking(1000.0, 3.0, 1.0)] },
+            ..p.clone()
+        };
+        assert!(p.only_media_eq_differs(&eq));
+        assert!(!p.only_media_eq_differs(&p));
+        assert!(!p.only_media_eq_differs(&Profile { sbc_bitpool: 30, ..eq.clone() }));
+        // The EQ and the microphone processing saved together: both in place
+        let both = Profile {
+            mic_processing: ipc::MicProcessing { enabled: true, gain_db: 6, ..Default::default() },
+            ..eq.clone()
+        };
+        assert!(p.only_live_processing_differs(&eq));
+        assert!(p.only_live_processing_differs(&both));
+        assert!(!p.only_live_processing_differs(&p));
+        assert!(!p.only_live_processing_differs(&Profile { sbc_bitpool: 30, ..both }));
         assert!(!p.only_unlisted_differs(&p));
         assert!(!p.only_unlisted_differs(&Profile { sbc_bitpool: 30, ..unlisted }));
     }

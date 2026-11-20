@@ -63,7 +63,7 @@ import { Banner, Button, Dialog, Field, Select, Toggle } from "../components/con
 import { Icon } from "../components/Icon";
 import { stateLabel } from "../components/stream";
 import { t } from "../i18n";
-import type { AudioDevice, Profile, Snapshot } from "../ipc/types";
+import type { AudioDevice, MediaEq, Profile, Snapshot } from "../ipc/types";
 import {
   autoKeepsCodecSettings,
   CARD_ORDER,
@@ -186,15 +186,18 @@ async function saveEntry(
   return ok ? saved.name : null;
 }
 
-/** Saves a device's headset mode, microphone output, default input
- *  (Audio Devices) or mute (Home's and the flyout's chip). The core opens or
- *  closes the microphone link (Auto: as apps record from the output).
- *  True once saved. */
+/** Saves a device's headset mode, microphone output, default input, the
+ *  microphone's processing (Audio Devices) or mute (Home's and the flyout's
+ *  chip). The core opens or closes the microphone link (Auto: as apps record
+ *  from the output); the processing applies in place. True once saved. */
 export async function saveHeadsetMic(
   app: ReturnType<typeof useApp>,
   entry: AudioEntry,
   patch: Partial<
-    Pick<Profile, "headset_mic" | "mic_device_id" | "mic_device_name" | "mic_muted" | "mic_default_input">
+    Pick<
+      Profile,
+      "headset_mic" | "mic_device_id" | "mic_device_name" | "mic_muted" | "mic_default_input" | "mic_processing"
+    >
   >,
 ): Promise<boolean> {
   return (await saveEntry(app, entry, (base) => ({ ...base, ...patch }))) !== null;
@@ -209,6 +212,12 @@ export async function saveMicCodec(
   patch: Partial<Pick<Profile, "voice_codec" | "mic_rate">>,
 ): Promise<boolean> {
   return (await saveEntry(app, entry, (base) => ({ ...base, ...patch }))) !== null;
+}
+
+/** Saves a device's playback EQ (Audio Devices). A stream of it takes the
+ *  change in place. True once saved. */
+export async function saveMediaEq(app: ReturnType<typeof useApp>, entry: AudioEntry, eq: MediaEq): Promise<boolean> {
+  return (await saveEntry(app, entry, (base) => ({ ...base, media_eq: eq }))) !== null;
 }
 
 /** Saves the device's profile with `codec` chosen (`values`: from its "..."

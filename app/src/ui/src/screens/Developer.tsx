@@ -90,7 +90,6 @@ export const NO_DEBUG: DevDebug = {
   mtk_command_before_reset: false,
   mtk_register: "",
   le_keys_to_windows: false,
-  realtek_driver_firmware: false,
   le_latency_c_to_p_ms: 0,
   le_latency_p_to_c_ms: 0,
   le_rtn_c_to_p: null,
@@ -577,13 +576,6 @@ function Debug(props: {
         </Field>
       </Section>
       <LeAudioDebug value={props.value} set={set} />
-      <Section title={t("ui.dev.realtek_section")}>
-        <Toggle
-          label={t("ui.dev.realtek_driver_firmware")}
-          checked={props.value.realtek_driver_firmware}
-          onChange={(v) => set({ realtek_driver_firmware: v })}
-        />
-      </Section>
       <Section title={t("ui.dev.keys_section")}>
         <Toggle
           label={t("ui.dev.le_keys_to_windows")}

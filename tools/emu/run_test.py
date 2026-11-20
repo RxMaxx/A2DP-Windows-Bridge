@@ -56,7 +56,7 @@ bluecaster-core.exe --cli --scan lists it:
     from a name request after the first inquiry
 Outputs go to tools/emu/out/scan-<case>/.
 
-    python tools/emu/run_test.py --voice [cvsd msbc lc3swb cvsd-roundtrip cvsd-auto lc3swb-msbc lc3swb-cvsd]
+    python tools/emu/run_test.py --voice [cvsd msbc lc3swb cvsd-roundtrip cvsd-auto lc3swb-msbc lc3swb-cvsd msbc-gain]
 
 runs the HFP audio cases instead (headset mode: bluecaster-core --headset-mic
 --mic-output <out>/mic.wav): emu_sink.py --hfp <codec> adds a hands-free
@@ -84,6 +84,8 @@ checks are cvsd's, plus Auto's "an application records" in the log.
 lc3swb-msbc / lc3swb-cvsd: the hands-free unit offers LC3-SWB, BlueCaster is
 given --voice-codec msbc / cvsd (the call codec chosen with Auto-select off):
 the link must come up with that codec instead.
+msbc-gain: msbc with --mic-gain 6: the microphone's processing runs, so
+mic.wav holds the tone 6 dB louder.
 Outputs go to tools/emu/out/voice-<case>/.
 
     python tools/emu/run_test.py --le-pairing [link-key link-key-ct2 no-link-key replaces-classic drops-authenticated]
@@ -187,6 +189,11 @@ CTKD_ON = {'debug_mode': True, 'le_audio_experimental': True}
 # Further cases: name -> (BlueCaster -c, emu_sink.py arguments, the codec expected,
 # more BlueCaster arguments)
 NEGOTIATION = {
+    # The playback EQ on (--eq, EQ_POINTS): a cut leaves the level alone, a
+    # boost is taken off again by the preamp
+    'sbc-eq': ('sbc', [], 'sbc', ['--eq', '1500:-6:2']),
+    'aac-eq': ('aac', [], 'aac', ['--eq', '1000:6:4']),
+    'aptxhd-eq': ('aptxhd', [], 'aptxhd', ['--eq', '1000:6:4']),  # 24-bit
     'sbcxq-44k': ('sbcxq', [], 'sbcxq', ['--rate', '44100']),            # bitpool 47
     # A codec chosen on its card that the sink does not list (the profile's
     # codec_forced, issue #86): LDAC to a sink that lists SBC only
@@ -250,6 +257,9 @@ NEGOTIATION = {
     # to an R2 sink that lists it (emu_sink.py's R2 caps do), else 48 kHz (an
     # R1 sink, low latency); Auto takes it over aptX and AAC (issue #86)
     'aptxad': ('aptxad', APTXAD_SINK, 'aptxad', []),
+    # aptX LL to a sink with the extended capabilities, which also offers
+    # aptX Adaptive (a FiiO BTR13): a 17-byte configuration (issue #520)
+    'aptxll-ext': ('aptxll', ['--codecs', 'sbc', 'aac', 'aptx', 'aptxll', 'aptxad', '--aptxll-ext'], 'aptxll', []),
     'aptxad-ll': ('aptxad', APTXAD_SINK, 'aptxad', ['-q', 'll']),
     'aptxad-r2': ('aptxad', APTXAD_SINK + ['--aptxad-r2'], 'aptxad-r2', []),
     'aptxad-r2-ll': ('aptxad', APTXAD_SINK + ['--aptxad-r2'], 'aptxad-r2', ['-q', 'll']),
@@ -436,6 +446,32 @@ LOG_CHECKS = {
 # Cases whose LE keys BlueCaster keeps must equal the sink's (ctkd_check)
 CTKD_CASES = {'ctkd', 'ctkd-next-connection', 'ctkd-developer-off', 'ctkd-le-off'}
 TONES = ((1000.0, 0.5), (1500.0, 0.5))  # (frequency, amplitude) per channel, as --test-tone
+# The EQ points (Hz, dB, Q; peaking) of the NEGOTIATION cases that turn it on
+EQ_POINTS = {'sbc-eq': [(1500.0, -6.0, 2.0)], 'aac-eq': [(1000.0, 6.0, 4.0)], 'aptxhd-eq': [(1000.0, 6.0, 4.0)]}
+
+
+def peaking_db(points, freq, rate):
+    """The response (dB) of peaking points at freq, as BlueCaster's EQ
+    filters them (RBJ cookbook)"""
+    total = 0.0
+    for f0, gain, q in points:
+        w0 = 2 * math.pi * f0 / rate
+        alpha, a = math.sin(w0) / (2 * q), 10 ** (gain / 40)
+        b = (1 + alpha * a, -2 * math.cos(w0), 1 - alpha * a)
+        d = (1 + alpha / a, -2 * math.cos(w0), 1 - alpha / a)
+        z = complex(math.cos(2 * math.pi * freq / rate), -math.sin(2 * math.pi * freq / rate))
+        h = (b[0] + b[1] * z + b[2] * z * z) / (d[0] + d[1] * z + d[2] * z * z)
+        total += 20 * math.log10(abs(h))
+    return total
+
+
+def eq_tones(points, rate):
+    """The test tone after the EQ: each channel's tone shaped by the points
+    and lowered by the preamp (the highest boost)"""
+    top = min(20000.0, rate * 0.49)
+    grid = [20.0 * (top / 20.0) ** (i / 191) for i in range(192)] + [p[0] for p in points]
+    preamp = max([0.0] + [peaking_db(points, f, rate) for f in grid])
+    return tuple(((f, a * 10 ** ((peaking_db(points, f, rate) - preamp) / 20)),) for f, a in TONES)
 LATE_SDU_FAILURE = 'reached the controller after their SDU interval began'  # LE Audio cases run once more
 
 
@@ -496,12 +532,12 @@ def tone_block(xs, rate, expected):
     return ok, notes
 
 
-def tone_check(path, tones=None):
+def tone_check(path, tones=None, eq=None):
     """Returns (ok, description) for the test tone in the middle of the WAV.
     tones: per channel the (frequency, amplitude) pairs expected there
-    (default: TONES, one per channel)."""
-    tones = tones or tuple((t,) for t in TONES)
+    (default: TONES, one per channel; eq: through these EQ points)."""
     rate, channels = read_wav(path)
+    tones = tones or (eq_tones(eq, rate) if eq else tuple((t,) for t in TONES))
     if len(channels) != 2 or len(channels[0]) < rate:
         return False, f'expected >= 1 s of stereo audio, got {len(channels)} ch'
     start, count = len(channels[0]) // 2 - rate // 4, rate // 2
@@ -793,7 +829,7 @@ def run_codec(args, codec, port):
                 with open(sent['wav'], 'rb') as a, open(received['wav'], 'rb') as b:
                     if a.read() != b.read():
                         failures.append('decoded audio differs between sent and received side')
-                ok, notes = tone_check(received['wav'])
+                ok, notes = tone_check(received['wav'], eq=EQ_POINTS.get(codec))
                 detail += f' | {notes}'
                 if not ok:
                     failures.append(f'test tone not found: {notes}')
@@ -1384,7 +1420,10 @@ VOICE_CASES = {
     'cvsd-auto': ('CVSD', 16000 / 60),
     'lc3swb-msbc': ('mSBC', 8000 / 60),
     'lc3swb-cvsd': ('CVSD', 16000 / 60),
+    'msbc-gain': ('mSBC', 8000 / 60),
 }
+# Cases with the microphone's gain (--mic-gain, dB): mic.wav's tone that much louder
+VOICE_MIC_GAIN = {'msbc-gain': 6}
 # Cases that choose the call codec (--voice-codec): the hands-free unit
 # offers more, the link takes the one chosen (hfp_audio.py's name for it)
 VOICE_CHOSEN = {'lc3swb-msbc': ('msbc', 'msbc'), 'lc3swb-cvsd': ('cvsd', 'cvsd')}
@@ -1411,9 +1450,9 @@ def pklg_records(path):
     return records
 
 
-def mic_tone_check(path):
+def mic_tone_check(path, gain_db=0):
     """(ok, description) for the hands-free unit's tone in the middle half
-    second of BlueCaster's mic.wav"""
+    second of BlueCaster's mic.wav (gain_db: the microphone's gain)"""
     try:
         rate, channels = read_wav(path)
     except (OSError, EOFError, wave.Error) as e:
@@ -1422,7 +1461,8 @@ def mic_tone_check(path):
     if len(channels) != 1 or len(xs) < rate:
         return False, f'expected >= 1 s of mono audio, got {len(channels)} ch, {len(xs) / max(rate, 1):.2f} s'
     start = len(xs) // 2 - rate // 4
-    ok, notes = tone_block(xs[start:start + rate // 2], rate, (MIC_TONE,))
+    freq, amp = MIC_TONE
+    ok, notes = tone_block(xs[start:start + rate // 2], rate, ((freq, amp * 10 ** (gain_db / 20)),))
     return ok, f'{rate} Hz {len(xs) / rate:.1f} s, {", ".join(notes)}'
 
 
@@ -1462,6 +1502,9 @@ def run_voice_case(args, case, port):
     chosen, negotiated = VOICE_CHOSEN.get(case, (None, hf_case))
     if chosen:
         headset += ['--voice-codec', chosen]
+    gain = VOICE_MIC_GAIN.get(case, 0)
+    if gain:
+        headset += ['--mic-gain', str(gain)]
     sink = start_sink(port, sink_capture, os.path.join(out, 'sink.log'), extra=['--hfp', hf_case])
     try:
         env = dict(os.environ, BLUECASTER_CONFIG_DIR=os.path.join(out, 'config'), BLUECASTER_LOG='debug')
@@ -1506,7 +1549,7 @@ def run_voice_case(args, case, port):
         detail.append(f'{side} SCO out {sent} in {received}')
         if sent < rate or received < rate:
             failures.append(f'{side}.pklg: SCO out {sent}, in {received} (less than a second of audio)')
-    ok, notes = mic_tone_check(mic_wav)
+    ok, notes = mic_tone_check(mic_wav, gain)
     detail.append(f'mic.wav {notes}')
     if not ok:
         failures.append(f'mic.wav: the sink\'s 1.5 kHz tone not found ({notes})')
@@ -1524,6 +1567,8 @@ def run_voice_case(args, case, port):
             failures.append(f'sink: what BlueCaster sent is not right ({tone})')
     if 'dropped an incoming HCI packet' in bc_log:
         failures.append('bluecaster.log: incoming HCI packets dropped')
+    if gain and f'microphone processing: gain {gain} dB' not in bc_log:
+        failures.append(f"bluecaster.log: the microphone's gain of {gain} dB never applied")
     if auto and 'voice: auto: an application records' not in bc_log:
         failures.append('bluecaster.log: Auto never saw the WAV output as recorded from')
     if roundtrip:

@@ -112,6 +112,15 @@ pub struct AdapterInfo {
     /// (adapter.download_firmware)
     #[serde(default)]
     pub firmware_download: bool,
+    /// The firmware comes from the vendor's Windows driver on this PC
+    /// instead of the firmware folder (a Realtek chip, issue #86):
+    /// firmware_files names the driver's file, nothing is to be done
+    #[serde(default)]
+    pub firmware_from_driver: bool,
+    /// The vendor's Windows driver on this PC has this chip's firmware, also
+    /// while Settings::realtek_custom_firmware loads the folder's instead
+    #[serde(default)]
+    pub firmware_driver: bool,
     /// What to tell about other vendors' firmware (firmware.vendor_intel,
     /// _broadcom, _csr, _unsupported); None for Realtek and unknown chips
     #[serde(default)]
@@ -560,8 +569,38 @@ pub struct MicTestState {
     pub error: Option<String>,
 }
 
+/// The kind of a playback EQ point
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum EqBandType {
+    #[default]
+    Peaking,
+    LowShelf,
+    HighShelf,
+    HighPass,
+    LowPass,
+}
+
+/// One playback EQ point: frequency (Hz, 20..20000), gain (dB, -24..24;
+/// not used by the pass filters), Q (0.1..12; not used by the shelves)
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+pub struct EqPoint {
+    pub frequency: f32,
+    pub gain: f32,
+    pub q: f32,
+    pub band_type: EqBandType,
+}
+
+/// A device's playback EQ, applied to the audio before it is encoded: on
+/// or off, and up to 16 points (kept while off)
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct MediaEq {
+    pub enabled: bool,
+    pub bands: Vec<EqPoint>,
+}
+
 /// A connection profile, as in profiles.json
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 
 pub struct Profile {
     pub name: String,
@@ -645,6 +684,10 @@ pub struct Profile {
     /// to Auto's. Kept but not used while Auto-select is on.
     #[serde(default)]
     pub mic_rate: u32,
+    /// The headset microphone's processing (all off by default); a change
+    /// applies to the running microphone in place
+    #[serde(default)]
+    pub mic_processing: MicProcessing,
     /// SBC / SBC XQ: the bitpool to encode with, within what the device
     /// allows (0 = by quality)
     #[serde(default)]
@@ -685,6 +728,82 @@ pub struct Profile {
     /// #86 round 8). Empty: highest sound quality first.
     #[serde(default)]
     pub codec_order: Vec<String>,
+    /// The playback EQ for this device: a change saved while it streams
+    /// takes effect without reconnecting
+    #[serde(default)]
+    pub media_eq: MediaEq,
+}
+
+/// What is done to the headset microphone before apps get it
+/// (Profile.mic_processing): gain, then noise suppression, then the noise
+/// gate; a limiter holds the peaks while any of them is on. The default
+/// does nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+pub struct MicProcessing {
+    /// The switch over all of it: off, the microphone passes untouched and
+    /// the values below are kept for the next time
+    pub enabled: bool,
+    /// dB, -12 to 24
+    pub gain_db: i8,
+    /// Noise suppression: percent of the denoised signal (the rest is the
+    /// original), 0 (off) to 100
+    pub suppression: u8,
+    /// The gate's threshold in dBFS, up to -20; -80 or lower: off
+    pub gate_db: i8,
+}
+
+impl MicProcessing {
+    /// The gate's threshold that means off
+    pub const GATE_OFF_DB: i8 = -80;
+
+    pub fn is_default(&self) -> bool {
+        *self == MicProcessing::default()
+    }
+
+    /// Any value away from off (whether or not the switch is on)
+    pub fn any_set(&self) -> bool {
+        self.gain_db != 0 || self.suppression > 0 || self.gate_db > Self::GATE_OFF_DB
+    }
+}
+
+impl Default for MicProcessing {
+    fn default() -> Self {
+        MicProcessing { enabled: false, gain_db: 0, suppression: 0, gate_db: Self::GATE_OFF_DB }
+    }
+}
+
+/// Also reads the settings saved before noise suppression lost its own
+/// switch (issue #86): switched off, the strength is 0; on, the strength
+/// stays (100 when it was never set). Settings saved before the switch over
+/// all of it are on when any value was set, as they worked then.
+impl<'de> Deserialize<'de> for MicProcessing {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Saved {
+            #[serde(default)]
+            enabled: Option<bool>,
+            #[serde(default)]
+            gain_db: i8,
+            #[serde(default)]
+            noise_suppression: Option<bool>,
+            #[serde(default)]
+            suppression: Option<u8>,
+            #[serde(default = "gate_off")]
+            gate_db: i8,
+        }
+        fn gate_off() -> i8 {
+            MicProcessing::GATE_OFF_DB
+        }
+        let s = Saved::deserialize(d)?;
+        let suppression = match s.noise_suppression {
+            Some(false) => 0,
+            Some(true) => s.suppression.unwrap_or(100),
+            None => s.suppression.unwrap_or(0),
+        };
+        let mut p = MicProcessing { enabled: false, gain_db: s.gain_db, suppression, gate_db: s.gate_db };
+        p.enabled = s.enabled.unwrap_or_else(|| p.any_set());
+        Ok(p)
+    }
 }
 
 /// One codec's settings in a profile (Profile.codec_settings)
@@ -823,9 +942,6 @@ pub struct DevDebug {
     /// Restore original driver hands Windows BlueCaster's LE keys too, for
     /// the devices Windows keeps LE keys of (issue #86)
     pub le_keys_to_windows: bool,
-    /// A Realtek chip's firmware from Realtek's Windows driver on this PC
-    /// instead of the firmware folder's (the RTL8761B, issue #427)
-    pub realtek_driver_firmware: bool,
     /// LE Audio CIG: max transport latency C->P / P->C in ms; 0: as planned
     pub le_latency_c_to_p_ms: u16,
     pub le_latency_p_to_c_ms: u16,
@@ -963,6 +1079,10 @@ pub struct Settings {
     /// 0 = auto, a Realtek PID, 0xFFFE = not Realtek
     pub bt_chip_pid: u16,
     pub bt_chip_fw_stem: String,
+    /// A Realtek chip loads the firmware folder's files instead of Realtek's
+    /// Windows driver's (AdapterInfo::firmware_driver)
+    #[serde(default)]
+    pub realtek_custom_firmware: bool,
     /// auto, off, or Wi-Fi channels such as "6,11"
     pub afh: String,
     pub remote_sink: String,
@@ -1100,6 +1220,8 @@ pub struct ProbeResult {
     /// "Intel, Bluetooth 5.3 (HCI 12), LMP subversion 0x3102, 8 of 8
     /// commands answered"
     pub summary: String,
+    /// The same report on one line, for a chip report issue
+    pub report: String,
 }
 
 /// A chip script checked before it runs (adapter.check_script)
@@ -1760,6 +1882,11 @@ pub enum Method {
     ProfileSave { profile: Box<Profile>, original_name: Option<String> },
     #[serde(rename = "profile.delete")]
     ProfileDelete { name: String },
+    /// Plays the stream with this EQ while it streams the profile `name`,
+    /// without saving it (while a point is dragged; profile.save keeps it).
+    /// Nothing happens for another profile or no stream.
+    #[serde(rename = "media_eq.preview")]
+    MediaEqPreview { name: String, eq: MediaEq },
     #[serde(rename = "profile.set_active")]
     ProfileSetActive { name: String },
     /// -> SettingsApplied (the settings come back as an event too)
@@ -2483,6 +2610,34 @@ pub enum ServerMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mic_processing_reads_the_old_noise_suppression_switch() {
+        let read = |j: serde_json::Value| serde_json::from_value::<MicProcessing>(j).unwrap();
+        // Switched off: the strength is 0 whatever was saved
+        let off =
+            read(serde_json::json!({"gain_db": 6, "noise_suppression": false, "suppression": 70, "gate_db": -50}));
+        assert_eq!(off, MicProcessing { enabled: true, gain_db: 6, suppression: 0, gate_db: -50 });
+        let on = read(serde_json::json!({"noise_suppression": true, "suppression": 70}));
+        assert_eq!(
+            on,
+            MicProcessing { enabled: true, gain_db: 0, suppression: 70, gate_db: MicProcessing::GATE_OFF_DB }
+        );
+        // Saved before the switch over all of it: on when anything was set
+        let nothing =
+            read(serde_json::json!({"gain_db": 0, "noise_suppression": false, "suppression": 100, "gate_db": -80}));
+        assert_eq!(nothing, MicProcessing::default());
+        assert!(read(serde_json::json!({"gate_db": -50})).enabled);
+        assert_eq!(read(serde_json::json!({"noise_suppression": true})).suppression, 100);
+        // Without the switch: the strength as saved, none at all is off
+        assert_eq!(read(serde_json::json!({"suppression": 40})).suppression, 40);
+        assert_eq!(read(serde_json::json!({})), MicProcessing::default());
+        // The switch as saved, off with values kept
+        let now = MicProcessing { enabled: false, gain_db: -3, suppression: 55, gate_db: -40 };
+        let j = serde_json::to_value(now).unwrap();
+        assert_eq!(j, serde_json::json!({"enabled": false, "gain_db": -3, "suppression": 55, "gate_db": -40}));
+        assert_eq!(read(j), now);
+    }
 
     #[test]
     fn wire_format() {

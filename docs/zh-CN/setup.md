@@ -131,6 +131,8 @@ bluecaster-core.exe --cli --scan
 
 其他厂商的适配器没有**蓝牙芯片**选项，而是用标签显示固件的来源：**来自 MediaTek 的驱动程序**或**来自 Qualcomm 的驱动程序**（从厂商的 Windows 驱动程序读取，改用 WinUSB 后该驱动程序仍保留安装），**来自 Wi-Fi 驱动程序**（Marvell；请保持 Wi-Fi 开启），**来自固件文件夹**（Intel，附有**打开下载页面**、**打开固件文件夹**和**设置指南**），**可选**（Broadcom 的 `.hcd`）或**不需要**（CSR、Barrot、Actions）。BlueCaster 通过 WinUSB 加载固件后，标签显示**已加载**；加载失败时显示**未加载**，同时附有**打开下载页面**、**打开固件文件夹**和一行说明固件来源的文字。
 
+如果电脑上安装了 Realtek 的 Windows 驱动程序，RTL8761B 适配器（如 TP-Link UB500）就无需下载固件。BlueCaster 会直接使用该驱动程序附带的固件。适配器改用 WinUSB 后，这些固件仍保留在电脑上。如需加载其他固件（例如 Linux 的固件），请在**适配器**页面中该适配器的固件区域选择**使用自定义固件**。BlueCaster 随后会加载固件文件夹中的文件。选择**使用驱动程序的固件**即可切换回来。
+
 对于**蓝牙芯片**列表中的芯片，**下载固件**可以代你完成：确认后，BlueCaster 会从 linux-firmware（kernel.org）下载文件，逐个校验预期的 SHA-256，然后保存到固件文件夹。如果 linux-firmware 中没有某个芯片的 config 文件，BlueCaster 会保存一个空的 `_config.bin`，芯片将使用自身的设置。这些文件不属于 BlueCaster，只在你要求时才会下载。
 
 BlueCaster 会检测适配器的芯片组，并显示需要哪些固件文件。
@@ -166,7 +168,7 @@ BlueCaster 会检测适配器的芯片组，并显示需要哪些固件文件。
 
 | 芯片组 | 产品示例 | 说明 |
 |:--------|:-----------------|:------|
-| Realtek | TP-Link UB500、RTL8761BU | 需要下载固件（见上文）。测试最充分 |
+| Realtek | TP-Link UB500、RTL8761BU | 已安装 Realtek 的 Windows 驱动程序时使用其中的固件，否则需要下载固件（见上文）。测试最充分 |
 | Realtek | 笔记本电脑内置的 RTL8852BD（`0BDA:B853`） | linux-firmware 中没有它的固件：BlueCaster 从 Realtek 的 Windows 蓝牙驱动程序中读取 `rtl8852bd_mp_chip_new.dat`，因此请保留该驱动程序（或将该文件放入固件文件夹）。尚未在实际硬件上测试 |
 | CSR | 通用 CSR8510 适配器 | 开箱即用，无需固件 |
 | Barrot | 蓝牙 5.4 / 6.0 适配器（`33FA:0010`、`33FA:0012`） | 使用 ROM 固件运行，无需固件。目前仅有一份用户报告 |
@@ -175,8 +177,8 @@ BlueCaster 会检测适配器的芯片组，并显示需要哪些固件文件。
 | Broadcom | ASUS BT400 (BCM20702) | 报告厂商类 `FF/01/01` 而非蓝牙类 `E0/01/01` 的适配器（BCM20702 OEM 适配器）也能被检测到。使用 ROM 固件运行；如果固件文件夹中有可选的 PatchRAM `.hcd` 文件（如 `BCM20702A1-0b05-17cb.hcd`），会在启动时上传 |
 | Intel | Intel 7260 / 3160 / 7265 / 3165 / 3168 / 8260 / 8265 / 9260 / AX200 / AX201 / AX210 / AX211 | 处于 bootloader 模式时（如冷启动后），需要将 linux-firmware `intel/` 中对应的 `ibt-*.sfi` + `ibt-*.ddc` 放入固件文件夹，所需文件名会写在日志里（例如 `ibt-0180-0041.sfi`）。7260 / 3160 / 7265 / 3165 / 3168 由 ROM 运行，无需文件；同一文件夹中有对应的 `ibt-hw-*.bseq` 补丁时会应用该补丁 |
 | MediaTek | MT7925、MT7927、MT7922、MT7921、MT7902（AMD RZ717、RZ738、RZ616、RZ608 等 Wi-Fi 网卡） | 需要该芯片的 `BT_RAM_CODE_MT*_hdr.bin`（例如 `BT_RAM_CODE_MT7925_1_1_hdr.bin`）：如果装有 MediaTek 的 Windows 蓝牙驱动程序，BlueCaster 会从中读取；否则请将 linux-firmware `mediatek/` 中的该文件放入固件文件夹，所需文件名会写在日志里。MT7927 尚未在实际硬件上测试 |
-| Qualcomm | QCA61x4、QCA9377（ROME）、WCN6855（FastConnect 6900） | 需要该芯片的 rampatch 和 NVM（例如 `AthrBT_0x00000302.dfu` 和 `ramps_0x00000302_48.dfu`）：如果装有 Qualcomm 的 Windows 蓝牙驱动程序，BlueCaster 会从中读取；否则请将 linux-firmware `qca/` 中的文件（`rampatch_usb_*.bin`、`nvm_usb_*.bin`）放入固件文件夹，所需文件名会写在日志里。尚未在实际硬件上测试 |
-| MediaTek、Qualcomm | 更早的 MediaTek 芯片（如 MT7663）、其他 Qualcomm 芯片（QCA6290、WCN785x） | 不支持：需要 BlueCaster 尚未提供的固件加载程序（[帮助添加支持](chip-support)） |
+| Qualcomm | QCA61x4、QCA9377（ROME）、WCN6855（FastConnect 6900）、WCN785x（FastConnect 7800） | 需要该芯片的 rampatch 和 NVM（例如 `AthrBT_0x00000302.dfu` 和 `ramps_0x00000302_48.dfu`）：如果装有 Qualcomm 的 Windows 蓝牙驱动程序，BlueCaster 会从中读取；否则请将 linux-firmware `qca/` 中的文件（`rampatch_usb_*.bin`、`nvm_usb_*.bin`）放入固件文件夹，所需文件名会写在日志里。尚未在实际硬件上测试 |
+| MediaTek、Qualcomm | 更早的 MediaTek 芯片（如 MT7663）、其他 Qualcomm 芯片（QCA6290） | 不支持：需要 BlueCaster 尚未提供的固件加载程序（[帮助添加支持](chip-support)） |
 
 对于 LDAC 等高比特率编解码器，USB 蓝牙 5.0+ 适配器通常效果最好。
 

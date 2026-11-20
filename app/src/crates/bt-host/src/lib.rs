@@ -15,6 +15,7 @@ pub mod bringup;
 pub mod capture;
 pub mod chips;
 pub mod debug_command;
+mod driver_files;
 pub mod esco_watch;
 pub mod events;
 pub mod intel;

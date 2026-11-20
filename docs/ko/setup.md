@@ -131,6 +131,8 @@ Realtek 기반 USB Bluetooth 어댑터(예: TP-Link UB500, RTL8761BU 동글)가 
 
 다른 제조사의 어댑터에는 **Bluetooth 칩** 선택이 없고, 대신 펌웨어를 어디서 가져오는지 표시됩니다. **MediaTek 드라이버에서** 또는 **Qualcomm 드라이버에서**(제조사의 Windows 드라이버에서 읽음. 이 드라이버는 WinUSB로 바꾼 뒤에도 설치된 채로 남습니다), **Wi-Fi 드라이버에서**(Marvell. Wi-Fi를 켜 두세요), **펌웨어 폴더에서**(Intel. **다운로드 페이지 열기**, **펌웨어 폴더 열기**, **설정 안내** 포함), **선택 사항**(Broadcom의 `.hcd`), **필요 없음**(CSR, Barrot, Actions). BlueCaster가 WinUSB로 펌웨어를 로드하면 **로드됨**, 로드하지 못하면 **로드 안 됨**으로 바뀌고, **다운로드 페이지 열기**, **펌웨어 폴더 열기**와 펌웨어 출처를 알려 주는 줄이 함께 표시됩니다.
 
+RTL8761B 어댑터(예: TP-Link UB500)는 PC에 Realtek Windows 드라이버가 설치되어 있으면 다운로드할 필요가 없습니다. 이 경우 BlueCaster는 그 드라이버의 펌웨어를 사용합니다. 이 펌웨어는 어댑터를 WinUSB로 바꾼 뒤에도 PC에 남아 있습니다. Linux용 등 다른 펌웨어를 불러오려면 **어댑터** 화면에서 어댑터의 펌웨어 영역에 있는 **사용자 지정 펌웨어 사용**을 선택하세요. 그러면 BlueCaster가 펌웨어 폴더의 파일을 불러옵니다. **드라이버 펌웨어 사용**을 선택하면 다시 드라이버의 펌웨어로 돌아갑니다.
+
 **Bluetooth 칩** 목록에 있는 칩이라면 **펌웨어 다운로드**로 이 작업을 자동으로 할 수 있습니다. 확인을 누르면 BlueCaster가 linux-firmware(kernel.org)에서 파일을 다운로드하고, 각 파일을 예상 SHA-256 값과 대조한 뒤 펌웨어 폴더에 저장합니다. linux-firmware에 config 파일이 없는 칩이면 빈 `_config.bin`을 저장하고, 칩은 자체 설정을 사용합니다. 이 파일들은 BlueCaster에 포함되어 있지 않으며, 요청할 때만 다운로드됩니다.
 
 BlueCaster는 어댑터의 칩셋을 감지하고 필요한 펌웨어 파일을 알려 줍니다.
@@ -166,7 +168,7 @@ BlueCaster에서 실제로 사용한 어댑터와 헤드폰은 코덱, 보고 �
 
 | 칩셋 | 제품 예 | 참고 |
 |:-----|:--------|:-----|
-| Realtek | TP-Link UB500, RTL8761BU | 펌웨어 다운로드 필요(위 참고). 가장 많이 테스트됨 |
+| Realtek | TP-Link UB500, RTL8761BU | Realtek Windows 드라이버가 설치되어 있으면 그 펌웨어 사용, 없으면 펌웨어 다운로드 필요(위 참고). 가장 많이 테스트됨 |
 | Realtek | 노트북 내장 RTL8852BD(`0BDA:B853`) | linux-firmware에는 이 칩의 펌웨어가 없습니다. BlueCaster가 Realtek의 Windows Bluetooth 드라이버에서 `rtl8852bd_mp_chip_new.dat`를 읽으므로 그 드라이버를 제거하지 마세요(또는 파일을 펌웨어 폴더에 넣으세요). 아직 실제 하드웨어에서 테스트하지 않았습니다 |
 | CSR | 일반 CSR8510 동글 | 바로 작동하며 펌웨어 불필요 |
 | Barrot | Bluetooth 5.4 / 6.0 동글(`33FA:0010`, `33FA:0012`) | ROM 펌웨어로 작동하며 펌웨어 불필요. 지금까지 사용자 보고 1건 |
@@ -175,8 +177,8 @@ BlueCaster에서 실제로 사용한 어댑터와 헤드폰은 코덱, 보고 �
 | Broadcom | ASUS BT400 (BCM20702) | Bluetooth 클래스 `E0/01/01` 대신 벤더 클래스 `FF/01/01`을 보고하는 어댑터(BCM20702 OEM 동글)도 감지합니다. ROM 펌웨어로 작동하며, 펌웨어 폴더에 PatchRAM `.hcd`(예: `BCM20702A1-0b05-17cb.hcd`)를 넣어 두면 시작할 때 업로드합니다(선택 사항) |
 | Intel | Intel 7260 / 3160 / 7265 / 3165 / 3168 / 8260 / 8265 / 9260 / AX200 / AX201 / AX210 / AX211 | 부트로더 모드(예: 콜드 부팅 직후)에서는 linux-firmware `intel/`의 해당 `ibt-*.sfi` + `ibt-*.ddc`를 펌웨어 폴더에 넣어야 합니다. 필요한 파일 이름은 로그에 표시됩니다(예: `ibt-0180-0041.sfi`). 7260 / 3160 / 7265 / 3165 / 3168은 ROM으로 작동해 파일이 필요 없으며, 같은 폴더에 해당 `ibt-hw-*.bseq` 패치가 있으면 적용합니다 |
 | MediaTek | MT7925, MT7927, MT7922, MT7921, MT7902(AMD RZ717, RZ738, RZ616, RZ608 등 Wi-Fi 카드) | 칩에 맞는 `BT_RAM_CODE_MT*_hdr.bin`(예: `BT_RAM_CODE_MT7925_1_1_hdr.bin`)이 필요합니다. MediaTek의 Windows Bluetooth 드라이버가 설치되어 있으면 BlueCaster가 거기서 읽습니다. 없으면 linux-firmware `mediatek/`의 파일을 펌웨어 폴더에 넣으세요. 필요한 파일 이름은 로그에 표시됩니다. MT7927은 아직 실제 하드웨어에서 테스트하지 않았습니다 |
-| Qualcomm | QCA61x4, QCA9377(ROME), WCN6855(FastConnect 6900) | 칩의 rampatch와 NVM(예: `AthrBT_0x00000302.dfu`, `ramps_0x00000302_48.dfu`)이 필요합니다. Qualcomm의 Windows Bluetooth 드라이버가 설치되어 있으면 BlueCaster가 거기서 읽습니다. 없으면 linux-firmware `qca/`의 파일(`rampatch_usb_*.bin`, `nvm_usb_*.bin`)을 펌웨어 폴더에 넣으세요. 필요한 파일 이름은 로그에 표시됩니다. 아직 실제 하드웨어에서 테스트하지 않았습니다 |
-| MediaTek, Qualcomm | 이전 MediaTek 칩(MT7663 등), 기타 Qualcomm 칩(QCA6290, WCN785x) | 미지원: BlueCaster에 없는 펌웨어 로더가 필요합니다 ([지원 추가 돕기](chip-support)) |
+| Qualcomm | QCA61x4, QCA9377(ROME), WCN6855(FastConnect 6900), WCN785x(FastConnect 7800) | 칩의 rampatch와 NVM(예: `AthrBT_0x00000302.dfu`, `ramps_0x00000302_48.dfu`)이 필요합니다. Qualcomm의 Windows Bluetooth 드라이버가 설치되어 있으면 BlueCaster가 거기서 읽습니다. 없으면 linux-firmware `qca/`의 파일(`rampatch_usb_*.bin`, `nvm_usb_*.bin`)을 펌웨어 폴더에 넣으세요. 필요한 파일 이름은 로그에 표시됩니다. 아직 실제 하드웨어에서 테스트하지 않았습니다 |
+| MediaTek, Qualcomm | 이전 MediaTek 칩(MT7663 등), 기타 Qualcomm 칩(QCA6290) | 미지원: BlueCaster에 없는 펌웨어 로더가 필요합니다 ([지원 추가 돕기](chip-support)) |
 
 LDAC 같은 고비트레이트 코덱에는 대체로 USB Bluetooth 5.0 이상 어댑터가 가장 좋습니다.
 

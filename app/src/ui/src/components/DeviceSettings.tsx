@@ -33,6 +33,7 @@ import {
 } from "../lib/profile";
 import { captureChoices, captureText, captureValue, withCapture } from "./CapturePicker";
 import { InputSource } from "./InputSource";
+import { MediaEqSettings } from "./MediaEq";
 import { Banner, Field, IconButton, Select, Toggle, type Option } from "./controls";
 import { Icon } from "./Icon";
 
@@ -135,7 +136,7 @@ export function DeviceSettings(props: { device: Device }) {
    *  not offered as the source (issue #86) */
   const micDevice = () => {
     const p = audioEntries(snap()).find((x) => x.key === deviceKey(props.device))?.profile;
-    return p && !p.mic_muted && headsetMode(p) !== "off" ? p.mic_device_id : "";
+    return p && !p.mic_muted && headsetMode(p, true) !== "off" ? p.mic_device_id : "";
   };
   /** The sound devices (the Windows default first), the virtual devices
    *  and the playing apps in one list (issue #86: no "Loopback") */
@@ -216,6 +217,7 @@ export function DeviceSettings(props: { device: Device }) {
           onChange={(v) => void apply({ auto_switch_device: v })}
         />
       </Show>
+      <MediaEqSettings device={props.device} />
       <InputSource device={props.device} devices={devices() ?? []} source={shown()} />
     </div>
   );

@@ -7,7 +7,7 @@ nav_order: 3.5
 
 # 加入晶片支援
 
-BlueCaster 直接驅動藍牙介面卡（WinUSB），因此必須完成廠商 Windows 驅動程式所做的工作，介面卡才能運作；對許多晶片來說，這代表每次啟動都要載入韌體。Realtek、Intel、Broadcom 與 CSR 介面卡目前都能使用，MediaTek MT7925、MT7927、MT7922、MT7921、MT7902 與 Qualcomm QCA61x4、QCA9377、WCN6855 也可以（MT7927、MT7922、MT7902 與 Qualcomm 晶片尚未在實際硬體上測試）。其他 MediaTek 晶片（較舊的晶片）與 Qualcomm 晶片（QCA6290、WCN785x）目前還無法使用，因為還沒有人為它們撰寫載入程式。若要支援其他 MediaTek 晶片，請從 `app/src/crates/bt-host/src/mediatek.rs` 中的 MT79xx 載入程式著手。
+BlueCaster 直接驅動藍牙介面卡（WinUSB），因此必須完成廠商 Windows 驅動程式所做的工作，介面卡才能運作；對許多晶片來說，這代表每次啟動都要載入韌體。Realtek、Intel、Broadcom 與 CSR 介面卡目前都能使用，MediaTek MT7925、MT7927、MT7922、MT7921、MT7902 與 Qualcomm QCA61x4、QCA9377、WCN6855、WCN785x 也可以（MT7927、MT7922、MT7902 與 Qualcomm 晶片尚未在實際硬體上測試）。其他 MediaTek 晶片（較舊的晶片）與 Qualcomm 晶片（QCA6290）目前還無法使用，因為還沒有人為它們撰寫載入程式。若要支援其他 MediaTek 晶片，請從 `app/src/crates/bt-host/src/mediatek.rs` 中的 MT79xx 載入程式著手。
 
 本頁說明如何加入載入程式。您需要一張採用該晶片的介面卡，維護者手上沒有這些介面卡。即使不寫程式，您也能幫忙：步驟 1 與 2 可以產生貢獻者所需的回報。
 
@@ -61,7 +61,9 @@ BlueCaster 直接驅動藍牙介面卡（WinUSB），因此必須完成廠商 Wi
 
 請先從系統匣結束 BlueCaster，因為同一時間只有一方能使用介面卡。
 
-**傳送回報**：按下 **讀取晶片資訊** 後，介面卡卡片會顯示讀取到的內容，以及 **在 GitHub 回報** 按鈕。這個按鈕會開啟新的 issue，預先填入版本、介面卡、摘要與您的 Windows 組建，並在檔案總管中顯示報告檔案：請將檔案拖曳到 issue 中，並說明介面卡的來源（筆電內建的介面卡請註明筆電型號）。報告包含介面卡的藍牙位址與名稱，但不含任何與您耳機有關的資訊。開啟 HCI 擷取的 **診斷套件**（**診斷** 畫面）也會在 `probe/` 下附上探測報告。
+**傳送回報**：按下 **讀取晶片資訊** 後，介面卡卡片會顯示讀取到的內容，以及 **在 GitHub 回報** 按鈕。這個按鈕會開啟新的 issue，預先填入版本、介面卡、摘要、您的 Windows 組建以及報告內容。請補充說明介面卡的來源（筆電內建的介面卡請註明筆電型號）。
+
+如果報告太長，無法填入 issue，**Probe report** 欄位會保持空白，檔案總管則會顯示報告檔案。請將檔案拖曳到這個欄位；沒有這個檔案，GitHub 不會建立 issue。報告存放在 `%APPDATA%\BlueCaster\logs\probe`，檔名日期最新的就是最新的報告。報告包含介面卡的藍牙位址與名稱，但不含任何與您耳機有關的資訊。開啟 HCI 擷取的 **診斷套件**（**診斷** 畫面）也會在 `probe/` 下附上探測報告。
 
 ## 步驟 3：記錄 Windows 驅動程式的動作
 

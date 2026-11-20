@@ -147,6 +147,31 @@ pub fn remove_le(dir: &Path, address: &str) -> std::io::Result<()> {
     remove_kind(dir, address, true)
 }
 
+/// The LE Audio devices whose LE pairing gave a classic link key (cross-
+/// transport key derivation, stored under the public address), without a
+/// classic entry yet: their classic side saved under the same name, so
+/// with LE Audio off they are listed and connect over classic without
+/// pairing again. Returns how many were saved.
+pub fn save_classic_sides(dir: &Path, keys: &[bt_host::link_keys::LinkKeyEntry]) -> usize {
+    let all = load_all(dir);
+    let mut n = 0;
+    for d in all.iter().filter(|d| d.le_audio) {
+        let classic_saved = all.iter().any(|c| !c.le_audio && c.address.eq_ignore_ascii_case(&d.address));
+        let keyed = bt_host::parse_addr(&d.address).is_some_and(|a| keys.iter().any(|k| k.addr == a));
+        if classic_saved || !keyed {
+            continue;
+        }
+        match save(dir, &d.address, &d.name) {
+            Ok(()) => n += 1,
+            Err(e) => tracing::warn!("devices: saving a classic side: {e}"),
+        }
+    }
+    if n > 0 {
+        tracing::info!("devices: {n} LE Audio device(s) also saved as classic (link key from the LE pairing)");
+    }
+    n
+}
+
 /// What each classic device offered when it last connected, by upper-case
 /// address: kept so the Codecs screen knows it after a restart (issue #86)
 pub fn load_codecs(dir: &Path) -> BTreeMap<String, KnownCodecs> {
@@ -246,6 +271,28 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(paths::devices_dir(&dir)).unwrap();
         dir
+    }
+
+    #[test]
+    fn an_le_device_with_a_classic_key_gets_its_classic_side() {
+        let dir = temp_dir("classic-side");
+        save_le(&dir, "00:A2:D0:00:00:70", "WH-CH530").unwrap();
+        save_le(&dir, "00:A2:D0:00:00:71", "No key").unwrap();
+        save_le(&dir, "00:A2:D0:00:00:72", "Both").unwrap();
+        save(&dir, "00:A2:D0:00:00:72", "Both").unwrap();
+        let key = |a: &str| bt_host::link_keys::LinkKeyEntry {
+            addr: bt_host::parse_addr(a).unwrap(),
+            key: [0; 16],
+            key_type: 7,
+        };
+        let keys = [key("00:A2:D0:00:00:70"), key("00:A2:D0:00:00:72")];
+        assert_eq!(save_classic_sides(&dir, &keys), 1);
+        let classic: Vec<_> = load(&dir).into_iter().map(|d| (d.address, d.name)).collect();
+        assert!(classic.contains(&("00:A2:D0:00:00:70".into(), "WH-CH530".into())), "{classic:?}");
+        assert!(!classic.iter().any(|(a, _)| a == "00:A2:D0:00:00:71"));
+        // Done once
+        assert_eq!(save_classic_sides(&dir, &keys), 0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

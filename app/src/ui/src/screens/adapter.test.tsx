@@ -5,6 +5,7 @@ import { t } from "../i18n";
 import { MockCore, type MockScenario, sampleSnapshot } from "../ipc/mock";
 import { createCore } from "../ipc/store";
 import { adapterIds, adapterIdsHint, adapterName, driverText } from "./Adapter";
+import { chipReportUrl } from "../lib/links";
 
 let mock: MockCore | null = null;
 
@@ -107,6 +108,30 @@ describe("Adapter firmware", () => {
     expect(await screen.findByText("No Realtek files needed")).toBeInTheDocument();
     // The folder is scanned again after the change
     await waitFor(() => expect(calls.filter((c) => c.method === "adapter.firmware_files").length).toBeGreaterThan(1));
+  });
+
+  it("loads Realtek's driver firmware first, custom firmware on request and back (issue #86)", async () => {
+    const { calls } = start("realtek_driver");
+    const box = await screen.findByRole("group", { name: "Firmware: From Realtek's driver" });
+    // Nothing to do: no chip choice, no download
+    expect(screen.queryByLabelText("Bluetooth Chip")).toBeNull();
+    expect(within(box).queryByRole("button", { name: "Download Firmware" })).toBeNull();
+    fireEvent.click(within(box).getByRole("button", { name: t("ui.adapter.custom_firmware") }));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === "settings.set").at(-1)?.params).toMatchObject({
+        settings: { realtek_custom_firmware: true },
+      }),
+    );
+    // The firmware folder's files as before, and the way back
+    const custom = await screen.findByRole("group", { name: "Firmware: Firmware OK" });
+    expect(within(custom).getByLabelText("Bluetooth Chip")).toBeInTheDocument();
+    expect(within(custom).getByRole("button", { name: "Download Firmware" })).toBeInTheDocument();
+    expect(within(custom).queryByRole("button", { name: t("ui.adapter.custom_firmware") })).toBeNull();
+    fireEvent.click(within(custom).getByRole("button", { name: t("ui.adapter.driver_firmware") }));
+    expect(await screen.findByRole("group", { name: "Firmware: From Realtek's driver" })).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "settings.set").at(-1)?.params).toMatchObject({
+      settings: { realtek_custom_firmware: false },
+    });
   });
 
   it("names the adapter as Device Manager does, with its driver and firmware side by side (issue #86)", async () => {
@@ -331,8 +356,30 @@ describe("Chip probe (developer mode)", () => {
     expect(url.searchParams.get("template")).toBe("chip_report.yml");
     expect(url.searchParams.get("chip")).toMatch(/^Intel, Bluetooth 5\.3/);
     expect(url.searchParams.get("title")).toBe("Chip support: Intel");
-    expect(url.searchParams.get("probe")).toMatch(/^probe-\d{8}_\d{6}\.json\n/);
-    expect(reveal).toHaveBeenCalledWith(expect.stringMatching(/probe-\d{8}_\d{6}\.json$/));
+    // The report itself is in the issue: nothing to drag
+    expect(url.searchParams.get("probe")).toMatch(/^```json\n\{[\s\S]*"Read Local Version Information"[\s\S]*\}\n```$/);
+    expect(reveal).not.toHaveBeenCalled();
+  });
+});
+
+describe("chipReportUrl", () => {
+  const base = { version: "3.0.2", adapter: "Barrot (0x33FA:0x0012)", summary: "Barrot, USB 33FA:0012", info: "" };
+  it("puts the report in the issue when it fits", () => {
+    const { url, attach } = chipReportUrl({ ...base, report: JSON.stringify({ steps: [{ answer: "0e0c" }] }) });
+    expect(attach).toBe(false);
+    expect(new URL(url).searchParams.get("probe")).toBe('```json\n{\n "steps": [\n  {\n   "answer": "0e0c"\n  }\n ]\n}\n```');
+  });
+  it("falls back to one line, then to an empty field the user must fill", () => {
+    const steps = (n: number) => JSON.stringify({ steps: Array.from({ length: n }, () => ({ a: "0e" })) });
+    // Too long indented, short enough on one line
+    const mid = chipReportUrl({ ...base, report: steps(250) });
+    expect(mid.attach).toBe(false);
+    expect(new URL(mid.url).searchParams.get("probe")).toBe(`\`\`\`json\n${steps(250)}\n\`\`\``);
+    // Too long either way: GitHub refuses the issue until the file is attached
+    const big = chipReportUrl({ ...base, report: JSON.stringify({ x: "0".repeat(8000) }) });
+    expect(big.attach).toBe(true);
+    expect(new URL(big.url).searchParams.has("probe")).toBe(false);
+    expect(chipReportUrl({ ...base, report: "" }).attach).toBe(true);
   });
 });
 

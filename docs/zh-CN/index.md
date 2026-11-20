@@ -11,9 +11,13 @@ has_toc: false
 适用于 Windows 的高级蓝牙音频发射器，全面支持各种编解码器。
 {: .fs-6 .fw-300 }
 
-BlueCaster 能把你的蓝牙适配器（廉价的 USB 适配器，或许多笔记本电脑内置的适配器）变成 Hi-Fi 发射器。Windows 只支持基础编解码器，而 BlueCaster 能以最高 96 kHz 串流 **LHDC V5、LDAC 和 aptX Adaptive**（LHDC V5 最高 192 kHz），还支持 **aptX HD、aptX、aptX Low Latency、Opus、AAC、SBC XQ、SBC 和 FastStream**，以及 LE Audio（LC3，实验性，仅限开发者模式）。BlueCaster 会自动设置适配器，一键即可把适配器交还给 Windows（[工作原理](architecture)）。
+BlueCaster 能把你的蓝牙适配器变成 Hi-Fi 音频发射器，通过 **LDAC@96 kHz**、**LHDC V5@192 kHz** 和 **aptX Adaptive** 等 Hi-Fi 编解码器向你的头戴式耳机和入耳式耳机串流音频。Windows 本身不支持这些编解码器。BlueCaster 还支持 aptX HD、aptX、aptX Low Latency、Opus、AAC、SBC XQ、SBC 和 FastStream。
 
-![BlueCaster 的编解码器页面，正在以 LDAC 990 kbps / 48 kHz 向 Sony WH-1000XM4 串流](../images/app_sample.png)
+- **直接使用你现有的蓝牙。** 许多笔记本电脑内置的 Intel、Realtek 或 MediaTek 蓝牙都能用，便宜的 USB 适配器也可以。BlueCaster 接管适配器后，一键即可交还给 Windows。
+- **只在需要时工作的耳机麦克风。** 麦克风只在应用录音时打开，其余时间音乐保持完整音质。内置噪声抑制和增益调节。
+- **无需额外工具。** 在应用内即可完成适配器设置（[工作原理](architecture)）。
+
+![BlueCaster 的编解码器页面，正在以 LDAC 990 kbps / 96 kHz 向 Sony WH-1000XM4 串流，Windows 快速设置上方显示着 BlueCaster 的卡片](../images/app_sample.png)
 
 [开始使用](setup){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [GitHub](https://github.com/SeiyaFunaokaJP/BlueCaster){: .btn .fs-5 .mb-4 .mb-md-0 }
@@ -144,7 +148,7 @@ BlueCaster 完全绕过 Windows 的蓝牙堆栈。它通过 WinUSB 直接与 USB
 ## 功能
 
 - **多编解码器**：LHDC V5、LDAC、aptX Adaptive、aptX、AAC、aptX HD、aptX Low Latency、Opus、Opus 05、FastStream、SBC XQ 和 SBC，自动协商
-- **LE Audio（实验性，仅限开发者模式）**：通过 LC3 向 LE Audio 耳机传输（BAP 单播、一对耳机的左右两只、耳机音量、媒体按键、GMAP 低延迟）。需要支持蓝牙 5.2 等时通道的适配器；只在一台 MediaTek MT7925 上测试过，存在已知问题（请参阅[使用方法](usage#le-audio)）
+- **LE Audio（实验性，仅限开发者模式）**：通过 LC3 向 LE Audio 耳机传输（BAP 单播、一对耳机的左右两只、耳机音量、媒体按键、GMAP 低延迟）。需要支持蓝牙 5.2 等时通道的适配器。LE Audio 在真实适配器上（包括 MediaTek MT7925）尚不能稳定工作（请参阅[使用方法](usage#le-audio)）
 - **三种捕获模式**：系统环回、虚拟音频设备路由，或单个应用的输出
 - **窗口、托盘和 CLI**：用于设置和诊断的窗口、用于日常连接的托盘浮出窗口和菜单，以及命令行（请参阅[使用方法](usage)）
 - **在应用内分配 WinUSB**：为适配器分配 WinUSB 驱动程序，也能恢复原来的驱动程序，无需 Zadig（请参阅[安装与设置](setup#winusb)）；Windows 曾通过该适配器配对的耳机无需重新配对即可连接

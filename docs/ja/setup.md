@@ -133,6 +133,8 @@ Realtek ベースの USB Bluetooth アダプター（TP-Link UB500、RTL8761BU �
 
 ほかのメーカーのアダプターには **Bluetooth チップ** の選択肢がなく、代わりにファームウェアの入手元がタグで表示されます。**MediaTek のドライバーから** または **Qualcomm のドライバーから**（メーカーの Windows ドライバーから読み込みます。このドライバーは WinUSB に切り替えたあともインストールされたままです）、**Wi-Fi ドライバーから**（Marvell。Wi-Fi はオンのままにしてください）、**ファームウェアフォルダーから**（Intel。**ダウンロードページを開く**、**ファームウェアフォルダーを開く**、**セットアップガイド** 付き）、**任意**（Broadcom の `.hcd`）、**不要**（CSR、Barrot、Actions）のいずれかです。BlueCaster が WinUSB 経由でファームウェアを読み込むと、タグは **読み込み済み** に変わります。読み込みに失敗したときは **読み込めませんでした** になり、**ダウンロードページを開く**、**ファームウェアフォルダーを開く** と、ファームウェアの入手元を示す行が表示されます。
 
+RTL8761B のアダプター（TP-Link UB500 など）は、PC に Realtek の Windows ドライバーがインストールされていれば、ダウンロードは不要です。その場合、BlueCaster はそのドライバーのファームウェアを使います。このファームウェアは、アダプターを WinUSB に切り替えたあとも PC に残ります。Linux 用など別のファームウェアを読み込むには、**アダプター** 画面でアダプターのファームウェア欄にある **カスタムファームウェアを使う** を選びます。BlueCaster はファームウェアフォルダーのファイルを読み込むようになります。**ドライバーのファームウェアを使う** で元に戻せます。
+
 **Bluetooth チップ** の一覧にあるチップなら、**ファームウェアをダウンロード** でこの作業を自動で行えます。確認すると、BlueCaster が linux-firmware（kernel.org）からファイルをダウンロードし、それぞれの SHA-256 を照合してからファームウェアフォルダーに保存します。linux-firmware にそのチップの config ファイルがない場合は空の `_config.bin` を保存し、チップは自身の設定を使います。ファイルは BlueCaster には含まれておらず、ボタンを押したときにだけダウンロードされます。
 
 BlueCaster はアダプターのチップセットを検出し、必要なファームウェアファイルを表示します。
@@ -168,7 +170,7 @@ BlueCaster で実際に使われたアダプターとヘッドホンは、コー
 
 | チップセット | 製品例 | 備考 |
 |:-------------|:-------|:-----|
-| Realtek | TP-Link UB500、RTL8761BU | ファームウェアのダウンロードが必要（上記を参照）。最も検証済み |
+| Realtek | TP-Link UB500、RTL8761BU | Realtek の Windows ドライバーがインストールされていれば、そのファームウェアを使用。なければファームウェアのダウンロードが必要（上記を参照）。最も検証済み |
 | Realtek | ノート PC 内蔵の RTL8852BD（`0BDA:B853`） | linux-firmware にはこのチップのファームウェアがありません。BlueCaster は Realtek の Windows 用 Bluetooth ドライバーから `rtl8852bd_mp_chip_new.dat` を読み込むので、そのドライバーはアンインストールしないでください（またはファイルをファームウェアフォルダーに置きます）。実機では未検証 |
 | CSR | CSR8510 汎用ドングル | 挿すだけで動作。ファームウェア不要 |
 | Barrot | Bluetooth 5.4 / 6.0 ドングル（`33FA:0010`、`33FA:0012`） | ROM のファームウェアで動作し、ファームウェアは不要。ユーザーからの報告は今のところ 1 件 |
@@ -177,8 +179,8 @@ BlueCaster で実際に使われたアダプターとヘッドホンは、コー
 | Broadcom | ASUS BT400 (BCM20702) | Bluetooth のクラス `E0/01/01` ではなくベンダークラス `FF/01/01` を名乗るアダプター（BCM20702 の OEM ドングル）も検出します。ROM のファームウェアで動作します。ファームウェアフォルダーに PatchRAM の `.hcd`（例: `BCM20702A1-0b05-17cb.hcd`）があれば、起動時に書き込みます（任意） |
 | Intel | Intel 7260 / 3160 / 7265 / 3165 / 3168 / 8260 / 8265 / 9260 / AX200 / AX201 / AX210 / AX211 | ブートローダーモード（コールドブートの後など）では、linux-firmware の `intel/` にある対応する `ibt-*.sfi` と `ibt-*.ddc` をファームウェアフォルダーに置く必要があります。必要なファイル名はログに出ます（例: `ibt-0180-0041.sfi`）。7260 / 3160 / 7265 / 3165 / 3168 は ROM で動作し、ファイルは不要です。同じフォルダーに対応する `ibt-hw-*.bseq` パッチがあれば、それを適用します |
 | MediaTek | MT7925、MT7927、MT7922、MT7921、MT7902（AMD RZ717、RZ738、RZ616、RZ608 などの Wi-Fi カード） | チップごとの `BT_RAM_CODE_MT*_hdr.bin`（例: `BT_RAM_CODE_MT7925_1_1_hdr.bin`）が必要です。MediaTek の Windows 用 Bluetooth ドライバーが入っていれば、BlueCaster がそこから読み込みます。入っていなければ、linux-firmware の `mediatek/` にあるファイルをファームウェアフォルダーに置いてください。必要なファイル名はログに出ます。MT7927 は実機では未検証 |
-| Qualcomm | QCA61x4、QCA9377（ROME）、WCN6855（FastConnect 6900） | チップの rampatch と NVM（例: `AthrBT_0x00000302.dfu` と `ramps_0x00000302_48.dfu`）が必要です。Qualcomm の Windows 用 Bluetooth ドライバーが入っていれば、BlueCaster がそこから読み込みます。入っていなければ、linux-firmware の `qca/` にあるファイル（`rampatch_usb_*.bin`、`nvm_usb_*.bin`）をファームウェアフォルダーに置いてください。必要なファイル名はログに出ます。実機では未検証 |
-| MediaTek、Qualcomm | 古い MediaTek チップ（MT7663 など）、ほかの Qualcomm チップ（QCA6290、WCN785x） | 未対応。BlueCaster にないファームウェアローダーが必要です（[対応の追加に協力する](chip-support)） |
+| Qualcomm | QCA61x4、QCA9377（ROME）、WCN6855（FastConnect 6900）、WCN785x（FastConnect 7800） | チップの rampatch と NVM（例: `AthrBT_0x00000302.dfu` と `ramps_0x00000302_48.dfu`）が必要です。Qualcomm の Windows 用 Bluetooth ドライバーが入っていれば、BlueCaster がそこから読み込みます。入っていなければ、linux-firmware の `qca/` にあるファイル（`rampatch_usb_*.bin`、`nvm_usb_*.bin`）をファームウェアフォルダーに置いてください。必要なファイル名はログに出ます。実機では未検証 |
+| MediaTek、Qualcomm | 古い MediaTek チップ（MT7663 など）、ほかの Qualcomm チップ（QCA6290） | 未対応。BlueCaster にないファームウェアローダーが必要です（[対応の追加に協力する](chip-support)） |
 
 LDAC のような高ビットレートのコーデックには、Bluetooth 5.0 以上の USB アダプターが一般に適しています。
 

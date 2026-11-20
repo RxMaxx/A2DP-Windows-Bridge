@@ -159,6 +159,7 @@ fn main() {
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "c"))
         .filter(|p| !CORE_EXCLUDE.contains(&p.file_name().unwrap().to_str().unwrap()))
+        .map(|p| if p.file_name().is_some_and(|n| n == "hci.c") { patched_hci(&btstack) } else { p })
         .collect();
     core.sort();
     build.files(&core);
@@ -240,6 +241,52 @@ fn patched_a2dp(btstack: &Path) -> PathBuf {
         );
     }
     let path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("a2dp.c");
+    std::fs::write(&path, source).unwrap();
+    path
+}
+
+/// src/hci.c keeping a CIS that went down while its ISO data path was set
+/// up down, written to OUT_DIR.
+///
+/// BTstack 1.8.3 marks a CIS of a CIG ACTIVE when the controller confirms
+/// its LE Setup ISO Data Path, whatever happened in between. When the ACL
+/// dropped right after the first CIS came up (a tester's Realtek adapter),
+/// the CIS's Disconnection Complete arrived before that confirmation: the
+/// CIS was ACTIVE again, gap_cig_remove sent it an HCI Disconnect (Command
+/// Disallowed), waited for its disconnection forever and never removed the
+/// CIG. A CIS found IDLE there (its disconnection set that) stays IDLE, and
+/// its CIS created event carries Connection Failed to be Established.
+fn patched_hci(btstack: &Path) -> PathBuf {
+    const FILE: &str = "hci.c";
+    let mut source = std::fs::read_to_string(btstack.join("src").join(FILE)).unwrap().replace("\r\n", "\n");
+    let proto = "static void hci_cis_handle_created(hci_iso_stream_t * iso_stream, uint8_t status);\n";
+    replace_once(
+        &mut source,
+        FILE,
+        proto,
+        &format!(
+            "{proto}static uint16_t hci_setup_cis_created(uint8_t * event, hci_iso_stream_t * iso_stream, uint8_t \
+             status);\n"
+        ),
+    );
+    replace_once(
+        &mut source,
+        FILE,
+        "                                if ((iso_stream->group_id == cig->cig_id) && (iso_stream->stream_id == cis_id)){\n\
+         \x20                                   iso_stream->state = HCI_ISO_STREAM_STATE_ACTIVE;\n\
+         \x20                                   hci_cis_handle_created(iso_stream, status);\n",
+        "                                if ((iso_stream->group_id == cig->cig_id) && (iso_stream->stream_id == cis_id)\n\
+         \x20                                   && (iso_stream->state == HCI_ISO_STREAM_STATE_IDLE)){\n\
+         \x20                                   /* BlueCaster: patched by btstack-sys build.rs (patched_hci) */\n\
+         \x20                                   uint8_t bluecaster_event[17];\n\
+         \x20                                   uint16_t bluecaster_pos = hci_setup_cis_created(bluecaster_event, iso_stream,\n\
+         \x20                                       ERROR_CODE_CONNECTION_FAILED_TO_BE_ESTABLISHED);\n\
+         \x20                                   hci_emit_btstack_event(bluecaster_event, bluecaster_pos, 0);\n\
+         \x20                               } else if ((iso_stream->group_id == cig->cig_id) && (iso_stream->stream_id == cis_id)){\n\
+         \x20                                   iso_stream->state = HCI_ISO_STREAM_STATE_ACTIVE;\n\
+         \x20                                   hci_cis_handle_created(iso_stream, status);\n",
+    );
+    let path = PathBuf::from(env::var("OUT_DIR").unwrap()).join(FILE);
     std::fs::write(&path, source).unwrap();
     path
 }

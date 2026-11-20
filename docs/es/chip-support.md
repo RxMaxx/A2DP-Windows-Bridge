@@ -7,7 +7,7 @@ nav_order: 3.5
 
 # Añadir compatibilidad con chips
 
-BlueCaster controla directamente el adaptador Bluetooth (WinUSB), así que tiene que hacer lo mismo que el controlador de Windows del fabricante para que el adaptador funcione; en muchos chips, eso significa cargar el firmware en cada inicio. Los adaptadores Realtek, Intel, Broadcom y CSR ya funcionan, igual que los MediaTek MT7925, MT7927, MT7922, MT7921 y MT7902 y los Qualcomm QCA61x4, QCA9377 y WCN6855 (el MT7927, el MT7922, el MT7902 y los chips Qualcomm aún no se han probado en el hardware). Los demás chips de MediaTek (los más antiguos) y de Qualcomm (QCA6290, WCN785x) todavía no funcionan, porque nadie ha escrito su cargador. Para otro chip de MediaTek, parta del cargador de los MT79xx en `app/src/crates/bt-host/src/mediatek.rs`.
+BlueCaster controla directamente el adaptador Bluetooth (WinUSB), así que tiene que hacer lo mismo que el controlador de Windows del fabricante para que el adaptador funcione; en muchos chips, eso significa cargar el firmware en cada inicio. Los adaptadores Realtek, Intel, Broadcom y CSR ya funcionan, igual que los MediaTek MT7925, MT7927, MT7922, MT7921 y MT7902 y los Qualcomm QCA61x4, QCA9377, WCN6855 y WCN785x (el MT7927, el MT7922, el MT7902 y los chips Qualcomm aún no se han probado en el hardware). Los demás chips de MediaTek (los más antiguos) y de Qualcomm (QCA6290) todavía no funcionan, porque nadie ha escrito su cargador. Para otro chip de MediaTek, parta del cargador de los MT79xx en `app/src/crates/bt-host/src/mediatek.rs`.
 
 Esta página explica cómo añadir un cargador. Necesita un adaptador con ese chip; los mantenedores no lo tienen. Aunque no escriba código, puede ayudar: los pasos 1 y 2 generan el informe que necesita quien vaya a escribirlo.
 
@@ -61,7 +61,9 @@ Desde la línea de comandos, con el VID:PID o el ID de instancia del adaptador (
 
 Antes, cierre BlueCaster desde la bandeja, ya que solo uno de los dos puede usar el adaptador a la vez.
 
-**Enviar un informe**: después de **Leer datos del chip**, la tarjeta del adaptador muestra lo que se leyó y un botón **Informar en GitHub**. El botón abre un issue nuevo con la versión, el adaptador, ese resumen y su compilación de Windows ya rellenados, y muestra el archivo del informe en el Explorador de archivos: arrastre el archivo al issue e indique de dónde procede el adaptador (si va integrado en un portátil, el modelo del portátil). El informe contiene la dirección Bluetooth y el nombre del adaptador; no contiene nada sobre sus auriculares. Un **Paquete de diagnóstico** (pantalla **Diagnóstico**) con las capturas HCI incluidas también lleva los informes de sondeo, en `probe/`.
+**Enviar un informe**: después de **Leer datos del chip**, la tarjeta del adaptador muestra lo que se leyó y un botón **Informar en GitHub**. El botón abre un issue nuevo con la versión, el adaptador, ese resumen, su compilación de Windows y el propio informe ya rellenados. Indique de dónde procede el adaptador (si va integrado en un portátil, el modelo del portátil).
+
+Si el informe es demasiado largo para el issue, el campo **Probe report** queda vacío y el Explorador de archivos muestra el archivo. Arrastre el archivo a ese campo; GitHub no creará el issue sin él. Los informes están en `%APPDATA%\BlueCaster\logs\probe`, y el más nuevo es el que lleva la fecha más reciente en el nombre. El informe contiene la dirección Bluetooth y el nombre del adaptador; no contiene nada sobre sus auriculares. Un **Paquete de diagnóstico** (pantalla **Diagnóstico**) con las capturas HCI incluidas también lleva los informes de sondeo, en `probe/`.
 
 ## Paso 3: Grabar lo que hace el controlador de Windows
 

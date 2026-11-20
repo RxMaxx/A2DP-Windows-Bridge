@@ -86,7 +86,10 @@ pub const OWN_TARGETS: &[&str] = &[
     "hci",
     "btstack",
     "le",
-    // The USB library (through the log crate): transfer and device errors
+    // The USB library (through the log crate): transfer and device errors.
+    // At debug it logs every transfer (80% of a tester's day log, which then
+    // left only its last hours in a 16 MB bundle): Info below trace
+    // ([`filter_directives`])
     "nusb",
 ];
 
@@ -420,7 +423,8 @@ pub fn filter_directives(base: &str, verbose: Option<LogLevel>) -> String {
     let mut s = base.to_owned();
     if let Some(l) = verbose {
         for t in OWN_TARGETS {
-            let _ = write!(s, ",{t}={}", level_name(l));
+            let level = if *t == "nusb" && l != LogLevel::Trace { LogLevel::Info } else { l };
+            let _ = write!(s, ",{t}={}", level_name(level));
         }
     }
     s
@@ -588,8 +592,8 @@ fn next_slot<'a>(lines: &'a mut Vec<LogLine>, head: &mut usize, capacity: usize)
 
 struct HubInner {
     started: Instant,
-    /// Local time of day (ms) at `started`
-    clock: Mutex<Option<u64>>,
+    /// The local time's UTC offset, once known ([`LogHub::clock`])
+    clock: Mutex<Option<time::UtcOffset>>,
     ring: Mutex<Ring>,
     subscribers: Mutex<Vec<Subscriber>>,
     /// Number of subscribers: the per-event check without a lock
@@ -628,16 +632,20 @@ impl LogHub {
     }
 
     fn set_clock(&self, offset: time::UtcOffset) {
+        *lock(&self.0.clock) = Some(offset);
+    }
+
+    /// Local time of day (ms) at time_ms 0, for diag::format_time. Taken
+    /// anew each time: the monotonic clock of time_ms and the wall clock
+    /// drift apart over days (a tester's Diagnostics ran 7 s ahead of the
+    /// log file)
+    pub fn clock(&self) -> Option<u64> {
+        let offset = (*lock(&self.0.clock))?;
         let since = self.0.started.elapsed().as_millis() as u64;
         let now = time::OffsetDateTime::now_utc().to_offset(offset);
         let of_day = ((now.hour() as u64 * 60 + now.minute() as u64) * 60 + now.second() as u64) * 1000
             + now.millisecond() as u64;
-        *lock(&self.0.clock) = Some((of_day + 86_400_000 - since % 86_400_000) % 86_400_000);
-    }
-
-    /// Local time of day (ms) at time_ms 0, for diag::format_time
-    pub fn clock(&self) -> Option<u64> {
-        *lock(&self.0.clock)
+        Some((of_day + 86_400_000 - since % 86_400_000) % 86_400_000)
     }
 
     /// ms since the hub started (LogLine::time_ms)
@@ -982,6 +990,9 @@ mod tests {
         let d = filter_directives("info", Some(LogLevel::Debug));
         assert!(d.starts_with("info,bluecaster_core=debug,bt_host=debug,"), "{d}");
         assert!(!d.contains("tokio"));
+        // nusb's per-transfer lines only at trace
+        assert!(d.contains(",nusb=info") && !d.contains("nusb=debug"), "{d}");
+        assert!(filter_directives("info", Some(LogLevel::Trace)).contains(",nusb=trace"));
         // Every directive parses
         assert!(EnvFilter::try_new(filter_directives("warn", Some(LogLevel::Trace))).is_ok());
         assert_eq!(verbose_level(Some(LogLevel::Info)), None);

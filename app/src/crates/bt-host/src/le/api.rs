@@ -236,6 +236,7 @@ impl BtHost {
             return Err(why.into());
         }
         self.le.stream_lost.store(false, Ordering::Release);
+        self.le.set_members_missing.store(0, Ordering::Release);
         let hooks = self.le.hooks();
         let cancelled = || self.le_cancelled();
         for h in &hooks {
@@ -434,6 +435,17 @@ impl BtHost {
     /// session stops and sets the stream up again)
     pub fn le_stream_lost(&self) -> bool {
         self.le.stream_lost.swap(false, Ordering::AcqRel)
+    }
+
+    /// Members of the last stream's coordinated sets left out (not found,
+    /// or down): it plays on the others, e.g. one earbud of two
+    pub fn le_set_members_missing(&self) -> u32 {
+        self.le.set_members_missing.load(Ordering::Acquire)
+    }
+
+    /// CSIP: `n` members of a set are left out of the stream being set up
+    pub(crate) fn le_note_set_members_missing(&self, n: u32) {
+        self.le.set_members_missing.fetch_add(n, Ordering::AcqRel);
     }
 
     /// Counters of the running (or last) stream

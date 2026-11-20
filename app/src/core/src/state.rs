@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use bluecaster_core::default_input::{DefaultInput, Want as InputWant};
 use bluecaster_core::diag::AudioRates;
+use bluecaster_core::media_eq::{self, MediaEq};
 use bluecaster_core::paths;
 use bluecaster_core::profiles::{self, Profile as CoreProfile};
 use bluecaster_core::receiver::{self, ReceiverClient};
@@ -207,6 +208,7 @@ fn to_ipc_profile(p: &CoreProfile, legacy: u16) -> Profile {
         mic_default_input: p.mic_default_input,
         voice_codec: p.voice_codec.clone(),
         mic_rate: p.mic_rate,
+        mic_processing: p.mic_processing,
         sbc_bitpool: p.sbc_bitpool,
         sbcxq_bitpool: p.sbcxq_bitpool,
         sbc_min_bitpool: p.sbc_min_bitpool,
@@ -217,6 +219,7 @@ fn to_ipc_profile(p: &CoreProfile, legacy: u16) -> Profile {
         sbc_channel_mode: p.sbc_channel_mode.clone(),
         codec_settings: p.codec_settings.iter().map(|(c, v)| (c.clone(), to_ipc_codec_values(v))).collect(),
         codec_order: p.codec_order.clone(),
+        media_eq: p.media_eq.to_ipc(),
     }
 }
 
@@ -256,6 +259,17 @@ fn from_ipc_codec_values(v: &ipc::CodecValues) -> profiles::CodecValues {
     }
 }
 
+/// The microphone's processing within the ranges the chain takes (a gate
+/// below its lowest threshold is off)
+fn clamp_mic_processing(p: ipc::MicProcessing) -> ipc::MicProcessing {
+    ipc::MicProcessing {
+        enabled: p.enabled,
+        gain_db: p.gain_db.clamp(-12, 24),
+        suppression: p.suppression.min(100),
+        gate_db: p.gate_db.clamp(ipc::MicProcessing::GATE_OFF_DB, -20),
+    }
+}
+
 /// Applies the UI's profile onto the stored one (unknown keys kept)
 fn merge_profile(base: Option<&CoreProfile>, p: &Profile) -> CoreProfile {
     let mut c = base.cloned().unwrap_or_default();
@@ -291,6 +305,7 @@ fn merge_profile(base: Option<&CoreProfile>, p: &Profile) -> CoreProfile {
     // A call codec not known reads as none chosen
     c.voice_codec = bluecaster_core::VoiceCodec::from_name(&p.voice_codec).map_or(String::new(), |v| v.name().into());
     c.mic_rate = p.mic_rate;
+    c.mic_processing = clamp_mic_processing(p.mic_processing);
     c.sbc_bitpool = p.sbc_bitpool;
     c.sbcxq_bitpool = p.sbcxq_bitpool;
     c.sbc_min_bitpool = p.sbc_min_bitpool;
@@ -312,6 +327,7 @@ fn merge_profile(base: Option<&CoreProfile>, p: &Profile) -> CoreProfile {
     // The codecs' keys, each once (the cards' order: FastStream and Opus 05
     // too, which Auto and the fallback never take); the UI sends none for
     // the default order; aptX Adaptive LL's card has its own place
+    c.media_eq = MediaEq::from_ipc(&p.media_eq);
     c.codec_order = Vec::new();
     let keys = p.codec_order.iter().filter_map(|k| {
         if k.eq_ignore_ascii_case(profiles::APTXAD_LL_CARD) {
@@ -400,7 +416,6 @@ fn to_ipc_settings(s: &CoreSettings) -> Settings {
             mtk_command_before_reset: s.dev_debug.mtk_command_before_reset,
             mtk_register: s.dev_debug.mtk_register.clone(),
             le_keys_to_windows: s.dev_debug.le_keys_to_windows,
-            realtek_driver_firmware: s.dev_debug.realtek_driver_firmware,
             le_latency_c_to_p_ms: s.dev_debug.le_latency_c_to_p_ms,
             le_latency_p_to_c_ms: s.dev_debug.le_latency_p_to_c_ms,
             le_rtn_c_to_p: s.dev_debug.le_rtn_c_to_p,
@@ -411,6 +426,7 @@ fn to_ipc_settings(s: &CoreSettings) -> Settings {
         },
         bt_chip_pid: s.bt_chip_pid,
         bt_chip_fw_stem: s.bt_chip_fw_stem.clone(),
+        realtek_custom_firmware: s.realtek_custom_firmware,
         afh: s.afh.clone(),
         remote_sink: s.remote_sink.clone(),
         le_audio_experimental: s.le_audio_experimental,
@@ -510,7 +526,6 @@ fn merge_settings(base: &CoreSettings, s: &Settings) -> CoreSettings {
         mtk_command_before_reset: s.dev_debug.mtk_command_before_reset,
         mtk_register: s.dev_debug.mtk_register.trim().to_string(),
         le_keys_to_windows: s.dev_debug.le_keys_to_windows,
-        realtek_driver_firmware: s.dev_debug.realtek_driver_firmware,
         le_latency_c_to_p_ms: s.dev_debug.le_latency_c_to_p_ms.min(4000),
         le_latency_p_to_c_ms: s.dev_debug.le_latency_p_to_c_ms.min(4000),
         le_rtn_c_to_p: s.dev_debug.le_rtn_c_to_p.map(|r| r.min(15)),
@@ -521,6 +536,7 @@ fn merge_settings(base: &CoreSettings, s: &Settings) -> CoreSettings {
     };
     c.bt_chip_pid = s.bt_chip_pid;
     c.bt_chip_fw_stem = s.bt_chip_fw_stem.clone();
+    c.realtek_custom_firmware = s.realtek_custom_firmware;
     c.afh = s.afh.clone();
     c.remote_sink = s.remote_sink.clone();
     c.le_audio_experimental = s.le_audio_experimental;
@@ -646,7 +662,20 @@ fn adapter_infos(config_dir: &Path, settings: &CoreSettings) -> (Vec<AdapterInfo
             };
             let (chip_pid, fw_stem) = adapter_chip(a.vendor, a.realtek_pid, settings);
             let files = chips::firmware_files(chip_pid, fw_stem);
-            let check = chips::firmware_check(&paths::firmware_dir(config_dir), chip_pid, fw_stem);
+            let mut check = chips::firmware_check(&paths::firmware_dir(config_dir), chip_pid, fw_stem);
+            let mut file_names = files.clone().map(|(f, c)| vec![f, c]).unwrap_or_default();
+            // Realtek's Windows driver's firmware comes first, with no config
+            // file (issue #86): no download is asked for then. Custom
+            // firmware: the folder's files as before.
+            let driver_fw = files
+                .as_ref()
+                .and_then(|(fw, _)| bluecaster_core::adapter::realtek_driver_firmware(fw))
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
+            let from_driver = driver_fw.is_some() && !settings.realtek_custom_firmware;
+            if let Some(name) = driver_fw.as_ref().filter(|_| from_driver) {
+                check = Some(chips::FirmwareCheck { present: true, invalid_file: None });
+                file_names = vec![name.clone()];
+            }
             AdapterInfo {
                 instance_id: a.device.instance_id.clone(),
                 vid: a.device.vid,
@@ -659,7 +688,9 @@ fn adapter_infos(config_dir: &Path, settings: &CoreSettings) -> (Vec<AdapterInfo
                 realtek_chip: a.realtek_pid.and_then(chips::realtek_chip_name).map(str::to_owned),
                 firmware_present: check.as_ref().map(|c| c.present),
                 firmware_download: files.as_ref().is_some_and(|(f, _)| bluecaster_core::firmware::available(f)),
-                firmware_files: files.map(|(f, c)| vec![f, c]).unwrap_or_default(),
+                firmware_files: file_names,
+                firmware_from_driver: from_driver,
+                firmware_driver: driver_fw.is_some(),
                 firmware_invalid: check.and_then(|c| c.invalid_file),
                 vendor_note: vendor_note(a.vendor, a.device.vid, a.device.pid),
                 restart_needed: a.device.problem_code == Some(CM_PROB_NEED_RESTART),
@@ -1252,7 +1283,9 @@ fn autostart_changed(before: &CoreSettings, after: &CoreSettings) -> bool {
 
 /// The chip or firmware setting changed: the stack must load firmware anew
 fn chip_changed(before: &CoreSettings, after: &CoreSettings) -> bool {
-    before.bt_chip_pid != after.bt_chip_pid || before.bt_chip_fw_stem != after.bt_chip_fw_stem
+    before.bt_chip_pid != after.bt_chip_pid
+        || before.bt_chip_fw_stem != after.bt_chip_fw_stem
+        || before.realtek_custom_firmware != after.realtek_custom_firmware
 }
 
 /// The codec and what it runs with: "LDAC 990 kbps | 96 kHz | 24-bit | ABR"
@@ -1607,9 +1640,16 @@ impl bluecaster_core::default_input::InputEndpoints for NoInputs {
 }
 
 /// The headset mode in force for a profile: its mode with an output
-/// chosen; Off otherwise (or while muted)
-fn headset_mic_in_force(p: &CoreProfile) -> HeadsetMic {
-    if p.mic_device_id.is_empty() { HeadsetMic::Off } else { p.headset_mic_mode() }
+/// chosen; Off otherwise (or while muted). On (the microphone kept open)
+/// counts only in developer mode (`developer`, Settings::debug_mode; issue
+/// #86): elsewhere it works as Auto, and the saved value stays, so turning
+/// developer mode on brings it back. LE Audio takes Auto as On anyway.
+fn headset_mic_in_force(p: &CoreProfile, developer: bool) -> HeadsetMic {
+    match p.headset_mic_mode() {
+        _ if p.mic_device_id.is_empty() => HeadsetMic::Off,
+        HeadsetMic::On if !developer => HeadsetMic::Auto,
+        mode => mode,
+    }
 }
 
 /// Headset mode in force into a profile's request, for classic and LE Audio
@@ -1657,7 +1697,9 @@ fn is_mic_note(key: &str) -> bool {
 /// headset mode in force and a call codec (classic) or microphone rate (LE
 /// Audio) chosen. Auto-select turned on or off then changes what it uses.
 fn mic_choice_matters(p: &CoreProfile) -> bool {
-    headset_mic_in_force(p).is_on() && if p.le_audio { p.mic_rate != 0 } else { !p.voice_codec.is_empty() }
+    p.headset_mic_mode().is_on()
+        && !p.mic_device_id.is_empty()
+        && if p.le_audio { p.mic_rate != 0 } else { !p.voice_codec.is_empty() }
 }
 
 /// The save changed only `headset_mic` / `mic_device_*` / the microphone's
@@ -2410,7 +2452,7 @@ impl CoreState {
                 if (p.mic_device_id.as_str(), p.headset_mic.as_str())
                     != (was.mic_device_id.as_str(), was.headset_mic.as_str())
                 {
-                    let mode = headset_mic_in_force(p);
+                    let mode = headset_mic_in_force(p, settings.debug_mode);
                     let kept = self.service.set_headset_mic(
                         mode,
                         mode.is_on().then(|| p.mic_device_id.clone()),
@@ -2560,7 +2602,7 @@ impl CoreState {
             req.codec_values = p.all_codec_values();
         }
         // Headset mode: on only with an output chosen
-        let headset_mic = headset_mic_in_force(p);
+        let headset_mic = headset_mic_in_force(p, settings.debug_mode);
         if headset_mic.is_on() {
             tracing::debug!(
                 "profile {}: headset microphone ({}) to {}",
@@ -2618,6 +2660,12 @@ impl CoreState {
 
     fn begin_stream(&self, req: StreamRequest, profile: Option<String>) {
         *self.starting_profile.lock().unwrap_or_else(|e| e.into_inner()) = profile.clone();
+        // The profile's playback EQ (none for a stream without one)
+        let eq = profile
+            .as_deref()
+            .and_then(|name| profiles::load(&self.config_dir()).into_iter().find(|p| p.name == name))
+            .map(|p| p.media_eq);
+        media_eq::apply(eq.as_ref());
         self.publish(Event::Stream(StreamStatus {
             state: StreamState::Connecting,
             message: Msg::new("status.initializing"),
@@ -3176,9 +3224,14 @@ impl CoreState {
                 });
                 let auto_select = self.service.settings().auto_codec;
                 // Settings of a codec not in use: nothing the stream uses
-                let kept_only = pos.is_some_and(|i| {
-                    list[i].only_kept_settings_differ(&merged) || list[i].only_default_input_differs(&merged)
-                });
+                // The playback EQ and the microphone's processing (one or
+                // both): the running stream takes them in place
+                let live_only = pos.is_some_and(|i| list[i].only_live_processing_differs(&merged));
+                let processing_only = live_only && pos.is_some_and(|i| list[i].mic_processing != merged.mic_processing);
+                let kept_only = live_only
+                    || pos.is_some_and(|i| {
+                        list[i].only_kept_settings_differ(&merged) || list[i].only_default_input_differs(&merged)
+                    });
                 let in_order = merged.clone();
                 // The profile's device joins the saved ones of its kind (as
                 // a connection saves it)
@@ -3211,8 +3264,16 @@ impl CoreState {
                     self.set_active_profile(Some(profile.name.clone()));
                 }
                 self.refresh_devices();
+                // The stream of this profile plays its EQ as saved from now
+                // on (also when it starts again below)
+                if restart_after_save(&s.stream, &key) {
+                    media_eq::apply(Some(&in_order.media_eq));
+                }
                 // The profile in use starts again with what was saved (v1),
                 // but for another source, which needs nothing of the link
+                if processing_only && restart_after_save(&s.stream, &key) {
+                    self.service.set_mic_processing(in_order.mic_processing);
+                }
                 let order_keeps_codec = order_only && !restart_for_order(&s.stream, &in_order, auto_select);
                 let headset = headset_change(&s.stream, before.as_ref(), &in_order);
                 let headset_kept = match headset {
@@ -3226,7 +3287,7 @@ impl CoreState {
                         // The session refuses an output that would feed the
                         // capture; false (no stream, or a stack without
                         // voice): it starts again instead
-                        let mode = headset_mic_in_force(&in_order);
+                        let mode = headset_mic_in_force(&in_order, self.service.settings().debug_mode);
                         let kept = self.service.set_headset_mic(
                             mode,
                             mode.is_on().then(|| in_order.mic_device_id.clone()),
@@ -3300,6 +3361,13 @@ impl CoreState {
                 }
                 Ok(Value::Null)
             }
+            Method::MediaEqPreview { name, eq } => {
+                let (_, s) = self.snapshot();
+                if restart_after_save(&s.stream, &name) {
+                    media_eq::apply(Some(&MediaEq::from_ipc(&eq)));
+                }
+                Ok(Value::Null)
+            }
             Method::ProfileDelete { name } => {
                 let mut list = profiles::load(&self.config_dir());
                 list.retain(|p| p.name != name);
@@ -3326,11 +3394,37 @@ impl CoreState {
                     let le_toggled = base.le_audio() != merged.le_audio();
                     let auto_toggled = base.auto_codec != merged.auto_codec;
                     let developer_off = base.debug_mode && !merged.debug_mode;
+                    let developer_toggled = base.debug_mode != merged.debug_mode;
                     let sync_toggled =
                         base.volume_sync != merged.volume_sync || base.mutes_output() != merged.mutes_output();
                     me.save_settings(merged)?;
                     if chip {
                         me.reload_adapter();
+                    }
+                    // Developer mode on / off: a classic stream of a profile
+                    // saved as On switches between On and Auto in place
+                    if developer_toggled {
+                        let (_, s) = me.snapshot();
+                        let list = profiles::load(&me.config_dir());
+                        let now = me.service.settings();
+                        let saved_on = |p: &&CoreProfile| {
+                            !p.le_audio && p.headset_mic_mode() == HeadsetMic::On && !p.mic_device_id.is_empty()
+                        };
+                        if let Some(p) =
+                            s.stream.profile.as_deref().and_then(|n| list.iter().find(|p| p.name == n)).filter(saved_on)
+                        {
+                            let mode = headset_mic_in_force(p, now.debug_mode);
+                            let kept = me.service.set_headset_mic(
+                                mode,
+                                Some(p.mic_device_id.clone()),
+                                p.voice_codec_in_force(now.auto_codec),
+                            );
+                            tracing::info!(
+                                "developer mode {}: headset microphone {} in place: {kept}",
+                                if now.debug_mode { "on" } else { "off" },
+                                mode.as_str()
+                            );
+                        }
                     }
                     // Auto-select on / off: a profile in use whose codec it
                     // changes starts again (as a profile save does); Windows
@@ -3387,7 +3481,7 @@ impl CoreState {
                             // A call codec chosen: the classic stream's
                             // voice link takes Auto's or the chosen one in
                             // place, or the profile starts again
-                            let mode = headset_mic_in_force(p);
+                            let mode = headset_mic_in_force(p, me.service.settings().debug_mode);
                             let codec = p.voice_codec_in_force(settings.auto_codec);
                             if !me.service.set_headset_mic(mode, Some(p.mic_device_id.clone()), codec)
                                 && restart_after_save(&s.stream, &p.name)
@@ -3418,6 +3512,16 @@ impl CoreState {
                     // connects again over what is now on (its LE Audio
                     // profile, or its classic one)
                     if le_toggled {
+                        // LE Audio off: a device paired over LE only, whose
+                        // pairing gave a classic link key, gets its classic
+                        // side, listed and connecting over classic
+                        if !me.service.settings().le_audio() {
+                            let keys = bluecaster_core::paths::link_keys_file(&me.config_dir());
+                            let keys = bt_host::link_keys::FileLinkKeyStore::open(&keys);
+                            if bluecaster_core::devices::save_classic_sides(&me.config_dir(), keys.entries()) > 0 {
+                                me.refresh_devices();
+                            }
+                        }
                         let (_, s) = me.snapshot();
                         let list = profiles::load(&me.config_dir());
                         let in_use = s
@@ -3523,7 +3627,9 @@ impl CoreState {
                                 tracing::warn!("chip probe: the report could not be saved: {e}");
                                 err("adapter.probe_failed", "error.probe_save")
                             })?;
-                    Ok(json(&ProbeResult { path: path.display().to_string(), summary }))
+                    let report =
+                        bluecaster_core::probe_report::to_json(&report, Some(&instance_id), version).to_string();
+                    Ok(json(&ProbeResult { path: path.display().to_string(), summary, report }))
                 }))
                 .await
             }
@@ -3967,6 +4073,8 @@ mod tests {
             firmware_files: vec!["rtl8761bu_fw.bin".into(), "rtl8761bu_config.bin".into()],
             firmware_invalid: invalid.map(str::to_owned),
             firmware_download: true,
+            firmware_from_driver: false,
+            firmware_driver: false,
             vendor_note: None,
             restart_needed: false,
             le_audio: None,
@@ -4355,11 +4463,44 @@ mod tests {
         assert_eq!(classic.mic_output.as_deref(), Some("{cable}"));
         // In force: an output chosen and not muted
         let auto = CoreProfile { headset_mic: "auto".into(), mic_device_id: "{cable}".into(), ..le_profile };
-        assert_eq!(headset_mic_in_force(&auto), HeadsetMic::Auto);
+        assert_eq!(headset_mic_in_force(&auto, false), HeadsetMic::Auto);
         let muted = CoreProfile { mic_muted: true, ..auto.clone() };
-        assert_eq!(headset_mic_in_force(&muted), HeadsetMic::Off);
+        assert_eq!(headset_mic_in_force(&muted, true), HeadsetMic::Off);
+        // On only in developer mode; Auto otherwise, saved as it was
+        let on = CoreProfile { headset_mic: "on".into(), ..auto.clone() };
+        assert_eq!(headset_mic_in_force(&on, true), HeadsetMic::On);
+        assert_eq!(headset_mic_in_force(&on, false), HeadsetMic::Auto);
+        assert_eq!(on.headset_mic, "on");
+        assert_eq!(headset_mic_in_force(&CoreProfile { mic_muted: true, ..on }, false), HeadsetMic::Off);
         let no_output = CoreProfile { mic_device_id: String::new(), ..auto };
-        assert_eq!(headset_mic_in_force(&no_output), HeadsetMic::Off);
+        assert_eq!(headset_mic_in_force(&no_output, true), HeadsetMic::Off);
+    }
+
+    #[test]
+    fn mic_processing_round_trips_and_is_clamped() {
+        let core =
+            CoreProfile { name: "WH".into(), device_address: "00:11:22:33:44:55".into(), ..CoreProfile::default() };
+        let mut p = to_ipc_profile(&core, 679);
+        assert_eq!(p.mic_processing, ipc::MicProcessing::default());
+        p.mic_processing = ipc::MicProcessing { enabled: true, gain_db: 40, suppression: 120, gate_db: -127 };
+        let merged = merge_profile(Some(&core), &p);
+        assert_eq!(
+            merged.mic_processing,
+            ipc::MicProcessing { enabled: true, gain_db: 24, suppression: 100, gate_db: -80 }
+        );
+        let unchanged = merge_profile(Some(&core), &to_ipc_profile(&core, 679));
+        assert!(unchanged.only_mic_processing_differs(&merged));
+        assert_eq!(to_ipc_profile(&merged, 679).mic_processing, merged.mic_processing);
+        // An older UI without the field leaves it off
+        let old: Profile = serde_json::from_value(serde_json::json!({
+            "name": "x", "device_address": "", "device_name": "", "codec": "auto", "quality": "hq",
+            "abr": false, "codec_fallback": true, "sample_rate": 0, "bit_depth": 0, "capture_mode": "loopback",
+            "audio_device_id": "", "audio_device_name": "", "auto_switch_device": true, "app_exe": "",
+            "app_name": "", "volume_sync": "auto", "volume_device_id": "", "volume_device_name": "",
+            "max_media_payload": 679
+        }))
+        .unwrap();
+        assert_eq!(old.mic_processing, ipc::MicProcessing::default());
     }
 
     #[test]
@@ -5492,6 +5633,7 @@ mod tests {
         assert!(!chip_changed(&a, &a.clone()));
         assert!(chip_changed(&a, &CoreSettings { bt_chip_pid: 0x8771, ..a.clone() }));
         assert!(chip_changed(&a, &CoreSettings { bt_chip_fw_stem: "rtl8761bu".into(), ..a.clone() }));
+        assert!(chip_changed(&a, &CoreSettings { realtek_custom_firmware: true, ..a.clone() }));
     }
 
     #[test]
@@ -5613,6 +5755,25 @@ mod tests {
             merge_profile(None, &Profile { codec_order: order, ..ui }).codec_order,
             ["aac", "aptxadll", "aptxad"]
         );
+    }
+
+    /// The playback EQ goes through the UI and back as saved, and a save
+    /// that changes only it keeps the stream going
+    #[test]
+    fn media_eq_is_saved_and_changes_in_place() {
+        let base =
+            CoreProfile { name: "WH".into(), device_address: "C0:11:22:33:44:55".into(), ..CoreProfile::default() };
+        let ui = to_ipc_profile(&base, 679);
+        assert_eq!(ui.media_eq, ipc::MediaEq::default());
+        let eq = ipc::MediaEq {
+            enabled: true,
+            bands: vec![ipc::EqPoint { frequency: 120.0, gain: 3.5, q: 0.9, band_type: ipc::EqBandType::LowShelf }],
+        };
+        let merged = merge_profile(Some(&base), &Profile { media_eq: eq.clone(), ..ui });
+        assert_eq!(to_ipc_profile(&merged, 679).media_eq, eq);
+        // As saved before from the UI: the EQ alone differs
+        let before = merge_profile(Some(&base), &to_ipc_profile(&base, 679));
+        assert!(before.only_media_eq_differs(&merged));
     }
 
     #[test]

@@ -1,30 +1,30 @@
 # BlueCaster (formerly A2DP-Windows-Bridge)
 
-BlueCaster turns your Bluetooth adapter — a cheap USB dongle or the one built into many laptops — into a Hi-Fi audio transmitter for Windows. Windows supports only basic codecs; BlueCaster adds LDAC, LHDC V5 and aptX Adaptive at up to 96 kHz (LHDC V5 up to 192 kHz), and also streams AAC, SBC XQ and aptX. It sets up the adapter automatically, and one click returns the adapter to Windows ([how it works](https://seiyafunaokajp.github.io/BlueCaster/architecture)).
+**Hi-Fi Bluetooth audio for Windows.** BlueCaster turns your Bluetooth adapter into a Hi-Fi audio transmitter. It streams Hi-Fi codecs like **LDAC@96 kHz**, **LHDC V5@192 kHz** and **aptX Adaptive** to your headphones and earbuds. Windows doesn't support any of these codecs on its own.
 
-![BlueCaster streaming LDAC 990 kbps / 96 kHz to Sony WH-1000XM4 (Home screen)](docs/images/app_sample.png)
+- **Works with the Bluetooth you already have.** The built-in Intel, Realtek or MediaTek Bluetooth on many laptops works, and so does an inexpensive USB dongle. BlueCaster takes over the adapter, and one click gives it back to Windows.
+- **A headset mic that stays out of the way.** The mic turns on only while an app is recording, so your music plays at full quality the rest of the time. Noise suppression and gain control are built in.
+- **No extra tools needed.** BlueCaster sets up the adapter right in the app ([how it works](https://seiyafunaokajp.github.io/BlueCaster/architecture)).
+
+![BlueCaster's Codecs screen, streaming LDAC 990 kbps / 96 kHz to Sony WH-1000XM4, with its card above Windows Quick Settings](docs/images/app_sample.png)
 
 **[Download](https://github.com/SeiyaFunaokaJP/BlueCaster/releases)** (installer `-setup.exe` or `-portable.zip`) | **[Documentation](https://seiyafunaokajp.github.io/BlueCaster/)**
 
 ## Codecs
 
-| Codec | Bitrate | Sample rate | Bit depth | Windows built-in | BlueCaster |
-|-------|---------|-------------|-----------|:----------------:|:------:|
-| LHDC V5 | 400–1000 kbps, ABR 160–400 | 44.1–192 kHz | 16/24 bit | ❌ | ✅ |
-| LDAC | 330/660/990 kbps | 44.1–96 kHz | 16/24/32 bit | ❌ | ✅ |
-| aptX Adaptive | 265/427 kbps (96 kHz: 646) | 48/96 kHz | 24 bit | ❌ | ✅ |
-| Opus (Android) | 256 kbps | 48 kHz | 16 bit | ❌ | ✅ |
-| aptX HD | 576 kbps | 44.1/48 kHz | 24 bit | ❌ | ✅ |
-| aptX | 352/384 kbps | 44.1/48 kHz | 16 bit | ✅ | ✅ |
-| aptX Low Latency | 352 kbps | 44.1/48 kHz | 16 bit | ❌ | ✅ |
-| AAC | up to 256 kbps | 44.1/48 kHz | 16 bit | Windows 11 | ✅ |
-| SBC XQ | up to 552 kbps | 44.1/48 kHz | 16 bit | ❌ | ✅ |
-| SBC | up to ~345 kbps | 44.1/48 kHz | 16 bit | ✅ | ✅ |
-| FastStream | 198/216 kbps | 44.1/48 kHz | 16 bit | ❌ | ✅ |
-| Opus 05 (PipeWire) | 256 kbps | 48 kHz | 16 bit | ❌ | ✅ 🔧 |
-| LC3 (LE Audio) | 32–124 kbps per channel | 16–48 kHz | 16 bit | Windows 11 | 🔧 |
-
-✅ supported · 🔧 developer mode only · ❌ not supported
+| Codec | Bitrate | Sample rate | Bit depth |
+|-------|---------|-------------|-----------|
+| LHDC V5 | 400–1000 kbps, ABR 160–400 | 44.1–192 kHz | 16/24 bit |
+| LDAC | 330/660/990 kbps | 44.1–96 kHz | 16/24/32 bit |
+| aptX Adaptive | 265/427 kbps (96 kHz: 646) | 48/96 kHz | 24 bit |
+| Opus (Android) | 256 kbps | 48 kHz | 16 bit |
+| aptX HD | 576 kbps | 44.1/48 kHz | 24 bit |
+| aptX | 352/384 kbps | 44.1/48 kHz | 16 bit |
+| aptX Low Latency | 352 kbps | 44.1/48 kHz | 16 bit |
+| AAC | up to 256 kbps | 44.1/48 kHz | 16 bit |
+| SBC XQ | up to 552 kbps | 44.1/48 kHz | 16 bit |
+| SBC | up to ~345 kbps | 44.1/48 kHz | 16 bit |
+| FastStream | 198/216 kbps | 44.1/48 kHz | 16 bit |
 
 ## Requirements
 
@@ -49,7 +49,7 @@ See the [Setup guide](https://seiyafunaokajp.github.io/BlueCaster/setup) and the
 ## Features
 
 - **Codec choice**: uses the best codec your headphones support, or the one you choose; ABR for LHDC V5, LDAC and aptX Adaptive
-- **LE Audio (developer mode only)**: LC3 to LE Audio headphones and earbuds with a Bluetooth 5.2 adapter; tested on one MediaTek MT7925 only ([details](https://seiyafunaokajp.github.io/BlueCaster/usage#le-audio))
+- **LE Audio (experimental, developer mode only)**: LC3 to LE Audio headphones and earbuds with a Bluetooth 5.2 adapter. LE Audio does not work reliably on real adapters yet, including the MediaTek MT7925 ([details](https://seiyafunaokajp.github.io/BlueCaster/usage#le-audio))
 - **Capture**: all system audio, a virtual audio device (e.g. VB-CABLE), or one application
 - **Runs in the tray**: keeps streaming when the window is closed, and reconnects after a dropped link or sleep
 - **Driver setup in the app**: switches the adapter to WinUSB and back without Zadig; headphones that Windows paired through the adapter connect without pairing again
@@ -58,7 +58,7 @@ See the [Setup guide](https://seiyafunaokajp.github.io/BlueCaster/setup) and the
 - **Command line**: `bluecaster-core.exe --cli` ([CLI Mode](https://seiyafunaokajp.github.io/BlueCaster/usage#cli-mode))
 - **Updates**: checks daily and installs updates automatically
 - **10 languages**: English, Japanese, Chinese (Simplified / Traditional), Korean, German, French, Spanish, Ukrainian, Russian
-- **Headset microphone**: use the headphones' microphone in Windows through a virtual audio cable such as VB-CABLE; classic Bluetooth headphones drop to call quality while it is in use, LE Audio keeps full quality ([details](https://seiyafunaokajp.github.io/BlueCaster/usage#codecs))
+- **Headset microphone**: use your headphones' microphone in Windows apps through a virtual audio cable such as VB-CABLE, with gain, noise suppression and a noise gate. In **Auto** mode, the microphone turns on only while an app is recording. While the microphone is on, classic Bluetooth headphones drop to call quality, but LE Audio headphones keep full quality ([details](https://seiyafunaokajp.github.io/BlueCaster/usage#codecs))
 - **Works with** third-party apps such as earbud control apps: [Works With](https://seiyafunaokajp.github.io/BlueCaster/works-with) (not supported by this project)
 
 ## Building

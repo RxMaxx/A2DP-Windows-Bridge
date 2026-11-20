@@ -19,6 +19,7 @@ members = [
     "app/src/crates/core",
     "app/src/crates/ipc",
     "app/src/crates/voice-link",
+    "app/src/crates/dsp",
     "app/src/core",
     "app/src/driver",
     "app/src/ui/src-tauri",
@@ -29,7 +30,7 @@ members = [
 exclude = ["app/src/crates/aptx-adaptive", "app/src/crates/nusb"]
 
 [workspace.package]
-version = "3.0.1"
+version = "3.0.2"
 edition = "2024"
 rust-version = "1.90"
 license = "Apache-2.0 OR MIT"
@@ -53,6 +54,7 @@ le-audio = { path = "app/src/crates/le-audio" }
 lc3-sys = { path = "app/src/crates/lc3-sys" }
 aptx-adaptive = { path = "app/src/crates/aptx-adaptive" }
 voice-link = { path = "app/src/crates/voice-link" }
+dsp = { path = "app/src/crates/dsp" }
 
 cc = "1.2"
 tracing = "0.1"

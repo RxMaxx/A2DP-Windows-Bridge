@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Thanks! This report is what a contributor needs to add support for your adapter's chip ([Adding Chip Support](https://seiyafunaokajp.github.io/BlueCaster/chip-support)).
-        The window fills in most of it after **Read chip info** (Adapters screen, developer mode). Please attach the report file it showed in Explorer.
+        After **Read chip info** (Adapters screen, developer mode), **Report on GitHub** fills in most of this form, usually including the probe report.
 
   - type: input
     id: version
@@ -44,7 +44,7 @@ body:
     id: probe
     attributes:
       label: Probe report
-      description: Drag the probe-….json file here (the Explorer window BlueCaster opened). It contains the adapter's Bluetooth address and name, nothing about your headphones.
+      description: "If this field is empty or shows only a file name, drag the newest probe-….json file here from `%APPDATA%\\BlueCaster\\logs\\probe` (paste the path into Explorer's address bar). The report contains the adapter's Bluetooth address and name, nothing about your headphones."
     validations:
       required: true
 

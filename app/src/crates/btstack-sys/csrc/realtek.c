@@ -10,7 +10,22 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+#include <stdio.h>
+#include <stdlib.h>
+
+/* BTstack's driver closes the config file with fclose() also when there was
+ * none to open (issue #86: Realtek's driver firmware comes without one, and
+ * a folder may hold only the firmware). The MSVC CRT treats fclose(NULL) as
+ * an invalid parameter and ends the process at once: no crash report, the
+ * last log lines lost. Its file I/O goes through this instead. */
+static int bluecaster_fclose(FILE *file) {
+    return file != NULL ? fclose(file) : 0;
+}
+#define fclose bluecaster_fclose
+
 #include "btstack_chipset_realtek.c"
+
+#undef fclose
 
 /* The firmware name (no extension, e.g. "rtl8852bu_fw") of entry `index` of
  * btstack_chipset_realtek_get_vendor_product_id's table */
@@ -55,6 +70,32 @@ static void bluecaster_realtek_init(const void *config) {
         }
         bluecaster_append_bin(config_file, sizeof(config_file));
     }
+}
+
+/* For tests: the length of the patch BTstack's download builds for USB
+ * product `pid` (ROM version `rom`) from `firmware` and `config`, either of
+ * which may be missing; 0 if the driver refuses them. Only the file reading
+ * runs, no HCI. */
+uint32_t bluecaster_realtek_patch_length(uint16_t pid, const char *firmware, const char *config, uint8_t rom) {
+    const patch_info_usb *entry = NULL;
+    for (uint16_t i = 0; i < btstack_chipset_realtek_get_num_usb_controllers(); i++) {
+        if (fw_patch_table_usb[i].prod_id == pid) {
+            entry = &fw_patch_table_usb[i];
+            break;
+        }
+    }
+    if (entry == NULL || patch_buffer != NULL) return 0;
+    realtek_interface = REALTEK_INTERFACE_USB;
+    rtb_cfg.lmp_subversion = entry->lmp_sub;
+    rtb_cfg.chip_type = entry->chip_type;
+    rom_version = rom;
+    firmware_size = 0;
+    config_size = 0;
+    if (!load_firmware_and_config(firmware, config)) return 0;
+    uint32_t length = firmware_size + config_size;
+    free(patch_buffer);
+    patch_buffer = NULL;
+    return length;
 }
 
 static btstack_chipset_t bluecaster_realtek;

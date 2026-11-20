@@ -42,6 +42,17 @@ firmware_invalid: string | null,
  */
 firmware_download: boolean, 
 /**
+ * The firmware comes from the vendor's Windows driver on this PC
+ * instead of the firmware folder (a Realtek chip, issue #86):
+ * firmware_files names the driver's file, nothing is to be done
+ */
+firmware_from_driver: boolean, 
+/**
+ * The vendor's Windows driver on this PC has this chip's firmware, also
+ * while Settings::realtek_custom_firmware loads the folder's instead
+ */
+firmware_driver: boolean, 
+/**
  * What to tell about other vendors' firmware (firmware.vendor_intel,
  * _broadcom, _csr, _unsupported); None for Realtek and unknown chips
  */

@@ -6,7 +6,7 @@ nav_order: 4.5
 
 # Adding Chip Support
 
-BlueCaster drives the Bluetooth adapter directly (WinUSB), so it must do what the vendor's Windows driver does to get the adapter working; on many chips, that means loading firmware at every start. Realtek, Intel, Broadcom and CSR adapters work today, as do the MediaTek MT7925, MT7927, MT7922, MT7921 and MT7902 and the Qualcomm QCA61x4, QCA9377 and WCN6855 (the MT7927, MT7922, MT7902 and the Qualcomm chips are not yet tested on hardware). The other MediaTek chips (older ones) and Qualcomm chips (QCA6290, WCN785x) do not work yet, because nobody has written their loader. For another MediaTek chip, start from the MT79xx loader in `app/src/crates/bt-host/src/mediatek.rs`.
+BlueCaster drives the Bluetooth adapter directly (WinUSB), so it must do what the vendor's Windows driver does to get the adapter working; on many chips, that means loading firmware at every start. Realtek, Intel, Broadcom and CSR adapters work today, as do the MediaTek MT7925, MT7927, MT7922, MT7921 and MT7902 and the Qualcomm QCA61x4, QCA9377, WCN6855 and WCN785x (the MT7927, MT7922, MT7902 and the Qualcomm chips are not yet tested on hardware). The other MediaTek chips (older ones) and Qualcomm chips (QCA6290) do not work yet, because nobody has written their loader. For another MediaTek chip, start from the MT79xx loader in `app/src/crates/bt-host/src/mediatek.rs`.
 
 This page explains how to add a loader. You need an adapter with that chip; the maintainers do not have one. Even if you do not write code, you can help: steps 1 and 2 produce the report a contributor needs.
 
@@ -60,7 +60,9 @@ From the command line, with the adapter's VID:PID or instance ID (the adapter ca
 
 Quit BlueCaster from the tray first, since only one of them can use the adapter at a time.
 
-**Sending a report**: after **Read chip info**, the adapter's card shows what was read and a **Report on GitHub** button. The button opens a new issue pre-filled with the version, the adapter, that summary and your Windows build, and shows the report file in Explorer: drag the file into the issue and say where the adapter came from (for a laptop's built-in adapter, the laptop model). The report contains the adapter's Bluetooth address and name; it does not contain anything about your headphones. A **diagnostic bundle** (Diagnostics screen) with HCI captures included also contains the probe reports, under `probe/`.
+**Sending a report**: after **Read chip info**, the adapter's card shows what was read and a **Report on GitHub** button. The button opens a new issue with the version, the adapter, that summary, your Windows build and the report itself already filled in. Add where the adapter came from (for a laptop's built-in adapter, the laptop model).
+
+If the report is too long for the issue, the **Probe report** field stays empty and Explorer shows the file instead. Drag the file into that field; GitHub won't create the issue without it. The reports are in `%APPDATA%\BlueCaster\logs\probe`, and the newest one has the latest date in its name. The report contains the adapter's Bluetooth address and name; it does not contain anything about your headphones. A **diagnostic bundle** (Diagnostics screen) with HCI captures included also contains the probe reports, under `probe/`.
 
 ## Step 3: Record what Windows' driver does
 

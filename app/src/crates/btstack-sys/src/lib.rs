@@ -372,6 +372,85 @@ pub fn realtek_usb_firmware() -> &'static [(u16, u16, &'static str)] {
     })
 }
 
+#[cfg(test)]
+mod realtek_download_tests {
+    use std::ffi::CString;
+    use std::path::{Path, PathBuf};
+
+    use crate::ffi;
+
+    /// The RTL8761BU's USB product ID in BTstack's table
+    const RTL8761BU: u16 = 0x8771;
+
+    /// The patch BTstack's Realtek download builds from these files, or 0
+    fn patch_length(firmware: &Path, config: &Path, rom: u8) -> u32 {
+        let fw = CString::new(firmware.to_string_lossy().as_bytes()).unwrap();
+        let cfg = CString::new(config.to_string_lossy().as_bytes()).unwrap();
+        // The driver's state is global: one test at a time
+        let _one = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: two NUL-terminated paths that outlive the call; no stack
+        // runs in this test binary
+        unsafe { ffi::bluecaster_realtek_patch_length(RTL8761BU, fw.as_ptr(), cfg.as_ptr(), rom) }
+    }
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A "Realtech" patch with one entry for ROM version 0 (chip ID 1) and
+    /// the RTL8761B's project ID
+    fn patch(payload_len: usize) -> Vec<u8> {
+        let mut f = b"Realtech".to_vec();
+        f.extend_from_slice(&0x1234_5678u32.to_le_bytes());
+        f.extend_from_slice(&1u16.to_le_bytes()); // patches
+        f.extend_from_slice(&1u16.to_le_bytes()); // chip ID: ROM version + 1
+        f.extend_from_slice(&(payload_len as u16).to_le_bytes());
+        f.extend_from_slice(&22u32.to_le_bytes()); // offset
+        f.extend(std::iter::repeat_n(0xA5, payload_len));
+        f.extend_from_slice(&[0xFF, 14, 0x01, 0x00, 0x51, 0x04, 0xFD, 0x77]);
+        f
+    }
+
+    fn temp_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("bc-rtk-download-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Issue #86: Realtek's driver firmware comes without a config file.
+    /// BTstack then closed a file it never opened, which ended the process.
+    #[test]
+    fn a_missing_config_file_is_no_crash() {
+        let dir = temp_dir();
+        let fw = dir.join("fw.bin");
+        std::fs::write(&fw, patch(600)).unwrap();
+        let config = dir.join("none_config.bin");
+        let without = patch_length(&fw, &config, 0);
+        std::fs::write(&config, [0x55, 0xAB, 0x23, 0x87, 0x00, 0x00]).unwrap();
+        let with = patch_length(&fw, &config, 0);
+        let missing_fw = patch_length(&dir.join("none_fw.bin"), &config, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(without, 600);
+        assert_eq!(with, 606);
+        assert_eq!(missing_fw, 0);
+    }
+
+    /// The RTL8761B firmware of Realtek's Windows driver on this PC, without
+    /// a config file, as the user's adapter (ROM version 1) gets it
+    #[test]
+    #[ignore = "needs Realtek's RTL8761B driver installed"]
+    fn the_driver_firmware_of_this_pc_without_a_config_file() {
+        let windows = PathBuf::from(std::env::var_os("SystemRoot").unwrap());
+        let store = windows.join("System32").join("DriverStore").join("FileRepository");
+        let fw = std::fs::read_dir(store)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path().join("rtl8761b_mp_chip_bt40_fw_asic_rom_patch_new.dat"))
+            .find(|p| p.is_file())
+            .expect("no RTL8761B driver firmware");
+        let length = patch_length(&fw, &std::env::temp_dir().join("bc-no-such-dir").join("rtl8761bu_config.bin"), 1);
+        println!("patch length {length}");
+        assert!(length > 0);
+    }
+}
+
 #[cfg(feature = "sbc-reference")]
 pub mod sbc_reference {
     //! The Bluedroid SBC encoder (C), for comparing the Rust port against it

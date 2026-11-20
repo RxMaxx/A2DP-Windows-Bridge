@@ -11,6 +11,9 @@
 //! - [`WavSink`]: the microphone into a WAV file instead (developer CLI,
 //!   emulator tests).
 //! - [`MicTap`]: the microphone test's level, recording and playback.
+//! - [`MicDsp`]: the microphone's gain, noise suppression, noise gate
+//!   and limiter, run where the queue is read (the render thread, the WAV
+//!   writer; [`PcmProducer::set_processing`]), before the tap.
 //!
 //! The codec primitives are in `btstack-sys` (mSBC, CVSD PLC) and `lc3-sys`;
 //! this crate itself has no `unsafe`.
@@ -20,6 +23,7 @@
 mod codec;
 mod drift;
 pub mod h2;
+mod process;
 mod render;
 mod resample;
 mod tap;
@@ -27,6 +31,7 @@ mod uplink;
 mod wav;
 
 pub use codec::{DecoderStats, EncoderStats, FirstSound, VoiceCodec, VoiceDecoder, VoiceEncoder};
+pub use process::{MicDsp, MicSettings};
 pub use render::{PcmConsumer, PcmProducer, RenderError, RenderStats, Renderer, pcm_channel};
 pub use tap::MicTap;
 pub use uplink::{UplinkConsumer, UplinkSink, UplinkStats};

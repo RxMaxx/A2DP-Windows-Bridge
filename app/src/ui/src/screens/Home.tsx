@@ -412,7 +412,8 @@ export function HeadsetChip(props: { entry: AudioEntry }) {
   const app = useApp();
   const snap = () => app.core.state.snap!;
   const profile = () => props.entry.profile;
-  const mode = (): HeadsetMode => (profile() ? headsetMode(profile()!) : "off");
+  const mode = (): HeadsetMode =>
+    profile() ? headsetMode(profile()!, !!snap().settings.developer_mode) : "off";
   const muted = () => !!profile()?.mic_muted;
   const ours = () => {
     const s = snap().stream;

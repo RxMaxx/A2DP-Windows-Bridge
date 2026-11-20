@@ -11,9 +11,13 @@ has_toc: false
 Transmisor de audio Bluetooth avanzado para Windows, compatible con todos los códecs.
 {: .fs-6 .fw-300 }
 
-BlueCaster convierte su adaptador Bluetooth -- un adaptador USB económico o el que traen integrado muchos portátiles -- en un transmisor Hi-Fi. Windows solo admite códecs básicos; BlueCaster transmite **LHDC V5, LDAC y aptX Adaptive** hasta 96 kHz (LHDC V5 hasta 192 kHz), además de **aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC y FastStream**, y LE Audio (LC3, experimental, solo en modo de desarrollador). Configura el adaptador automáticamente, y un clic lo devuelve a Windows ([cómo funciona](architecture)).
+BlueCaster convierte su adaptador Bluetooth en un transmisor de audio Hi-Fi. Transmite códecs Hi-Fi como **LDAC@96 kHz**, **LHDC V5@192 kHz** y **aptX Adaptive** a sus auriculares. Windows no admite ninguno de estos códecs por sí solo. BlueCaster también admite aptX HD, aptX, aptX Low Latency, Opus, AAC, SBC XQ, SBC y FastStream.
 
-![BlueCaster's Codecs screen, streaming LDAC 990 kbps / 48 kHz to Sony WH-1000XM4](../images/app_sample.png)
+- **Funciona con el Bluetooth que ya tiene.** Puede usar el Bluetooth integrado de Intel, Realtek o MediaTek de muchos portátiles o un adaptador USB económico. BlueCaster toma el control del adaptador, y un clic lo devuelve a Windows.
+- **Un micrófono de auriculares que no estorba.** El micrófono solo se activa mientras una aplicación graba. El resto del tiempo, la música suena con toda su calidad. Incluye supresión de ruido y control de ganancia.
+- **Sin herramientas adicionales.** BlueCaster configura el adaptador desde la propia aplicación ([cómo funciona](architecture)).
+
+![Pantalla Códecs de BlueCaster: transmisión LDAC 990 kbps / 96 kHz a unos Sony WH-1000XM4, con su tarjeta sobre la configuración rápida de Windows](../images/app_sample.png)
 
 [Primeros pasos](setup){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [GitHub](https://github.com/SeiyaFunaokaJP/BlueCaster){: .btn .fs-5 .mb-4 .mb-md-0 }
@@ -144,7 +148,7 @@ BlueCaster prescinde por completo de la pila Bluetooth de Windows. Se comunica d
 ## Funciones
 
 - **Varios códecs**: LHDC V5, LDAC, aptX Adaptive, aptX, AAC, aptX HD, aptX Low Latency, Opus, Opus 05, FastStream, SBC XQ y SBC con negociación automática
-- **LE Audio (experimental, solo en modo de desarrollador)**: LC3 hacia auriculares y auriculares de botón LE Audio (BAP unicast, los dos auriculares de un par, volumen del auricular, botones multimedia, baja latencia GMAP). Necesita un adaptador con canales isócronos de Bluetooth 5.2; probado solo en un MediaTek MT7925, con problemas conocidos ([Uso](usage#le-audio))
+- **LE Audio (experimental, solo en modo de desarrollador)**: LC3 hacia auriculares y auriculares de botón LE Audio (BAP unicast, los dos auriculares de un par, volumen del auricular, botones multimedia, baja latencia GMAP). Necesita un adaptador con canales isócronos de Bluetooth 5.2. LE Audio todavía no funciona de forma fiable con adaptadores reales, tampoco con el MediaTek MT7925 ([Uso](usage#le-audio))
 - **Tres modos de captura**: loopback del sistema, enrutamiento a través de un dispositivo de audio virtual o la salida de una sola aplicación
 - **Ventana, bandeja y CLI**: una ventana para la configuración y el diagnóstico, un panel desplegable y un menú en la bandeja para conectarse en el día a día, y una línea de comandos (consulte [Uso](usage))
 - **WinUSB desde la aplicación**: asigna el controlador WinUSB al adaptador y restaura el controlador original, sin necesidad de Zadig (consulte [Configuración](setup#winusb)); los auriculares que Windows emparejó a través del adaptador se conectan sin volver a emparejarlos

@@ -806,6 +806,13 @@ static uint8_t other_config_info[BLUECASTER_CODEC_INFO_MAX];
 uint8_t bluecaster_set_config_other(uint16_t a2dp_cid, uint8_t local_seid, uint8_t remote_seid, const uint8_t *info,
                                 uint8_t info_len) {
     if (info_len > sizeof(other_config_info)) return ERROR_CODE_INVALID_HCI_COMMAND_PARAMETERS;
+    /* BTstack asserts that the accepted configuration is as long as the
+     * local SEP's configuration buffer. Some codecs have more than one
+     * length (aptX LL: 8 bytes, 17 with a sink's extended capabilities;
+     * issue #520): the buffer (endpoint_config, 40 bytes) takes this one's. */
+    avdtp_stream_endpoint_t *ep = avdtp_get_stream_endpoint_for_seid(local_seid);
+    if (ep == NULL || ep->media_codec_configuration_info == NULL) return ERROR_CODE_INVALID_HCI_COMMAND_PARAMETERS;
+    ep->media_codec_configuration_len = info_len;
     memcpy(other_config_info, info, info_len);
     return a2dp_source_set_config_other(a2dp_cid, local_seid, remote_seid, other_config_info, info_len);
 }
@@ -1167,6 +1174,15 @@ int bluecaster_le_init(void) {
     sm_add_event_handler(&sm_event_registration);
 
     gatt_client_init();
+
+    /* Our LE links (BTstack's defaults: interval 10..30 ms, peripheral
+     * latency 4, supervision timeout 720 ms): no peripheral latency, so
+     * GATT discovery and the ASE control point answer every connection
+     * event instead of every 5th, and a 5 s supervision timeout (as Android
+     * uses). The short one dropped the ACL less than a second after the
+     * first CIS came up on a Realtek adapter with three headphones: the
+     * CIG's schedule leaves the ACL few events while it starts. */
+    gap_set_connection_parameters(0x0060, 0x0030, 0x0008, 0x0018, 0, 500, 0, 0);
 
     memset(&le_hci_registration, 0, sizeof(le_hci_registration));
     le_hci_registration.callback = &le_hci_handler;

@@ -22,6 +22,8 @@
 // again in the same mode. Its recording side becomes Windows' default input
 // while the device is connected unless turned off (the core's
 // default_input.rs), so apps that record from the default microphone open it.
+// Its processing (gain, noise suppression, noise gate) follows, disabled
+// while the microphone is Off; it applies in place.
 
 import { createSignal, Show } from "solid-js";
 import { useApp } from "../app/context";
@@ -32,10 +34,11 @@ import {
   audioEntries,
   deviceKey,
   entryBase,
-  HEADSET_MODES,
+  headsetModes,
   headsetMode,
   hifiCable,
   isHifiCable,
+  MIC_PROCESSING_OFF,
   multichannelCable,
   ownDefaultOutput,
   type HeadsetMode,
@@ -44,6 +47,7 @@ import {
 import { saveHeadsetMic } from "../screens/Codecs";
 import { Segmented, Select, Toggle, type Option } from "./controls";
 import { Icon } from "./Icon";
+import { MicProcessingRow } from "./MicProcessing";
 
 /** The render endpoint the stream records with this source (the default
  *  output for System Loopback): the microphone must not go there */
@@ -91,13 +95,14 @@ export function InputSource(props: {
         }
       : base;
   };
+  const developer = () => !!snap().settings.developer_mode;
   /** The mode saved: what the microphone's button opens again */
   const saved = (): HeadsetMode => {
     const p = entry()?.profile;
-    return p ? headsetMode(p) : "off";
+    return p ? headsetMode(p, developer()) : "off";
   };
   /** The mode shown: Off while muted (the cards' button) */
-  const mode = (): HeadsetMode => (!shown() || shown()!.mic_muted ? "off" : headsetMode(shown()!));
+  const mode = (): HeadsetMode => (!shown() || shown()!.mic_muted ? "off" : headsetMode(shown()!, developer()));
   /** Off mutes a device whose mode is Auto or On, as its button does */
   const chooseMode = (m: HeadsetMode) => {
     if (m === mode()) return;
@@ -227,7 +232,7 @@ export function InputSource(props: {
           <Segmented<HeadsetMode>
             label={t("capture.input_source")}
             value={mode()}
-            options={HEADSET_MODES.map((m) => ({
+            options={headsetModes(developer()).map((m) => ({
               value: m,
               label: t(`ui.headset_mic_${m}`),
               disabled: busy(),
@@ -267,6 +272,12 @@ export function InputSource(props: {
             onChange={(v) => void save({ mic_default_input: v })}
           />
         </Show>
+        <MicProcessingRow
+          value={shown()?.mic_processing ?? MIC_PROCESSING_OFF}
+          off={mode() === "off"}
+          busy={busy()}
+          onChange={(p) => save({ mic_processing: p })}
+        />
       </div>
     </Show>
   );
