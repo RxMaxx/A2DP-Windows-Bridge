@@ -12,4 +12,8 @@ path: string,
  * "Intel, Bluetooth 5.3 (HCI 12), LMP subversion 0x3102, 8 of 8
  * commands answered"
  */
-summary: string, };
+summary: string, 
+/**
+ * The same report on one line, for a chip report issue
+ */
+report: string, };

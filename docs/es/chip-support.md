@@ -61,7 +61,9 @@ Desde la línea de comandos, con el VID:PID o el ID de instancia del adaptador (
 
 Antes, cierre BlueCaster desde la bandeja, ya que solo uno de los dos puede usar el adaptador a la vez.
 
-**Enviar un informe**: después de **Leer datos del chip**, la tarjeta del adaptador muestra lo que se leyó y un botón **Informar en GitHub**. El botón abre un issue nuevo con la versión, el adaptador, ese resumen y su compilación de Windows ya rellenados, y muestra el archivo del informe en el Explorador de archivos: arrastre el archivo al issue e indique de dónde procede el adaptador (si va integrado en un portátil, el modelo del portátil). El informe contiene la dirección Bluetooth y el nombre del adaptador; no contiene nada sobre sus auriculares. Un **Paquete de diagnóstico** (pantalla **Diagnóstico**) con las capturas HCI incluidas también lleva los informes de sondeo, en `probe/`.
+**Enviar un informe**: después de **Leer datos del chip**, la tarjeta del adaptador muestra lo que se leyó y un botón **Informar en GitHub**. El botón abre un issue nuevo con la versión, el adaptador, ese resumen, su compilación de Windows y el propio informe ya rellenados. Indique de dónde procede el adaptador (si va integrado en un portátil, el modelo del portátil).
+
+Si el informe es demasiado largo para el issue, el campo **Probe report** queda vacío y el Explorador de archivos muestra el archivo. Arrastre el archivo a ese campo; GitHub no creará el issue sin él. Los informes están en `%APPDATA%\BlueCaster\logs\probe`, y el más nuevo es el que lleva la fecha más reciente en el nombre. El informe contiene la dirección Bluetooth y el nombre del adaptador; no contiene nada sobre sus auriculares. Un **Paquete de diagnóstico** (pantalla **Diagnóstico**) con las capturas HCI incluidas también lleva los informes de sondeo, en `probe/`.
 
 ## Paso 3: Grabar lo que hace el controlador de Windows
 

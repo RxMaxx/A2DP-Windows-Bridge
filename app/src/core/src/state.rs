@@ -3624,7 +3624,9 @@ impl CoreState {
                                 tracing::warn!("chip probe: the report could not be saved: {e}");
                                 err("adapter.probe_failed", "error.probe_save")
                             })?;
-                    Ok(json(&ProbeResult { path: path.display().to_string(), summary }))
+                    let report =
+                        bluecaster_core::probe_report::to_json(&report, Some(&instance_id), version).to_string();
+                    Ok(json(&ProbeResult { path: path.display().to_string(), summary, report }))
                 }))
                 .await
             }

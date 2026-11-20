@@ -103,8 +103,10 @@ emulator (tools/emu).
 
 **Report button**: after **Read chip info**, the adapter's card keeps the
 summary and opens a `chip_report.yml` issue prefilled with the summary, the version
-and the Windows build (`chipReportUrl` in `ui/src/lib/links.ts`), and shows the
-report file in Explorer for attaching.
+and the Windows build (`chipReportUrl` in `ui/src/lib/links.ts`). The report
+itself goes into the issue as a JSON block (`ProbeResult.report`); one too long
+for the URL leaves the required field empty, and Explorer shows the file for
+attaching (#518).
 
 **Chip scripts** (`bt-host/src/script.rs`): plain text, one request per line
 (`hci`, `bulk`, `usb in/out`, `wait`, `expect`, `bootloader`, `upload`,

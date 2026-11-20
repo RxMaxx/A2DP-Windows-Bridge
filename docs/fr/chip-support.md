@@ -61,7 +61,9 @@ En ligne de commande, avec le VID:PID ou l'ID d'instance de l'adaptateur (la car
 
 Quittez d'abord BlueCaster depuis la zone de notification, car un seul programme à la fois peut utiliser l'adaptateur.
 
-**Envoyer un rapport** : après **Lire les infos de la puce**, la carte de l'adaptateur affiche ce qui a été lu et un bouton **Signaler sur GitHub**. Ce bouton ouvre une nouvelle issue préremplie avec la version, l'adaptateur, ce résumé et votre build de Windows, et affiche le fichier du rapport dans l'Explorateur. Faites glisser le fichier dans l'issue et indiquez la provenance de l'adaptateur (pour un adaptateur intégré, le modèle du portable). Le rapport contient l'adresse Bluetooth et le nom de l'adaptateur ; il ne contient rien sur votre casque. Un **Paquet de diagnostic** (écran **Diagnostic**) avec **Inclure les captures HCI** contient aussi les rapports de sonde, sous `probe/`.
+**Envoyer un rapport** : après **Lire les infos de la puce**, la carte de l'adaptateur affiche ce qui a été lu et un bouton **Signaler sur GitHub**. Ce bouton ouvre une nouvelle issue préremplie avec la version, l'adaptateur, ce résumé, votre build de Windows et le rapport lui-même. Indiquez la provenance de l'adaptateur (pour un adaptateur intégré, le modèle du portable).
+
+Si le rapport est trop long pour l'issue, le champ **Probe report** reste vide et l'Explorateur affiche le fichier à la place. Faites glisser le fichier dans ce champ : GitHub ne crée pas l'issue sans ce fichier. Les rapports se trouvent dans `%APPDATA%\BlueCaster\logs\probe` ; le dernier porte la date la plus récente dans son nom. Le rapport contient l'adresse Bluetooth et le nom de l'adaptateur ; il ne contient rien sur votre casque. Un **Paquet de diagnostic** (écran **Diagnostic**) avec **Inclure les captures HCI** contient aussi les rapports de sonde, sous `probe/`.
 
 ## Étape 3 : enregistrer ce que fait le pilote de Windows
 

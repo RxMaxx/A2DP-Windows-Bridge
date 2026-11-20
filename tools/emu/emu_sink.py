@@ -364,11 +364,13 @@ APTXAD_R2 = ([0x39, 0x0A, 0x37, 0x6A, 0x00, 0xAF, 0x64, 0x4B, 0x00, 0x01, 0x03, 
 
 
 def sink_codec_capabilities(sbc_dual=True, sbc_max_bitpool=53, aptxad_r2=False, aptxad_rates=None,
-                            lhdcv5_limited=False):
+                            lhdcv5_limited=False, aptxll_ext=False):
     """Endpoints a typical high-end headset offers (all sample rates / modes).
     SBC allows SBC XQ (dual channel, bitpool up to 53) unless sbc_dual is
     False; aptX Adaptive is an R1 sink's unless aptxad_r2, with its rate
-    byte (bits 7..3 of byte 6) replaced by aptxad_rates when given."""
+    byte (bits 7..3 of byte 6) replaced by aptxad_rates when given. aptX LL
+    lists the extended capabilities (buffer levels) with aptxll_ext, as a
+    FiiO BTR13 does (issue #520)."""
     aptxad = list(APTXAD_R2 if aptxad_r2 else APTXAD_R1)
     if aptxad_rates is not None:
         aptxad[0] = (aptxad_rates & 0xF8) | (aptxad[0] & 0x07)
@@ -422,7 +424,10 @@ def sink_codec_capabilities(sbc_dual=True, sbc_max_bitpool=53, aptxad_r2=False, 
         ),
         vendor(0x0000004F, 0x0001, [aptx_freq_ch]),               # aptX
         vendor(0x000000D7, 0x0024, [aptx_freq_ch, 0, 0, 0, 0]),   # aptX HD
-        vendor(0x0000000A, 0x0002, [aptx_freq_ch, 0x00]),         # aptX LL
+        # aptX LL; extended: new caps flag, then target / initial level,
+        # SRA max rate and averaging time, good level (PipeWire a2dp_aptx_ll_ext_t)
+        vendor(0x0000000A, 0x0002, [aptx_freq_ch, 0x02, 0x00, 0xB4, 0x00, 0x68, 0x01, 0x32, 0x01, 0xB4, 0x00]
+               if aptxll_ext else [aptx_freq_ch, 0x00]),
         # LDAC: 44.1 / 48 / 88.2 / 96 kHz, mono / dual / stereo
         vendor(0x0000012D, 0x00AA, [0x3C, 0x07]),
         # LHDC V5 (Android a2dp_vendor_lhdcv5_constants.h): 44.1 / 48 / 96 / 192 kHz,
@@ -793,7 +798,8 @@ async def main(args):
             ))
         for name, capabilities in zip(CODEC_NAMES, sink_codec_capabilities(not args.sbc_no_dual, args.sbc_max_bitpool,
                                                                          args.aptxad_r2, args.aptxad_rates,
-                                                                         oppo is not None and not oppo.unlimited)):
+                                                                         oppo is not None and not oppo.unlimited,
+                                                                         args.aptxll_ext)):
             if args.codecs and name not in args.codecs and not (name == 'ldac' and huawei and huawei.ldac):
                 continue
             # BTstack 1.8.1 keeps at most 10 discovered SEPs (a2dp.c
@@ -964,6 +970,8 @@ if __name__ == '__main__':
     parser.add_argument('--aptxad-rates', type=lambda x: int(x, 0),
                         help='aptX Adaptive rate byte to list instead (e.g. 0xD1: an EarFun Air Pro 4+, '
                              '96 kHz by its 0x80 bit only; 0x51: a Bose QC Ultra, no 96 kHz; issue #86)')
+    parser.add_argument('--aptxll-ext', action='store_true',
+                        help='aptX LL with the extended capabilities (17 bytes, as a FiiO BTR13; issue #520)')
     parser.add_argument('--avrcp-keys', type=int, default=0, metavar='N',
                         help='press and release FAST FORWARD N times over AVRCP, checking each answer')
     parser.add_argument('--huawei', choices=['off', 'on'],
