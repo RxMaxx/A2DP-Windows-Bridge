@@ -673,7 +673,10 @@ impl Inner {
                 }
             }
         }
-        Err(Msg::new(if last == InitFailure::NoAnswer { "error.btstack_no_answer" } else { "error.btstack_init" }))
+        // An adapter a firmware loader left needing a power cycle: the same
+        // advice as for one that does not answer (unplug it, or shut down)
+        let needs_replug = matches!(last, InitFailure::NoAnswer | InitFailure::NeedsReplug);
+        Err(Msg::new(if needs_replug { "error.btstack_no_answer" } else { "error.btstack_init" }))
     }
 
     /// Remembers whether the adapter the stack opened has LE Audio's

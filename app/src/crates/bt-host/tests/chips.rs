@@ -116,6 +116,15 @@ fn vendors_and_names() {
     assert_eq!(vendor_for_usb(0x0A5C, 0x21E8, None), ChipVendor::Broadcom);
     assert_eq!(vendor_for_usb(0x0B05, 0x17CB, None), ChipVendor::Broadcom); // ASUS BT400
     assert_eq!(vendor_for_usb(0x0B05, 0x1234, None), ChipVendor::Unknown);
+    // Broadcom chips under the module maker's VID, from Broadcom's Windows
+    // driver: Dell DW380, Lite-On, AzureWave, Foxconn, Toshiba, Lenovo
+    for (vid, pid) in
+        [(0x413C, 0x8197), (0x04CA, 0x2003), (0x13D3, 0x3404), (0x0489, 0xE032), (0x0930, 0x0221), (0x17EF, 0x7201)]
+    {
+        assert_eq!(vendor_for_usb(vid, pid, None), ChipVendor::Broadcom, "{vid:04X}:{pid:04X}");
+        assert_eq!(chip_support_tag(ChipVendor::Broadcom, vid, pid), None);
+    }
+    assert_eq!(vendor_for_usb(0x413C, 0x8198, None), ChipVendor::Unknown);
     assert_eq!(vendor_for_usb(0x0A12, 0x0001, None), ChipVendor::Csr);
     assert_eq!(vendor_for_usb(0x0E8D, 0x0608, None), ChipVendor::MediaTek);
     assert_eq!(vendor_for_usb(0x0CF3, 0xE300, None), ChipVendor::Qualcomm);

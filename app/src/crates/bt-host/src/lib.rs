@@ -13,6 +13,7 @@ pub mod afh;
 mod app;
 pub mod atheros;
 pub mod bringup;
+pub mod broadcom;
 pub mod capture;
 pub mod chips;
 pub mod debug_command;
@@ -188,6 +189,9 @@ pub struct HostConfig {
     pub realtek_driver_chip: Option<(u16, u16)>,
     /// VID:PID of present Broadcom adapters (PatchRAM file names)
     pub broadcom_ids: Vec<(u16, u16)>,
+    /// Where the Broadcom loader remembers a failed patch per adapter
+    /// (crate::broadcom); None: not kept
+    pub broadcom_marks: Option<Arc<dyn broadcom::PatchMarks>>,
     /// Upper limit of the media payload (clamped)
     pub media_payload_limit: u16,
     pub capture: HciCapture,
@@ -261,6 +265,7 @@ impl HostConfig {
             atheros_loader: false,
             realtek_driver_chip: None,
             broadcom_ids: Vec::new(),
+            broadcom_marks: None,
             media_payload_limit: media::MEDIA_PAYLOAD_LIMIT_DEFAULT,
             capture: HciCapture::new(),
             afh: None,
@@ -286,6 +291,9 @@ pub enum InitFailure {
     Timeout,
     /// Another BtHost runs in this process
     Busy,
+    /// A firmware loader left the controller in a state only a power cycle
+    /// ends: the adapter must be unplugged and plugged back in
+    NeedsReplug,
 }
 
 /// How a connection attempt failed
@@ -604,6 +612,7 @@ impl BtHost {
                         atheros_loader,
                         realtek_driver_chip,
                         broadcom_ids,
+                        broadcom_marks,
                         media_payload_limit: _,
                         capture,
                         afh,
@@ -645,6 +654,10 @@ impl BtHost {
                             .set_packet_logger(Some(Box::new(move |t, incoming, p| logger.log_packet(t, incoming, p))));
                         let (sink, consumer, media_streaming) = media::queue(stats.clone(), remote);
                         let _ = remote_tx.send((remote, sink));
+                        // A Broadcom adapter the patch of Broadcom's Windows
+                        // driver is for (crate::broadcom)
+                        let broadcom_loader =
+                            !tcp && broadcom_ids.iter().any(|&(vid, pid)| broadcom::patch_files(vid, pid).is_some());
                         let setup = Setup {
                             tcp,
                             link_key_file,
@@ -653,6 +666,7 @@ impl BtHost {
                             realtek_files,
                             realtek_firmware_file,
                             broadcom_ids,
+                            broadcom_marks,
                             battery,
                             voice,
                             on_loader,
@@ -706,6 +720,11 @@ impl BtHost {
                             // driver, sent in the driver's own sequence
                             stack.install_transport(backend);
                             app.start_realtek_driver_loader(stack, chip, file);
+                        } else if broadcom_loader {
+                            // Its ROM takes the patch of Broadcom's Windows
+                            // driver, unless the firmware folder has a .hcd
+                            stack.install_transport(backend);
+                            app.start_broadcom_loader(stack);
                         } else {
                             app.setup_hci_and_power_on(stack, Some(backend));
                         }
