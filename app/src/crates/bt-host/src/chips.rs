@@ -86,7 +86,7 @@ pub static OEM_TABLE: &[OemChipMapping] = &[
 /// The controller vendor, guessed from the USB VID:PID. Decides which
 /// firmware loader (if any) runs before HCI init: Realtek's, Intel's
 /// (crate::intel), MediaTek MT79xx (crate::mediatek), Qualcomm ROME /
-/// WCN6855 (crate::qualcomm) and Broadcom's. CSR, Barrot and Actions run
+/// WCN6855 / WCN785x (crate::qualcomm) and Broadcom's. CSR, Barrot and Actions run
 /// from ROM; Marvell's firmware comes from its Wi-Fi driver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ChipVendor {
@@ -277,11 +277,14 @@ pub const LOADER_CHIPS: &[(ChipVendor, u16, u16)] = &[
     (ChipVendor::MediaTek, 0x15A9, 0x0047),
     (ChipVendor::MediaTek, 0x2C7C, 0x7009),
     (ChipVendor::MediaTek, 0x2C7C, 0x700A),
-    // Qualcomm ROME and WCN6855 (crate::qualcomm): the USB IDs
+    // Qualcomm ROME, WCN6855 and WCN785x (crate::qualcomm): the USB IDs
     // of Qualcomm's Windows drivers 10.0.0.1272 (QCA61x4, QCA9377; not its
-    // QCA6290, 0CF3:E400) and 2.0.0.1400 (WCN6855, FastConnect 6900). The
-    // loader reads the ROM version itself and refuses another chip before
-    // sending anything. None has been tried yet.
+    // QCA6290, 0CF3:E400), 2.0.0.1400 and 1.0.0.1858 (WCN6855, FastConnect
+    // 6900) and 3.1.0.1794 (WCN785x, FastConnect 7800). The loader reads
+    // the ROM version itself and refuses another chip before sending
+    // anything. None has been tried yet.
+    (ChipVendor::Qualcomm, 0x045E, 0x00EB),
+    (ChipVendor::Qualcomm, 0x045E, 0x0C9E),
     (ChipVendor::Qualcomm, 0x0489, 0xE092),
     (ChipVendor::Qualcomm, 0x0489, 0xE09C),
     (ChipVendor::Qualcomm, 0x0489, 0xE09F),
@@ -303,7 +306,20 @@ pub const LOADER_CHIPS: &[(ChipVendor, u16, u16)] = &[
     (ChipVendor::Qualcomm, 0x0489, 0xE0E3),
     (ChipVendor::Qualcomm, 0x0489, 0xE0EA),
     (ChipVendor::Qualcomm, 0x0489, 0xE0EC),
+    (ChipVendor::Qualcomm, 0x0489, 0xE0F3),
+    (ChipVendor::Qualcomm, 0x0489, 0xE0FC),
+    (ChipVendor::Qualcomm, 0x0489, 0xE100),
+    (ChipVendor::Qualcomm, 0x0489, 0xE103),
+    (ChipVendor::Qualcomm, 0x0489, 0xE10A),
+    (ChipVendor::Qualcomm, 0x0489, 0xE10D),
     (ChipVendor::Qualcomm, 0x0489, 0xE115),
+    (ChipVendor::Qualcomm, 0x0489, 0xE11B),
+    (ChipVendor::Qualcomm, 0x0489, 0xE11C),
+    (ChipVendor::Qualcomm, 0x0489, 0xE11F),
+    (ChipVendor::Qualcomm, 0x0489, 0xE141),
+    (ChipVendor::Qualcomm, 0x0489, 0xE14A),
+    (ChipVendor::Qualcomm, 0x0489, 0xE14B),
+    (ChipVendor::Qualcomm, 0x0489, 0xE14D),
     (ChipVendor::Qualcomm, 0x04C5, 0x14B2),
     (ChipVendor::Qualcomm, 0x04C5, 0x14DE),
     (ChipVendor::Qualcomm, 0x04CA, 0x3011),
@@ -338,6 +354,8 @@ pub const LOADER_CHIPS: &[(ChipVendor, u16, u16)] = &[
     (ChipVendor::Qualcomm, 0x0CF3, 0xE370),
     (ChipVendor::Qualcomm, 0x0CF3, 0xE500),
     (ChipVendor::Qualcomm, 0x0CF3, 0xE600),
+    (ChipVendor::Qualcomm, 0x0CF3, 0xE700),
+    (ChipVendor::Qualcomm, 0x0CF3, 0xEA00),
     (ChipVendor::Qualcomm, 0x10AB, 0x9008),
     (ChipVendor::Qualcomm, 0x10AB, 0x9108),
     (ChipVendor::Qualcomm, 0x10AB, 0x9109),
@@ -374,13 +392,20 @@ pub const LOADER_CHIPS: &[(ChipVendor, u16, u16)] = &[
     (ChipVendor::Qualcomm, 0x13D3, 0x3522),
     (ChipVendor::Qualcomm, 0x13D3, 0x3523),
     (ChipVendor::Qualcomm, 0x13D3, 0x3534),
+    (ChipVendor::Qualcomm, 0x13D3, 0x3623),
+    (ChipVendor::Qualcomm, 0x13D3, 0x3624),
     (ChipVendor::Qualcomm, 0x1690, 0x0783),
     (ChipVendor::Qualcomm, 0x1690, 0x0784),
     (ChipVendor::Qualcomm, 0x1690, 0x0785),
     (ChipVendor::Qualcomm, 0x1690, 0x0786),
     (ChipVendor::Qualcomm, 0x1690, 0x0789),
     (ChipVendor::Qualcomm, 0x28DE, 0x1401),
+    (ChipVendor::Qualcomm, 0x2C7C, 0x0130),
+    (ChipVendor::Qualcomm, 0x2C7C, 0x0131),
+    (ChipVendor::Qualcomm, 0x2C7C, 0x0132),
     (ChipVendor::Qualcomm, 0x2C7C, 0x0137),
+    (ChipVendor::Qualcomm, 0x2C7C, 0x013A),
+    (ChipVendor::Qualcomm, 0x2C7C, 0x013B),
     (ChipVendor::Qualcomm, 0x3641, 0x0902),
     (ChipVendor::Qualcomm, 0x3641, 0x0904),
 ];
