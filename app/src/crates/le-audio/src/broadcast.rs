@@ -153,7 +153,8 @@ pub fn groups(config: &BroadcastConfig) -> Vec<BroadcastGroup> {
             big_handle: BIG_HANDLE + i as u8,
             sid: ADV_SID + i as u8,
             name: suffixed_name(&config.name, side),
-            broadcast_id: broadcast_id(u64::from(config.broadcast_id) + i as u64),
+            // R = L + 1, after 0xFFFFFE (the last valid ID) 1
+            broadcast_id: config.broadcast_id.wrapping_add(i as u32).wrapping_sub(1) % 0x00FF_FFFE + 1,
             bis: i..i + 1,
         })
         .collect()
@@ -386,6 +387,12 @@ mod tests {
         // A long name keeps room for the suffix
         c.name = "x".repeat(NAME_MAX);
         assert!(groups(&c).iter().all(|g| g.name.len() == NAME_MAX && g.name.ends_with(['L', 'R'])));
+        // The two IDs differ, also at the top of the range
+        for (id, right) in [(0x00FF_FFFD, 0x00FF_FFFE), (0x00FF_FFFE, 1)] {
+            c.broadcast_id = id;
+            let g = groups(&c);
+            assert_eq!((g[0].broadcast_id, g[1].broadcast_id), (id, right));
+        }
         // Mono or plain stereo: one broadcast as before
         c.split = false;
         assert_eq!(groups(&c).len(), 1);
