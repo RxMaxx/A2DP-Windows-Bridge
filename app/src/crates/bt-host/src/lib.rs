@@ -68,7 +68,7 @@ pub use le::{
 pub use media::{MediaPacket, MediaSink};
 pub use rfcomm::{
     MAX_SEND_BYTES as RFCOMM_MAX_SEND_BYTES, OPEN_DEADLINE as RFCOMM_OPEN_DEADLINE, RfcommCloseReason, RfcommError,
-    RfcommEvent, RfcommOpened, RfcommReply, RfcommSink, parse_uuid,
+    RfcommEvent, RfcommOpened, RfcommReply, RfcommSink, is_voice_service, parse_uuid, uuid_str,
 };
 pub use sdp_services::{SdpRecord, ServicesError};
 use shared::{Shared, Wait};

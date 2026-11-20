@@ -95,6 +95,8 @@ sequenceDiagram
 
 `stream.state` は `idle`、`connecting`、`streaming`、`reconnecting`、`error` のいずれかです。その理由は、`stream.message` が[メッセージキー](#errors-and-messages)で示します。
 
+状態のイベントは、購読しなくてもすべてのクライアントに届きます。イベントは何かが変わったときにだけ届くので、長い間何も届かないこともあります。
+
 **リビジョン。** 状態のイベントは、どれも次のリビジョン（`rev` + 1）を持ちます。番号が飛んだ場合はイベントを取りこぼしているので、`state.snapshot` を送って新しいスナップショットを取得してください。クライアントの読み取りが遅すぎる場合も、コアは要求を待たずに新しい `snapshot` を送ります。状態以外のイベント（`link`、`log`、`receiver`、`rfcomm_data`、`rfcomm_closed`）は現在のリビジョンを持ち、リビジョンを進めません。
 
 コアは終了時にイベント `bye` を送り、パイプを閉じます。
@@ -136,14 +138,19 @@ sequenceDiagram
 | `diag.info` | `{"mask": bool}`（省略可） | `DiagInfo`（「診断情報をコピー」のテキスト） |
 | `rfcomm.open`、`rfcomm.send`、`rfcomm.close` | [RFCOMM パススルー](#rfcomm-passthrough)を参照 | |
 
+`diag.subscribe` では毎回 `logs` と `link` の両方を送ってください。呼び出すたびに両方が設定されるため、`logs` を省くとログのイベントはオフになります。
+
 BlueCaster のウィンドウが使うメソッドのうち、ツールでは注意して使うべきもの: `profile.save` / `profile.delete`、`settings.set`（設定を **すべて** 置き換えます。最新の `settings` に変更を加えて送ってください。一部だけのオブジェクトは決して送らないでください）、`device.forget` / `device.rename`、`adapter.*`（`adapter.assign_winusb` と `adapter.restore_driver` は UAC の確認を出します。開発者モードのチップのツールである `adapter.probe` と `adapter.run_script` は Bluetooth スタックを止めます）、`app.quit`。それ以外のメソッドはウィンドウ自身の画面のためのもので、予告なく変わることがあります: `stream.start_custom`、ほかの `device.*`（`device.import_windows_pairings` は UAC の確認を出します）、`audio.apps`、`audio.mixer` / `audio.mixer_set`、上の 2 つ以外の `diag.*`、`receiver.*`、`app.*`。パラメーターと結果を含む全一覧は、`protocol.rs` の `Method` 列挙型にあります。
 
 ## RFCOMM パススルー {#rfcomm-passthrough}
 
 `welcome.features` に `"rfcomm"` があるとき（2.0.2-beta.10 以降）に使えます。BlueCaster 経由で接続したヘッドホンは Windows からは見えません。RFCOMM パススルーを使うと、ツールは BlueCaster の既存のリンクを通して、ヘッドホン自身の RFCOMM サービス（メーカーの操作アプリ: バッテリー、ノイズコントロール、EQ）を利用できます。
 
-- `rfcomm.open {address, uuid}` → `{channel_id, mtu}`。`address` は配信中のデバイスである必要があります。コアがこのために接続やペアリングを行うことはありません（`rfcomm.not_connected`）。`uuid` は 128 ビットの完全な UUID か、Bluetooth のベース UUID 上の 16 ビットの `"xxxx"` です。ほかの open の処理を待つ場合も応答は 20 秒以内に返るので、少なくとも 25 秒は待ってください。エラー: `rfcomm.not_connected`、`rfcomm.service_not_found`、`rfcomm.open_failed`、`rfcomm.busy`。
+- `rfcomm.open {address, uuid}` → `{channel_id, mtu}`。`address` は配信中のデバイスである必要があります。コアがこのために接続やペアリングを行うことはありません（`rfcomm.not_connected`）。`uuid` は 128 ビットの完全な UUID か、Bluetooth のベース UUID 上の 16 ビットの `"xxxx"` です。ほかの open の処理を待つ場合も応答は 20 秒以内に返るので、少なくとも 25 秒は待ってください。エラー: `rfcomm.not_connected`、`rfcomm.service_not_found`、`rfcomm.service_reserved`、`rfcomm.open_failed`、`rfcomm.busy`。
+- ヘッドセットとハンズフリーのサービス（`1108`、`1112`、`111E`、`111F`）は、どちらの UUID の形式で指定しても `rfcomm.service_reserved` で拒否されます。BlueCaster がヘッドセットマイクに使うためです。
+- RFCOMM パススルーには Classic（A2DP）の接続が必要です。LE Audio で接続したデバイスでは、`rfcomm.open` は常に `rfcomm.not_connected` を返します。
 - `rfcomm.send {channel_id, data}` → `null`。`data` は base64（標準、パディングあり）で、1 リクエストあたり最大 64 KiB です。データはリクエストの順に、最大 `mtu` のフレームで送られます。エラー: `rfcomm.no_channel`、`rfcomm.busy`（キューがいっぱいで、送信されていない）、`rfcomm.timeout`（送信されたかどうか不明。再送せず、チャネルを開き直してください）。
+- ファームウェアの更新など、大量のデータはゆっくり送ってください。チャネルは音声と同じ無線リンクを使うため、大量のデータを速く送ると音が途切れることがあります。
 - 受信したデータは、`rfcomm_data` イベント `{channel_id, data}` として、そのチャネルを開いた接続にだけ届きます。
 - `rfcomm.close {channel_id}` → `null`。それまでに送ったデータの送信が終わってから閉じます。`rfcomm_closed` は届きません。
 - チャネルは、パイプの接続が終わったときにも閉じます。また、`rfcomm_closed` イベント `{channel_id, reason}` とともに閉じることもあります。理由は `remote`（デバイスが閉じた、またはリンクが切れた）、`disconnected`（A2DP の接続が終わった）、`stopped`（Bluetooth スタックが停止した）、`overflow`（クライアントが 1 MiB を超える受信データを読まずに残した）のいずれかです。

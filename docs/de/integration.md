@@ -95,6 +95,8 @@ Ein Client braucht keinen eigenen Zustand. Er behält den letzten Snapshot und w
 
 `stream.state` ist eines von `idle`, `connecting`, `streaming`, `reconnecting`, `error`; `stream.message` nennt den Grund als [Meldungsschlüssel](#errors-and-messages).
 
+Jeder Client erhält die Zustands-Events, ohne sie abonnieren zu müssen. Ein Event kommt nur, wenn sich etwas ändert. Eine Verbindung kann daher lange still bleiben.
+
 **Revisionen.** Jedes Zustands-Event trägt die nächste Revision (`rev` + 1). Eine Lücke bedeutet, dass ein Event verloren gegangen ist. Fordern Sie dann mit `state.snapshot` einen neuen Snapshot an. Liest ein Client zu langsam, sendet ihm der Kern auch unaufgefordert einen neuen `snapshot`. Events, die keinen Zustand betreffen (`link`, `log`, `receiver`, `rfcomm_data`, `rfcomm_closed`), tragen die aktuelle Revision und erhöhen sie nicht.
 
 Wenn der Kern beendet wird, sendet er das Event `bye` und schließt die Pipe.
@@ -136,14 +138,19 @@ Methoden für Werkzeuge:
 | `diag.info` | `{"mask": bool}` (optional) | `DiagInfo` (der Text von „Diagnose kopieren“) |
 | `rfcomm.open`, `rfcomm.send`, `rfcomm.close` | siehe [RFCOMM-Passthrough](#rfcomm-passthrough) | |
 
+Senden Sie bei jedem `diag.subscribe` sowohl `logs` als auch `link`. Jeder Aufruf setzt beide Werte. Fehlt `logs`, werden die Protokoll-Events ausgeschaltet.
+
 Methoden, die das BlueCaster-Fenster verwendet und die ein Werkzeug nur mit Vorsicht einsetzen sollte: `profile.save` / `profile.delete`, `settings.set` (ersetzt **alle** Einstellungen: Senden Sie die neuesten `settings` mit Ihrer Änderung, nie ein unvollständiges Objekt), `device.forget` / `device.rename`, `adapter.*` (`adapter.assign_winusb` und `adapter.restore_driver` zeigen eine UAC-Abfrage; `adapter.probe` und `adapter.run_script`, die Chip-Werkzeuge des Entwicklermodus, halten den Bluetooth-Stack an), `app.quit`. Die übrigen Methoden dienen den Seiten des Fensters und können sich ohne Ankündigung ändern: `stream.start_custom`, die anderen `device.*`-Methoden (`device.import_windows_pairings` zeigt eine UAC-Abfrage), `audio.apps`, `audio.mixer` / `audio.mixer_set`, `diag.*` außer den beiden oben, `receiver.*` und `app.*`. Die vollständige Liste mit Parametern und Ergebnissen ist das Enum `Method` in `protocol.rs`.
 
 ## RFCOMM-Passthrough {#rfcomm-passthrough}
 
 Verfügbar, wenn `welcome.features` `"rfcomm"` enthält (2.0.2-beta.10 und neuer). Damit erreicht ein Werkzeug die RFCOMM-Dienste der Kopfhörer (Steuer-Apps der Hersteller: Akku, Geräuschunterdrückung, EQ) über die bestehende Verbindung von BlueCaster. Windows selbst sieht Kopfhörer, die über BlueCaster verbunden sind, nicht.
 
-- `rfcomm.open {address, uuid}` → `{channel_id, mtu}`. `address` muss das Gerät sein, an das gerade gestreamt wird. Der Kern baut dafür nie selbst eine Verbindung oder Kopplung auf (`rfcomm.not_connected`). `uuid` ist eine vollständige 128-Bit-UUID oder eine 16-Bit-`"xxxx"` auf der Bluetooth-Basis-UUID. Die Antwort kommt innerhalb von 20 s, auch wenn andere Öffnungsanfragen davor warten. Warten Sie daher mindestens 25 s. Fehler: `rfcomm.not_connected`, `rfcomm.service_not_found`, `rfcomm.open_failed`, `rfcomm.busy`.
+- `rfcomm.open {address, uuid}` → `{channel_id, mtu}`. `address` muss das Gerät sein, an das gerade gestreamt wird. Der Kern baut dafür nie selbst eine Verbindung oder Kopplung auf (`rfcomm.not_connected`). `uuid` ist eine vollständige 128-Bit-UUID oder eine 16-Bit-`"xxxx"` auf der Bluetooth-Basis-UUID. Die Antwort kommt innerhalb von 20 s, auch wenn andere Öffnungsanfragen davor warten. Warten Sie daher mindestens 25 s. Fehler: `rfcomm.not_connected`, `rfcomm.service_not_found`, `rfcomm.service_reserved`, `rfcomm.open_failed`, `rfcomm.busy`.
+- Die Headset- und Freisprechdienste (`1108`, `1112`, `111E`, `111F`) werden in beiden UUID-Formen mit `rfcomm.service_reserved` abgelehnt. BlueCaster verwendet sie für das Headset-Mikrofon.
+- Der Passthrough braucht eine klassische (A2DP-)Verbindung. Bei einem Gerät, das über LE Audio verbunden ist, liefert `rfcomm.open` immer `rfcomm.not_connected`.
 - `rfcomm.send {channel_id, data}` → `null`. `data` ist Base64 (Standard, mit Padding), höchstens 64 KiB pro Anfrage, gesendet in Frames von höchstens `mtu` Bytes in der Reihenfolge der Anfragen. Fehler: `rfcomm.no_channel`, `rfcomm.busy` (Warteschlange voll, nicht gesendet), `rfcomm.timeout` (unklar, ob gesendet wurde: nicht wiederholen, sondern den Kanal neu öffnen).
+- Senden Sie große Datenmengen langsam, zum Beispiel bei einem Firmware-Update. Der Kanal teilt sich die Funkverbindung mit der Audioübertragung. Schnelles Senden kann zu Aussetzern führen.
 - Empfangene Daten kommen als Events `rfcomm_data` `{channel_id, data}` an, und zwar nur bei der Verbindung, die den Kanal geöffnet hat.
 - `rfcomm.close {channel_id}` → `null`, sobald die vorher gesendeten Daten übertragen sind. Es folgt kein `rfcomm_closed`.
 - Ein Kanal wird auch geschlossen, wenn die Pipe-Verbindung endet, oder mit einem Event `rfcomm_closed` `{channel_id, reason}`: `remote` (das Gerät hat ihn geschlossen oder die Verbindung ist abgebrochen), `disconnected` (die A2DP-Verbindung wurde beendet), `stopped` (der Bluetooth-Stack wurde angehalten), `overflow` (der Client hat mehr als 1 MiB empfangener Daten ungelesen gelassen).

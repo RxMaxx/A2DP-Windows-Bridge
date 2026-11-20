@@ -608,6 +608,22 @@ class OppoEarbuds:
                 reply(b'\0')
 
 
+class EchoService:
+    """An SPP-style service on a test UUID that sends back what it receives,
+    for the IPC's RFCOMM passthrough (rfcomm.open / send / close)."""
+
+    UUID = '5D6A7B8C-0E1F-4A2B-9C3D-4E5F60718293'
+
+    def __init__(self, device):
+        served = Server(device).listen(self.on_dlc, 0)
+        device.sdp_service_records[0x00010006] = make_service_sdp_records(0x00010006, served, UUID(self.UUID))
+
+    def on_dlc(self, dlc):
+        print('echo: channel open', flush=True)
+        dlc.sink = lambda data: (print(f'echo: {len(data)} bytes', flush=True), dlc.write(data))
+        dlc.on('close', lambda: print('echo: channel closed', flush=True))
+
+
 def refuse_dual_channel(sink):
     """The SBC endpoint lists dual channel but rejects a SET_CONFIGURATION
     with it, as some headsets do (SBC XQ then has to fall back to SBC)."""
@@ -675,6 +691,8 @@ async def main(args):
     if args.huawei:
         huawei = HuaweiEarbuds(device, args.huawei == 'on', args.huawei_drop, args.huawei_silent,
                                args.huawei_no_ldac, args.huawei_channel)
+    if args.echo:
+        EchoService(device)
     oppo = None
     if args.oppo:
         oppo = OppoEarbuds(device, args.oppo == 'on', args.oppo_drop, args.oppo_product, args.oppo_no_change,
@@ -984,6 +1002,8 @@ if __name__ == '__main__':
                         help='sound quality first is taken, and LDAC is never listed')
     parser.add_argument('--huawei-channel', type=int,
                         help='serve the control channel on this RFCOMM channel, not listed in SDP')
+    parser.add_argument('--echo', action='store_true',
+                        help=f'serve an echo service on RFCOMM ({EchoService.UUID})')
     parser.add_argument('--oppo', choices=['off', 'on'],
                         help='serve the control channel of Enco Free4 earbuds, Hi-Res as given; '
                              'LHDC V5 lists 400 kbps at 44.1 / 48 kHz until a write asks for it')

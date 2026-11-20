@@ -940,6 +940,7 @@
   "ipc.error.failed": "Échec de la requête : %s",
   "ipc.error.rfcomm_not_connected": "L'appareil n'est pas connecté à BlueCaster",
   "ipc.error.rfcomm_service_not_found": "L'appareil ne propose pas ce service",
+  "ipc.error.rfcomm_service_reserved": "BlueCaster utilise ce service en interne",
   "ipc.error.rfcomm_open_failed": "Impossible d'ouvrir le canal RFCOMM (%s)",
   "ipc.error.rfcomm_no_channel": "Ce canal RFCOMM n'existe pas",
   "ipc.error.rfcomm_busy": "Le canal RFCOMM est occupé. Réessayez.",

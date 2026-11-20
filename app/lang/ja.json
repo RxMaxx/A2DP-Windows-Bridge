@@ -940,6 +940,7 @@
   "ipc.error.failed": "要求に失敗しました: %s",
   "ipc.error.rfcomm_not_connected": "デバイスが BlueCaster に接続されていません",
   "ipc.error.rfcomm_service_not_found": "デバイスにこのサービスがありません",
+  "ipc.error.rfcomm_service_reserved": "このサービスは BlueCaster 専用です",
   "ipc.error.rfcomm_open_failed": "RFCOMM チャネルを開けませんでした（%s）",
   "ipc.error.rfcomm_no_channel": "その RFCOMM チャネルはありません",
   "ipc.error.rfcomm_busy": "RFCOMM チャネルが使用中です。もう一度お試しください。",
