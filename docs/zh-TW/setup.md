@@ -177,8 +177,9 @@ BlueCaster 會偵測介面卡的晶片組，並顯示需要哪些韌體檔案。
 | Broadcom | ASUS BT400 (BCM20702) | 回報廠商類別 `FF/01/01` 而非藍牙類別 `E0/01/01` 的介面卡（BCM20702 OEM 接收器）也能偵測。使用 ROM 韌體運作；如果韌體資料夾中有選用的 PatchRAM `.hcd`（例如 `BCM20702A1-0b05-17cb.hcd`），會在啟動時上傳 |
 | Intel | Intel 7260 / 3160 / 7265 / 3165 / 3168 / 8260 / 8265 / 9260 / AX200 / AX201 / AX210 / AX211 | 處於 bootloader 模式時（例如冷開機後），韌體資料夾中需要 linux-firmware `intel/` 內對應的 `ibt-*.sfi` + `ibt-*.ddc`，記錄中會列出檔案名稱（例如 `ibt-0180-0041.sfi`）。7260 / 3160 / 7265 / 3165 / 3168 從 ROM 執行，不需要檔案；同一資料夾中若有對應的 `ibt-hw-*.bseq` 修補檔，則會套用 |
 | MediaTek | MT7925、MT7927、MT7922、MT7921、MT7902（AMD RZ717、RZ738、RZ616、RZ608 等 Wi-Fi 網路卡） | 需要該晶片的 `BT_RAM_CODE_MT*_hdr.bin`（例如 `BT_RAM_CODE_MT7925_1_1_hdr.bin`）。若已安裝 MediaTek 的 Windows 藍牙驅動程式，BlueCaster 會從中讀取；否則請將 linux-firmware `mediatek/` 中的檔案放入韌體資料夾，記錄中會列出檔案名稱。MT7927 尚未在實際硬體上測試 |
-| Qualcomm | QCA61x4、QCA9377（ROME）、WCN6855（FastConnect 6900） | 需要該晶片的 rampatch 與 NVM（例如 `AthrBT_0x00000302.dfu` 與 `ramps_0x00000302_48.dfu`）。若已安裝 Qualcomm 的 Windows 藍牙驅動程式，BlueCaster 會從中讀取；否則請將 linux-firmware `qca/` 中的檔案（`rampatch_usb_*.bin`、`nvm_usb_*.bin`）放入韌體資料夾，記錄中會列出檔案名稱。尚未在實際硬體上測試 |
-| MediaTek、Qualcomm | 較舊的 MediaTek 晶片（例如 MT7663）、其他 Qualcomm 晶片（QCA6290、WCN785x） | 不支援：需要 BlueCaster 目前沒有的韌體載入程式（[協助加入支援](chip-support)） |
+| Qualcomm | QCA61x4、QCA9377（ROME）、WCN6855（FastConnect 6900）、WCN785x（FastConnect 7800） | 需要該晶片的 rampatch 與 NVM（例如 `AthrBT_0x00000302.dfu` 與 `ramps_0x00000302_48.dfu`）。若已安裝 Qualcomm 的 Windows 藍牙驅動程式，BlueCaster 會從中讀取；否則請將 linux-firmware `qca/` 中的檔案（`rampatch_usb_*.bin`、`nvm_usb_*.bin`）放入韌體資料夾，記錄中會列出檔案名稱。尚未在實際硬體上測試 |
+| MediaTek | MT7663 | 需要該晶片的修補檔（例如 `mt7663_patch_e2_hdr.bin`）。若已安裝 MediaTek 的 Windows 藍牙驅動程式，BlueCaster 會從中讀取；否則請將該檔案放入韌體資料夾，記錄中會列出檔案名稱。尚未在實際硬體上測試 |
+| MediaTek、Qualcomm | 較舊的 MediaTek 晶片（例如 MT7630 與 MT7650）、其他 Qualcomm 晶片（QCA6290） | 不支援：需要 BlueCaster 目前沒有的韌體載入程式（[協助加入支援](chip-support)） |
 
 支援藍牙 5.0 以上的 USB 介面卡，通常最適合 LDAC 等高位元率的編解碼器。
 

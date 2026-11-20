@@ -179,8 +179,9 @@ BlueCaster で実際に使われたアダプターとヘッドホンは、コー
 | Broadcom | ASUS BT400 (BCM20702) | Bluetooth のクラス `E0/01/01` ではなくベンダークラス `FF/01/01` を名乗るアダプター（BCM20702 の OEM ドングル）も検出します。ROM のファームウェアで動作します。ファームウェアフォルダーに PatchRAM の `.hcd`（例: `BCM20702A1-0b05-17cb.hcd`）があれば、起動時に書き込みます（任意） |
 | Intel | Intel 7260 / 3160 / 7265 / 3165 / 3168 / 8260 / 8265 / 9260 / AX200 / AX201 / AX210 / AX211 | ブートローダーモード（コールドブートの後など）では、linux-firmware の `intel/` にある対応する `ibt-*.sfi` と `ibt-*.ddc` をファームウェアフォルダーに置く必要があります。必要なファイル名はログに出ます（例: `ibt-0180-0041.sfi`）。7260 / 3160 / 7265 / 3165 / 3168 は ROM で動作し、ファイルは不要です。同じフォルダーに対応する `ibt-hw-*.bseq` パッチがあれば、それを適用します |
 | MediaTek | MT7925、MT7927、MT7922、MT7921、MT7902（AMD RZ717、RZ738、RZ616、RZ608 などの Wi-Fi カード） | チップごとの `BT_RAM_CODE_MT*_hdr.bin`（例: `BT_RAM_CODE_MT7925_1_1_hdr.bin`）が必要です。MediaTek の Windows 用 Bluetooth ドライバーが入っていれば、BlueCaster がそこから読み込みます。入っていなければ、linux-firmware の `mediatek/` にあるファイルをファームウェアフォルダーに置いてください。必要なファイル名はログに出ます。MT7927 は実機では未検証 |
-| Qualcomm | QCA61x4、QCA9377（ROME）、WCN6855（FastConnect 6900） | チップの rampatch と NVM（例: `AthrBT_0x00000302.dfu` と `ramps_0x00000302_48.dfu`）が必要です。Qualcomm の Windows 用 Bluetooth ドライバーが入っていれば、BlueCaster がそこから読み込みます。入っていなければ、linux-firmware の `qca/` にあるファイル（`rampatch_usb_*.bin`、`nvm_usb_*.bin`）をファームウェアフォルダーに置いてください。必要なファイル名はログに出ます。実機では未検証 |
-| MediaTek、Qualcomm | 古い MediaTek チップ（MT7663 など）、ほかの Qualcomm チップ（QCA6290、WCN785x） | 未対応。BlueCaster にないファームウェアローダーが必要です（[対応の追加に協力する](chip-support)） |
+| Qualcomm | QCA61x4、QCA9377（ROME）、WCN6855（FastConnect 6900）、WCN785x（FastConnect 7800） | チップの rampatch と NVM（例: `AthrBT_0x00000302.dfu` と `ramps_0x00000302_48.dfu`）が必要です。Qualcomm の Windows 用 Bluetooth ドライバーが入っていれば、BlueCaster がそこから読み込みます。入っていなければ、linux-firmware の `qca/` にあるファイル（`rampatch_usb_*.bin`、`nvm_usb_*.bin`）をファームウェアフォルダーに置いてください。必要なファイル名はログに出ます。実機では未検証 |
+| MediaTek | MT7663 | チップのパッチファイル（例: `mt7663_patch_e2_hdr.bin`）が必要です。MediaTek の Windows 用 Bluetooth ドライバーが入っていれば、BlueCaster がそこから読み込みます。入っていなければ、このファイルをファームウェアフォルダーに置いてください。必要なファイル名はログに出ます。実機では未検証 |
+| MediaTek、Qualcomm | 古い MediaTek チップ（MT7630、MT7650 など）、ほかの Qualcomm チップ（QCA6290） | 未対応。BlueCaster にないファームウェアローダーが必要です（[対応の追加に協力する](chip-support)） |
 
 LDAC のような高ビットレートのコーデックには、Bluetooth 5.0 以上の USB アダプターが一般に適しています。
 
