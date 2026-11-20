@@ -208,8 +208,9 @@ pub static OEM_TABLE: &[OemChipMapping] = &[
 /// The controller vendor, guessed from the USB VID:PID. Decides which
 /// firmware loader (if any) runs before HCI init: Realtek's, Intel's
 /// (crate::intel), MediaTek MT79xx and MT7663 (crate::mediatek), Qualcomm ROME /
-/// WCN6855 / WCN785x (crate::qualcomm) and Broadcom's. CSR, Barrot and Actions run
-/// from ROM; Marvell's firmware comes from its Wi-Fi driver.
+/// WCN6855 / WCN785x (crate::qualcomm), Qualcomm Atheros AR30xx (crate::atheros)
+/// and Broadcom's. CSR, Barrot and Actions run from ROM; Marvell's firmware
+/// comes from its Wi-Fi driver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ChipVendor {
     #[default]
@@ -224,7 +225,8 @@ pub enum ChipVendor {
     Csr,
     /// needs WMT firmware download: the chips in [`LOADER_CHIPS`] only
     MediaTek,
-    /// needs rampatch/NVM download: the chips in [`LOADER_CHIPS`] only
+    /// needs rampatch/NVM download: the chips in [`LOADER_CHIPS`] and
+    /// [`QUALCOMM_AR30XX`] only
     Qualcomm,
     /// ROM firmware, nothing to load: cheap Bluetooth 5.4 / 6.0 dongles
     Barrot,
@@ -543,10 +545,151 @@ pub const LOADER_CHIPS: &[(ChipVendor, u16, u16)] = &[
     (ChipVendor::Qualcomm, 0x3641, 0x0902),
     (ChipVendor::Qualcomm, 0x3641, 0x0904),
 ];
+
+/// Qualcomm Atheros AR30xx adapters (crate::atheros): the USB IDs of Qualcomm
+/// Atheros' Windows drivers 10.0.3.12 to 10.0.3.22 (btfilter.inf) and
+/// 10.0.1.14 (qca_btusb.inf), which load AR3011, AR3012 and the Bluetooth
+/// of AR9462 / QCA9565 Wi-Fi combos with the same requests. The loader
+/// reads the ROM version itself and refuses one it does not know before
+/// sending anything. Supported like [`LOADER_CHIPS`]; none has been tried
+/// yet.
+pub const QUALCOMM_AR30XX: &[(u16, u16)] = &[
+    (0x03F0, 0x311D),
+    (0x0489, 0xE015),
+    (0x0489, 0xE027),
+    (0x0489, 0xE02C),
+    (0x0489, 0xE036),
+    (0x0489, 0xE03C),
+    (0x0489, 0xE03D),
+    (0x0489, 0xE043),
+    (0x0489, 0xE048),
+    (0x0489, 0xE04A),
+    (0x0489, 0xE04C),
+    (0x0489, 0xE04D),
+    (0x0489, 0xE04E),
+    (0x0489, 0xE056),
+    (0x0489, 0xE057),
+    (0x0489, 0xE05F),
+    (0x0489, 0xE060),
+    (0x0489, 0xE061),
+    (0x0489, 0xE076),
+    (0x0489, 0xE078),
+    (0x0489, 0xE07D),
+    (0x0489, 0xE081),
+    (0x0489, 0xE082),
+    (0x0489, 0xE083),
+    (0x0489, 0xE088),
+    (0x0489, 0xE093),
+    (0x0489, 0xE095),
+    (0x04C5, 0x1330),
+    (0x04C5, 0x1471),
+    (0x04CA, 0x17EA),
+    (0x04CA, 0x3000),
+    (0x04CA, 0x3001),
+    (0x04CA, 0x3002),
+    (0x04CA, 0x3004),
+    (0x04CA, 0x3005),
+    (0x04CA, 0x3006),
+    (0x04CA, 0x3007),
+    (0x04CA, 0x3008),
+    (0x04CA, 0x3009),
+    (0x04CA, 0x300A),
+    (0x04CA, 0x300B),
+    (0x04CA, 0x300C),
+    (0x04CA, 0x300D),
+    (0x04CA, 0x300F),
+    (0x04CA, 0x3010),
+    (0x04CA, 0x3014),
+    (0x04CA, 0x3018),
+    (0x04CA, 0x301D),
+    (0x04F2, 0xAFF1),
+    (0x04F2, 0xAFF3),
+    (0x04F2, 0xAFF4),
+    (0x04F2, 0xAFFD),
+    (0x04F2, 0xAFFE),
+    (0x05AC, 0x8282),
+    (0x0930, 0x0215),
+    (0x0930, 0x0218),
+    (0x0930, 0x0219),
+    (0x0930, 0x021C),
+    (0x0930, 0x0220),
+    (0x0930, 0x0227),
+    (0x0930, 0x0228),
+    (0x0930, 0x022A),
+    (0x0A5C, 0xE027),
+    (0x0A5C, 0xE028),
+    (0x0B05, 0x1783),
+    (0x0B05, 0x179C),
+    (0x0B05, 0x17D0),
+    (0x0CF3, 0x0036),
+    (0x0CF3, 0x3002),
+    (0x0CF3, 0x3004),
+    (0x0CF3, 0x3006),
+    (0x0CF3, 0x3008),
+    (0x0CF3, 0x311D),
+    (0x0CF3, 0x311E),
+    (0x0CF3, 0x311F),
+    (0x0CF3, 0x3121),
+    (0x0CF3, 0x3122),
+    (0x0CF3, 0x312D),
+    (0x0CF3, 0x817A),
+    (0x0CF3, 0x817B),
+    (0x0CF3, 0xE003),
+    (0x0CF3, 0xE004),
+    (0x0CF3, 0xE005),
+    (0x0CF3, 0xE006),
+    (0x0CF3, 0xE019),
+    (0x0CF3, 0xE020),
+    (0x0CF3, 0xE021),
+    (0x10AB, 0x0063),
+    (0x10AB, 0x0064),
+    (0x10AB, 0x0081),
+    (0x10AB, 0x0088),
+    (0x13D3, 0x3283),
+    (0x13D3, 0x3293),
+    (0x13D3, 0x3294),
+    (0x13D3, 0x3296),
+    (0x13D3, 0x3304),
+    (0x13D3, 0x3320),
+    (0x13D3, 0x3362),
+    (0x13D3, 0x3363),
+    (0x13D3, 0x3373),
+    (0x13D3, 0x3374),
+    (0x13D3, 0x3375),
+    (0x13D3, 0x3393),
+    (0x13D3, 0x3395),
+    (0x13D3, 0x3397),
+    (0x13D3, 0x3398),
+    (0x13D3, 0x3402),
+    (0x13D3, 0x3408),
+    (0x13D3, 0x3422),
+    (0x13D3, 0x3423),
+    (0x13D3, 0x3424),
+    (0x13D3, 0x3429),
+    (0x13D3, 0x3430),
+    (0x13D3, 0x3432),
+    (0x13D3, 0x3460),
+    (0x13D3, 0x3472),
+    (0x13D3, 0x3474),
+    (0x13D3, 0x3478),
+    (0x13D3, 0x3480),
+    (0x13D3, 0x3487),
+    (0x13D3, 0x3489),
+    (0x13D3, 0x3490),
+    (0x145F, 0x0197),
+    (0x145F, 0x0198),
+    (0x1690, 0x0751),
+    (0x1690, 0x0754),
+    (0x1690, 0x0755),
+    (0x1690, 0x0763),
+    (0x1690, 0x0765),
+    (0x5160, 0x30B0),
+];
 /// BlueCaster can bring this adapter up: its vendor needs no loader or has one
-/// for every chip, or the chip is in [`LOADER_CHIPS`]
+/// for every chip, or the chip is in [`LOADER_CHIPS`] (or [`QUALCOMM_AR30XX`])
 pub fn chip_supported(vendor: ChipVendor, vid: u16, pid: u16) -> bool {
     supported_in(LOADER_CHIPS, vendor, vid, pid)
+        || (vendor == ChipVendor::Qualcomm && QUALCOMM_AR30XX.contains(&(vid, pid)))
 }
 
 /// Tag shown after one adapter's name: "unsupported" for a chip whose
@@ -626,6 +769,9 @@ pub fn vendor_for_usb(vid: u16, pid: u16, realtek_pid: Option<u16>) -> ChipVendo
     // other vendors' chips use too: by the exact ID
     if let Some(&(vendor, _, _)) = LOADER_CHIPS.iter().find(|&&(_, v, p)| v == vid && p == pid) {
         return vendor;
+    }
+    if QUALCOMM_AR30XX.contains(&(vid, pid)) {
+        return ChipVendor::Qualcomm;
     }
     match vid {
         0x0BDA => ChipVendor::Realtek,

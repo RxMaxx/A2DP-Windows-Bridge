@@ -179,6 +179,7 @@ BlueCaster에서 실제로 사용한 어댑터와 헤드폰은 코덱, 보고 �
 | MediaTek | MT7925, MT7927, MT7922, MT7921, MT7902(AMD RZ717, RZ738, RZ616, RZ608 등 Wi-Fi 카드) | 칩에 맞는 `BT_RAM_CODE_MT*_hdr.bin`(예: `BT_RAM_CODE_MT7925_1_1_hdr.bin`)이 필요합니다. MediaTek의 Windows Bluetooth 드라이버가 설치되어 있으면 BlueCaster가 거기서 읽습니다. 없으면 linux-firmware `mediatek/`의 파일을 펌웨어 폴더에 넣으세요. 필요한 파일 이름은 로그에 표시됩니다. MT7927은 아직 실제 하드웨어에서 테스트하지 않았습니다 |
 | Qualcomm | QCA61x4, QCA9377(ROME), WCN6855(FastConnect 6900), WCN785x(FastConnect 7800) | 칩의 rampatch와 NVM(예: `AthrBT_0x00000302.dfu`, `ramps_0x00000302_48.dfu`)이 필요합니다. Qualcomm의 Windows Bluetooth 드라이버가 설치되어 있으면 BlueCaster가 거기서 읽습니다. 없으면 linux-firmware `qca/`의 파일(`rampatch_usb_*.bin`, `nvm_usb_*.bin`)을 펌웨어 폴더에 넣으세요. 필요한 파일 이름은 로그에 표시됩니다. 아직 실제 하드웨어에서 테스트하지 않았습니다 |
 | MediaTek | MT7663 | 칩의 패치 파일(예: `mt7663_patch_e2_hdr.bin`)이 필요합니다. MediaTek의 Windows Bluetooth 드라이버가 설치되어 있으면 BlueCaster가 거기서 읽습니다. 없으면 이 파일을 펌웨어 폴더에 넣으세요. 필요한 파일 이름은 로그에 표시됩니다. 아직 실제 하드웨어에서 테스트하지 않았습니다 |
+| Qualcomm Atheros | AR3012 등 AR30xx 칩(구형 노트북의 Bluetooth 4.0) | 칩의 패치 파일과 구성 파일(예: `AthrBT_0x31010000.dfu`, `ramps_0x31010000_40.dfu`)이 필요합니다. Qualcomm Atheros의 Windows Bluetooth 드라이버가 설치되어 있으면 BlueCaster가 거기서 읽습니다. 없으면 이 파일들을 펌웨어 폴더에 넣으세요. 필요한 파일 이름은 로그에 표시됩니다. 아직 실제 하드웨어에서 테스트하지 않았습니다 |
 | MediaTek, Qualcomm | 이전 MediaTek 칩(MT7630, MT7650 등), 기타 Qualcomm 칩(QCA6290) | 미지원: BlueCaster에 없는 펌웨어 로더가 필요합니다 ([지원 추가 돕기](chip-support)) |
 
 LDAC 같은 고비트레이트 코덱에는 대체로 USB Bluetooth 5.0 이상 어댑터가 가장 좋습니다.

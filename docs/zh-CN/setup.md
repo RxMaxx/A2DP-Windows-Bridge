@@ -179,6 +179,7 @@ BlueCaster 会检测适配器的芯片组，并显示需要哪些固件文件。
 | MediaTek | MT7925、MT7927、MT7922、MT7921、MT7902（AMD RZ717、RZ738、RZ616、RZ608 等 Wi-Fi 网卡） | 需要该芯片的 `BT_RAM_CODE_MT*_hdr.bin`（例如 `BT_RAM_CODE_MT7925_1_1_hdr.bin`）：如果装有 MediaTek 的 Windows 蓝牙驱动程序，BlueCaster 会从中读取；否则请将 linux-firmware `mediatek/` 中的该文件放入固件文件夹，所需文件名会写在日志里。MT7927 尚未在实际硬件上测试 |
 | Qualcomm | QCA61x4、QCA9377（ROME）、WCN6855（FastConnect 6900）、WCN785x（FastConnect 7800） | 需要该芯片的 rampatch 和 NVM（例如 `AthrBT_0x00000302.dfu` 和 `ramps_0x00000302_48.dfu`）：如果装有 Qualcomm 的 Windows 蓝牙驱动程序，BlueCaster 会从中读取；否则请将 linux-firmware `qca/` 中的文件（`rampatch_usb_*.bin`、`nvm_usb_*.bin`）放入固件文件夹，所需文件名会写在日志里。尚未在实际硬件上测试 |
 | MediaTek | MT7663 | 需要该芯片的补丁文件（例如 `mt7663_patch_e2_hdr.bin`）：如果装有 MediaTek 的 Windows 蓝牙驱动程序，BlueCaster 会从中读取；否则请将该文件放入固件文件夹，所需文件名会写在日志里。尚未在实际硬件上测试 |
+| Qualcomm Atheros | AR3012 及其他 AR30xx 芯片（较旧笔记本电脑中的蓝牙 4.0） | 需要该芯片的补丁文件和配置文件（例如 `AthrBT_0x31010000.dfu` 和 `ramps_0x31010000_40.dfu`）：如果装有 Qualcomm Atheros 的 Windows 蓝牙驱动程序，BlueCaster 会从中读取；否则请将这些文件放入固件文件夹，所需文件名会写在日志里。尚未在实际硬件上测试 |
 | MediaTek、Qualcomm | 更早的 MediaTek 芯片（如 MT7630 和 MT7650）、其他 Qualcomm 芯片（QCA6290） | 不支持：需要 BlueCaster 尚未提供的固件加载程序（[帮助添加支持](chip-support)） |
 
 对于 LDAC 等高比特率编解码器，USB 蓝牙 5.0+ 适配器通常效果最好。
