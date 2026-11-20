@@ -833,7 +833,14 @@ pub fn broadcast_config(le: &LeRequest) -> Result<BroadcastConfig, String> {
     })?;
     let random = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64)
         ^ u64::from(std::process::id()).rotate_left(32);
-    Ok(BroadcastConfig { name, code, preset, stereo: !b.mono, broadcast_id: broadcast::broadcast_id(random) })
+    Ok(BroadcastConfig {
+        name,
+        code,
+        preset,
+        stereo: !b.mono,
+        split: !b.mono && b.split,
+        broadcast_id: broadcast::broadcast_id(random),
+    })
 }
 
 /// The session of a broadcast (Auracast source, developer mode): no device

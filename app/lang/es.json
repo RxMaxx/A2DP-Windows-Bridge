@@ -542,6 +542,7 @@
   "ui.dev.auracast_channels": "Canales",
   "ui.dev.auracast_stereo": "Estéreo",
   "ui.dev.auracast_mono": "Mono",
+  "ui.dev.auracast_split": "Izquierdo / derecho por separado",
   "ui.dev.chip_script": "Script del chip",
   "ui.dev.chip_format": "Formato del script",
   "ui.dev.chip_open": "Abrir archivo",

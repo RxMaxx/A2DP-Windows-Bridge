@@ -404,10 +404,12 @@ impl BtHost {
             return Err(reason);
         }
         let plan = self.le_run(RUN_TIMEOUT, |ctx| ctx.broadcast_plan()).flatten().unwrap_or(plan);
+        let groups = le_audio::broadcast::groups(&config);
+        let names: Vec<String> =
+            groups.iter().map(|g| format!("\"{}\" (Broadcast ID 0x{:06X})", g.name, g.broadcast_id)).collect();
         tracing::info!(
-            "Auracast: broadcasting \"{}\", Broadcast ID 0x{:06X}, {}: {summary}",
-            config.name,
-            config.broadcast_id,
+            "Auracast: broadcasting {}, {}: {summary}",
+            names.join(" + "),
             if config.code.is_some() { "encrypted" } else { "open" }
         );
         let status = LeStreamStatus { active: true, plan, devices: Vec::new(), summary };

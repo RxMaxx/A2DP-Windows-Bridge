@@ -16,7 +16,9 @@
 //!
 //! A broadcast (BIG) is sent the same way on HCI_EVENT_BIS_CAN_SEND_NOW,
 //! which BTstack gives for every BIS of the BIG in BIS order once all of
-//! them have room (the last one completes the round).
+//! them have room. Several BIGs (broadcasts of their own, e.g. left and
+//! right) share one round: each BIG is asked, and the round ends once every
+//! BIS of all of them got its SDU.
 //!
 //! BTstack (1.8.3) refuses the CIS request with Command Disallowed until
 //! the CIG is active, which is only after the ISO data paths are set up;
@@ -151,8 +153,9 @@ pub struct IsoSender {
     /// 1 ms system timer resolution while sending (as v1), so that the
     /// guard timer and time_ms() don't move in 15.6 ms steps
     timer_resolution: Option<HighTimerResolution>,
-    /// Sending to a BIG (broadcast): its handle; None: a CIG
-    big: Option<u8>,
+    /// Sending to BIGs (broadcasts): each handle with the index of its
+    /// first BIS in `cis_handles`; empty: a CIG
+    bigs: Vec<(u8, usize)>,
     /// The CIS (or BIS) handles in plan order
     cis_handles: Vec<u16>,
     seq: Vec<u16>,
@@ -200,11 +203,12 @@ impl IsoSender {
         frame_us: u32,
         queue_depth: u8,
     ) {
-        self.big = None;
+        self.bigs.clear();
         self.begin(out, cis_handles, queue, frame_us, queue_depth);
     }
 
     /// As [`IsoSender::start`] for the BIS of a BIG (in BIS order)
+    #[cfg(test)]
     pub(crate) fn start_big(
         &mut self,
         out: &dyn IsoOut,
@@ -214,8 +218,26 @@ impl IsoSender {
         frame_us: u32,
         queue_depth: u8,
     ) {
-        self.big = Some(big);
-        self.begin(out, bis_handles, queue, frame_us, queue_depth);
+        self.start_bigs(out, &[(big, bis_handles.to_vec())], queue, frame_us, queue_depth);
+    }
+
+    /// As [`IsoSender::start`] for the BIS of several BIGs (each in BIS
+    /// order; the SDU set has one SDU per BIS in this order)
+    pub(crate) fn start_bigs(
+        &mut self,
+        out: &dyn IsoOut,
+        bigs: &[(u8, Vec<u16>)],
+        queue: SharedSduQueue,
+        frame_us: u32,
+        queue_depth: u8,
+    ) {
+        let mut handles = Vec::new();
+        self.bigs.clear();
+        for (big, bis) in bigs {
+            self.bigs.push((*big, handles.len()));
+            handles.extend_from_slice(bis);
+        }
+        self.begin(out, &handles, queue, frame_us, queue_depth);
     }
 
     fn begin(&mut self, out: &dyn IsoOut, cis_handles: &[u16], queue: SharedSduQueue, frame_us: u32, queue_depth: u8) {
@@ -241,7 +263,7 @@ impl IsoSender {
         out.set_queue(queue_depth);
         self.timer_resolution = Some(HighTimerResolution::new());
         self.sending = true;
-        let kind = if self.big.is_some() { "BIS" } else { "CIS" };
+        let kind = if self.bigs.is_empty() { "CIS" } else { "BIS" };
         tracing::info!("LE Audio: sending ISO SDUs on {} {kind} (queue {queue_depth})", cis_handles.len());
         tracing::debug!(
             "LE Audio: ISO sender: {kind} {cis_handles:04X?}, frame {} us, prefill {} set(s), guard lead {} set(s)",
@@ -292,26 +314,30 @@ impl IsoSender {
 
     /// HCI_EVENT_CIS_CAN_SEND_NOW
     pub(crate) fn on_cis_can_send_now(&mut self, out: &dyn IsoOut, packet: &[u8]) {
-        if !self.sending || self.big.is_some() {
+        if !self.sending || !self.bigs.is_empty() {
             return;
         }
         let Some(ev) = events::cis_can_send_now(packet) else { return };
         self.on_can_send(out, ev.cis_handle, ev.group_complete);
     }
 
-    /// HCI_EVENT_BIS_CAN_SEND_NOW: the last BIS completes the round
+    /// HCI_EVENT_BIS_CAN_SEND_NOW: the last BIS of all BIGs completes the
+    /// round
     pub(crate) fn on_bis_can_send_now(&mut self, out: &dyn IsoOut, packet: &[u8]) {
         if !self.sending {
             return;
         }
         let Some(ev) = events::bis_can_send_now(packet) else { return };
-        if self.big != Some(ev.big_handle) {
+        let Some(k) = self.bigs.iter().position(|&(big, _)| big == ev.big_handle) else { return };
+        // By index: BTstack's event lacks the handle
+        let first = self.bigs[k].1;
+        let end = self.bigs.get(k + 1).map_or(self.cis_handles.len(), |&(_, next)| next);
+        let index = first + usize::from(ev.bis_index);
+        if index >= end {
             return;
         }
-        // By index: BTstack's event lacks the handle
-        let Some(&handle) = self.cis_handles.get(usize::from(ev.bis_index)) else { return };
-        let last = usize::from(ev.bis_index) + 1 == self.cis_handles.len();
-        self.on_can_send(out, handle, last);
+        let handle = self.cis_handles[index];
+        self.on_can_send(out, handle, false);
     }
 
     fn on_can_send(&mut self, out: &dyn IsoOut, handle: u16, group_complete: bool) {
@@ -476,8 +502,10 @@ impl IsoSender {
     }
 
     fn request_events(&mut self, out: &dyn IsoOut) {
-        if let Some(big) = self.big {
-            out.request_bis_can_send(big);
+        if !self.bigs.is_empty() {
+            for &(big, _) in &self.bigs {
+                out.request_bis_can_send(big);
+            }
             return;
         }
         // BTstack requests CAN_SEND_NOW for every CIS of the CIG from any of
@@ -600,6 +628,32 @@ mod tests {
         s.on_bis_can_send_now(&out, &bis_can_send(0, 1, 0x11));
         assert_eq!(out.take(), ["send 10 #1 ee", "send 11 #1 ee", "request BIG 0"]);
         s.stop(&out);
+        assert_eq!(stats.lock().unwrap().sdus_sent, 4);
+    }
+
+    #[test]
+    fn rounds_over_two_bigs_end_once_both_sent() {
+        let out = Fake::default();
+        let stats = Arc::new(Mutex::new(LeStreamStats::default()));
+        let mut s = IsoSender::new(stats.clone());
+        let q: SharedSduQueue = Arc::new(Mutex::new(SduQueue::new()));
+        q.lock().unwrap().configure(2, vec![vec![0xEE; 4], vec![0xEE; 4]]);
+        // Left in BIG 0, right in BIG 1: each its BIS 0
+        s.start_bigs(&out, &[(0, vec![0x10]), (1, vec![0x20])], q.clone(), 10_000, 2);
+        assert_eq!(out.take(), ["queue 2", "request BIG 0", "request BIG 1"]);
+        // An index beyond a BIG's own BIS is ignored
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 1, 0));
+        assert!(out.take().is_empty());
+        s.on_bis_can_send_now(&out, &bis_can_send(1, 0, 0x20));
+        assert_eq!(out.take(), ["send 20 #0 ee"]);
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 0, 0x10));
+        assert_eq!(out.take(), ["send 10 #0 ee", "request BIG 0", "request BIG 1"]);
+        // The next round, the BIGs in the other order: same set for both
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 0, 0x10));
+        s.on_bis_can_send_now(&out, &bis_can_send(1, 0, 0x20));
+        assert_eq!(out.take(), ["send 10 #1 ee", "send 20 #1 ee", "request BIG 0", "request BIG 1"]);
+        s.stop(&out);
+        assert_eq!(stats.lock().unwrap().sets_sent, 2);
         assert_eq!(stats.lock().unwrap().sdus_sent, 4);
     }
 

@@ -542,6 +542,7 @@
   "ui.dev.auracast_channels": "チャンネル",
   "ui.dev.auracast_stereo": "ステレオ",
   "ui.dev.auracast_mono": "モノラル",
+  "ui.dev.auracast_split": "左右を別々に",
   "ui.dev.chip_script": "チップスクリプト",
   "ui.dev.chip_format": "スクリプトの書き方",
   "ui.dev.chip_open": "ファイルを開く",

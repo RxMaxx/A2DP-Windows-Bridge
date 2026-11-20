@@ -156,6 +156,8 @@ pub struct LeBroadcast {
     pub code: Option<String>,
     /// One mono BIS instead of left and right
     pub mono: bool,
+    /// Left and right as two broadcasts of their own (not with `mono`)
+    pub split: bool,
 }
 
 /// One advertiser seen by [`crate::BtHost::le_scan`] /

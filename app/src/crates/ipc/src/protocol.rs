@@ -1774,10 +1774,12 @@ pub enum Method {
     /// profile stays. `name`: the Broadcast Name (4-32 bytes); `code`: the
     /// Broadcast Code (4-16 bytes; none or empty: open); `quality`: "hq"
     /// (48 kHz) or "sq" (24 kHz); `mono`: one channel instead of left and
-    /// right; `source` / `source_id` / `source_name` as for
-    /// stream.start_custom ("app" fails with error.le_audio_capture). Error
-    /// developer.off while developer mode is off; a name or code out of
-    /// range fails the stream (error.auracast).
+    /// right; `split`: left and right as two broadcasts of their own
+    /// ("<name> L" / "<name> R", one mono BIS each; not with `mono`);
+    /// `source` / `source_id` / `source_name` as for stream.start_custom
+    /// ("app" fails with error.le_audio_capture). Error developer.off while
+    /// developer mode is off; a name or code out of range fails the stream
+    /// (error.auracast).
     #[serde(rename = "stream.start_broadcast")]
     StreamStartBroadcast {
         name: String,
@@ -1788,6 +1790,9 @@ pub enum Method {
         #[ts(optional = nullable)]
         #[serde(default)]
         mono: Option<bool>,
+        #[ts(optional = nullable)]
+        #[serde(default)]
+        split: Option<bool>,
         source: String,
         #[ts(optional = nullable)]
         #[serde(default)]

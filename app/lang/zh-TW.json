@@ -542,6 +542,7 @@
   "ui.dev.auracast_channels": "聲道",
   "ui.dev.auracast_stereo": "立體聲",
   "ui.dev.auracast_mono": "單聲道",
+  "ui.dev.auracast_split": "左 / 右分開",
   "ui.dev.chip_script": "晶片指令碼",
   "ui.dev.chip_format": "指令碼格式",
   "ui.dev.chip_open": "開啟檔案",
