@@ -349,19 +349,49 @@ buffer (`le_audio::sdu_queue::SduQueue`: prefill queue + 3 sets, one more per
 underrun up to queue + 7, 16 at most, dropping the oldest beyond that). No
 allocation per frame: sets are recycled through the queue's pool.
 
-The BTstack thread sends on `HCI_EVENT_CIS_CAN_SEND_NOW` (`le/iso_send.rs`):
-complete SDUs, sequence numbers per CIS, **no time stamp** (the controller
-places SDUs by sequence number), up to 2 SDUs queued per CIS
-(`hci_set_num_iso_packets_to_queue`; queue x CIS within the controller's ISO
-buffers), and a send guard that keeps the sent sets at most queue + 2
-intervals ahead of real time. A round starts once every CIS that is still up
-has its SDU, so one CIS going down does not stall the others. Underrun -> encoded
-silence ("LE Audio: no audio for SDU set N ..."). While sending, the system
-timer resolution is 1 ms (`btstack_sys::HighTimerResolution`, like v1's
-`timeBeginPeriod(1)`); otherwise BTstack's Windows run loop and its clock move
-in 15.6 ms steps. At the end: "LE Audio: stopped sending: N SDU sets
-(...), S silence, U underruns, ..." and, if the guard had to wait, how late
-its timer fired.
+The BTstack thread sends unicast audio paced by the SDU interval
+(`le/iso_send.rs`, run loop timer `TIMER_ISO`), 2 intervals ahead of real
+time. Each interval it takes the next set and gives every CIS its SDU with
+that interval's sequence number: complete SDUs, **no time stamp**, and the
+number counts SDU intervals, so a dropped SDU leaves a gap. Each CIS then
+sends on its own while it has fewer SDUs in the controller than its depth,
+counted from our sends and Number Of Completed Packets (both HCI events
+reach `IsoSender::on_hci_event` through `LeCore::on_hci`).
+
+- BTstack's CIS can-send-now is not used for sending (only to learn that the
+  CIG is active): `hci_iso_notify_can_send_now` grants the CIS of a CIG in
+  lockstep and stops at the first CIS whose queue is full ("wait for next
+  round"), so one CIS whose completions came late or never stopped the
+  others. `bluecaster_iso_send` (shim.c) sends without it; BTstack itself
+  does not check controller space for ISO.
+- Depth per CIS: its share of the controller's ISO buffers (at most 16),
+  narrowed to what the flush timeout of LE CIS Established needs (FT x ISO
+  interval in SDU intervals + 4, at least 4). A controller holds a PDU the
+  peer did not acknowledge until its flush point, so with FT 10 an SDU can
+  stay ~100 ms. MediaTek controllers keep 12 or Developer > Debug "ISO
+  packets queued per CIS".
+- A CIS without room keeps up to 3 SDUs waiting; beyond that the oldest is
+  dropped ("late"). BTstack's single HCI packet buffer is often taken (the
+  previous ISO packet, a GATT write): the send is refused with 0x57
+  (`BTSTACK_ACL_BUFFERS_FULL`) and the same SDU, same sequence number, goes
+  again on `HCI_EVENT_TRANSPORT_PACKET_SENT`.
+- Watchdog: a CIS without a completion for 2 s while SDUs wait in the
+  controller is stalled ("CIS 0x....: no SDU completed for 2 s"). All CIS
+  stalled -> the stream is reported lost and set up again; some -> the
+  others play on, `LeStreamStats::cis_stalled` and `status.le_set_partial`.
+- Logs: every LE CIS Established ("CIS 0x.... parameters: NSE, BN, FT, max
+  PDU, ISO interval, transport latency, PHY"), every 10 s "LE stream health"
+  (per CIS: SDUs/s, late, completion delay p50 / p90, queue peak), and at the
+  end each CIS's counters before "LE Audio: stopped sending: ...". The
+  counters are published about once a second, so the live bit rate is what
+  was really sent.
+
+Underrun -> encoded silence ("LE Audio: no audio for SDU set N ...").
+While sending, the system timer resolution is 1 ms
+(`btstack_sys::HighTimerResolution`, like v1's `timeBeginPeriod(1)`);
+otherwise BTstack's Windows run loop and its clock move in 15.6 ms steps.
+A broadcast (BIG) is still sent in rounds on `HCI_EVENT_BIS_CAN_SEND_NOW`,
+with a send guard keeping the rounds at most queue + 2 intervals ahead.
 
 The UI's ISO counters (`LinkSample.iso`) come from `BtHost::le_stream_stats()`
 (sets, silence, underruns, dropped, prefill).
@@ -382,7 +412,11 @@ It prints `READY 127.0.0.1:P sinks=<addr>[,<addr>]`. Options:
 `--ascs-release-waits-for-cis`, `--drop-link-after S`, `--privacy`,
 `--no-iso-buffers`, `--refuse-cis N` / `--cis-up-after S` (the controller
 refuses the Nth CIS of LE Create CIS with 0x1E; the others come up, with
-`--cis-up-after` only S seconds later), `--mic [SINKS]` / `--mic-rates` (a
+`--cis-up-after` only S seconds later), `--iso-buffers N` (ISO buffers of
+BlueCaster's controller), `--completion-delay-ms MS` (Number Of Completed
+Packets MS after delivery, with the matching FT in LE CIS Established),
+`--withhold-completions N` (the Nth CIS never completes while up),
+`--mic [SINKS]` / `--mic-rates` (a
 microphone: Source PAC 16 / 32 kHz 10 ms, a source ASE, a 1 kHz tone sent
 from pre-encoded LC3 frames in `le_audio/mic_frames.py` once BlueCaster has
 written Receiver Start Ready), and each profile's own options (`--csip-set`,
@@ -397,7 +431,7 @@ Emulator facts to know:
   P->C interval; a late SDU from the emulated headset's own sender is logged
   as "late microphone SDU" and does not fail a case). An SDU that arrives more than
   2 ms after its interval began is logged as `late SDU` and fails the case (a
-  real controller's queue of 2 SDUs per CIS would have run empty); stalls in
+  real controller's queue would have run empty); stalls in
   the emulator's own event loop are not counted. The emulator runs asyncio on
   the performance counter with 1 ms timers.
 - Every HCI command gets an answer (unknown ones: Unknown HCI Command).
