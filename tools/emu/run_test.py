@@ -257,6 +257,9 @@ NEGOTIATION = {
     # to an R2 sink that lists it (emu_sink.py's R2 caps do), else 48 kHz (an
     # R1 sink, low latency); Auto takes it over aptX and AAC (issue #86)
     'aptxad': ('aptxad', APTXAD_SINK, 'aptxad', []),
+    # aptX LL to a sink with the extended capabilities, which also offers
+    # aptX Adaptive (a FiiO BTR13): a 17-byte configuration (issue #520)
+    'aptxll-ext': ('aptxll', ['--codecs', 'sbc', 'aac', 'aptx', 'aptxll', 'aptxad', '--aptxll-ext'], 'aptxll', []),
     'aptxad-ll': ('aptxad', APTXAD_SINK, 'aptxad', ['-q', 'll']),
     'aptxad-r2': ('aptxad', APTXAD_SINK + ['--aptxad-r2'], 'aptxad-r2', []),
     'aptxad-r2-ll': ('aptxad', APTXAD_SINK + ['--aptxad-r2'], 'aptxad-r2', ['-q', 'll']),
