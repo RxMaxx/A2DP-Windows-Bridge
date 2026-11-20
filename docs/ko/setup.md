@@ -169,7 +169,7 @@ BlueCaster에서 실제로 사용한 어댑터와 헤드폰은 코덱, 보고 �
 | 칩셋 | 제품 예 | 참고 |
 |:-----|:--------|:-----|
 | Realtek | TP-Link UB500, RTL8761BU | Realtek Windows 드라이버가 설치되어 있으면 그 펌웨어 사용, 없으면 펌웨어 다운로드 필요(위 참고). 가장 많이 테스트됨 |
-| Realtek | 노트북 내장 RTL8852BD(`0BDA:B853`) | linux-firmware에는 이 칩의 펌웨어가 없습니다. BlueCaster가 Realtek의 Windows Bluetooth 드라이버에서 `rtl8852bd_mp_chip_new.dat`를 읽으므로 그 드라이버를 제거하지 마세요(또는 파일을 펌웨어 폴더에 넣으세요). 아직 실제 하드웨어에서 테스트하지 않았습니다 |
+| Realtek | RTL8852BD(`0BDA:B853`), RTL8852BT, RTL8922A | BlueCaster가 Realtek의 Windows Bluetooth 드라이버에서 펌웨어(예: `rtl8852bd_mp_chip_new.dat`)를 읽으므로 그 드라이버를 제거하지 마세요. 또는 로그에 표시된 파일을 펌웨어 폴더에 넣으세요. 아직 실제 하드웨어에서 테스트하지 않았습니다 |
 | CSR | 일반 CSR8510 동글 | 바로 작동하며 펌웨어 불필요 |
 | Barrot | Bluetooth 5.4 / 6.0 동글(`33FA:0010`, `33FA:0012`) | ROM 펌웨어로 작동하며 펌웨어 불필요. 지금까지 사용자 보고 1건 |
 | Marvell | Microsoft Surface Pro / Surface Book 내장(88W8897) | 펌웨어 파일 불필요: Wi-Fi 드라이버가 Bluetooth 펌웨어도 로드하므로 Wi-Fi를 켜 두세요. 아직 실제 하드웨어에서 테스트하지 않았습니다 |

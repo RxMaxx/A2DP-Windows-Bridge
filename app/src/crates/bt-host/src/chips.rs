@@ -73,14 +73,136 @@ pub struct OemChipMapping {
 }
 
 /// Verified OEM adapters (sources: linux-firmware, lsusb databases, user
-/// reports). Add new ones here; BTstack's transport also registers these
-/// VID:PIDs so it opens them.
+/// reports, Realtek's Windows drivers). Add new ones here; BTstack's
+/// transport also registers these VID:PIDs so it opens them.
 pub static OEM_TABLE: &[OemChipMapping] = &[
     OemChipMapping { vid: 0x2357, pid: 0x0604, realtek_pid: 0x8771 }, // TP-Link UB500 (RTL8761BU)
     // TP-Link UB600 under TP-Link's newer VID (issue #521: RTL8761B ROM in the probe)
     OemChipMapping { vid: 0x37AD, pid: 0x0600, realtek_pid: 0x8771 },
     // Generic RTL8761B dongles (issues #66, #86: rtl8761bu firmware)
     OemChipMapping { vid: 0x0BDA, pid: 0xA729, realtek_pid: 0x8771 },
+    // Realtek's Windows drivers (RtkBtFilter2 18.4021 to 246.4050: its USB ID
+    // to chip table; older RtkBtfilter 1.4 to 1.10: its PidVid list): the
+    // IDs of the chips above that BTstack's table does not hold
+    OemChipMapping { vid: 0x024C, pid: 0xC822, realtek_pid: 0xC82C }, // RTL8822CU
+    OemChipMapping { vid: 0x0411, pid: 0x0374, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x0489, pid: 0xE112, realtek_pid: 0xB851 }, // RTL8851BU
+    OemChipMapping { vid: 0x0489, pid: 0xE122, realtek_pid: 0xC85A }, // RTL8852CU
+    OemChipMapping { vid: 0x0489, pid: 0xE123, realtek_pid: 0xB85B }, // RTL8852BU
+    OemChipMapping { vid: 0x0489, pid: 0xE125, realtek_pid: 0xB85B }, // RTL8852BU
+    OemChipMapping { vid: 0x04BB, pid: 0x0A15, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x04C5, pid: 0x15D7, realtek_pid: 0xB82C }, // RTL8822BU
+    OemChipMapping { vid: 0x04C5, pid: 0x161F, realtek_pid: 0xC82C }, // RTL8822CU
+    OemChipMapping { vid: 0x04C5, pid: 0x165C, realtek_pid: 0xC852 }, // RTL8852AU
+    OemChipMapping { vid: 0x04C5, pid: 0x1670, realtek_pid: 0xB85B }, // RTL8852BU
+    OemChipMapping { vid: 0x04C5, pid: 0x1675, realtek_pid: 0xC85A }, // RTL8852CU
+    OemChipMapping { vid: 0x04CA, pid: 0x4000, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x04CA, pid: 0x4001, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x04CA, pid: 0x4002, realtek_pid: 0xD723 }, // RTL8723DU
+    OemChipMapping { vid: 0x04CA, pid: 0x4003, realtek_pid: 0xD723 }, // RTL8723DU
+    OemChipMapping { vid: 0x04CA, pid: 0x4004, realtek_pid: 0xB82C }, // RTL8822BU
+    OemChipMapping { vid: 0x04CA, pid: 0x4005, realtek_pid: 0xC82C }, // RTL8822CU
+    OemChipMapping { vid: 0x04CA, pid: 0x4006, realtek_pid: 0xC852 }, // RTL8852AU
+    OemChipMapping { vid: 0x04CA, pid: 0x4007, realtek_pid: 0xC85A }, // RTL8852CU
+    OemChipMapping { vid: 0x04CA, pid: 0x4B06, realtek_pid: 0xB85B }, // RTL8852BU
+    OemChipMapping { vid: 0x0B05, pid: 0x100E, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x0B05, pid: 0x185C, realtek_pid: 0xB82C }, // RTL8822BU
+    OemChipMapping { vid: 0x0B05, pid: 0x1865, realtek_pid: 0xB82C }, // RTL8822BU
+    OemChipMapping { vid: 0x0B05, pid: 0x18EA, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x0B05, pid: 0x18EB, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x0B05, pid: 0x18EF, realtek_pid: 0xC82C }, // RTL8822CU
+    OemChipMapping { vid: 0x0B05, pid: 0x190E, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x0BDA, pid: 0x2550, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x0BDA, pid: 0x8150, realtek_pid: 0xB851 }, // RTL8851BU
+    OemChipMapping { vid: 0x0BDA, pid: 0x8151, realtek_pid: 0xB851 }, // RTL8851BU
+    OemChipMapping { vid: 0x0BDA, pid: 0x8152, realtek_pid: 0xB851 }, // RTL8851BU
+    OemChipMapping { vid: 0x0BDA, pid: 0x876E, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x0BDA, pid: 0x877C, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x0BDA, pid: 0xB00B, realtek_pid: 0xB82C }, // RTL8822BU
+    OemChipMapping { vid: 0x0BDA, pid: 0xB010, realtek_pid: 0xD723 }, // RTL8723DU
+    OemChipMapping { vid: 0x0BDA, pid: 0xB011, realtek_pid: 0xD723 }, // RTL8723DU
+    OemChipMapping { vid: 0x0BDA, pid: 0xB027, realtek_pid: 0xB82C }, // RTL8822BU
+    OemChipMapping { vid: 0x0BDA, pid: 0xB028, realtek_pid: 0xB82C }, // RTL8822BU
+    OemChipMapping { vid: 0x0BDA, pid: 0xB029, realtek_pid: 0xB82C }, // RTL8822BU
+    OemChipMapping { vid: 0x0BDA, pid: 0xB030, realtek_pid: 0xB82C }, // RTL8822BU
+    OemChipMapping { vid: 0x0BDA, pid: 0xB031, realtek_pid: 0xB82C }, // RTL8822BU
+    OemChipMapping { vid: 0x0BDA, pid: 0xB033, realtek_pid: 0xB82C }, // RTL8822BU
+    OemChipMapping { vid: 0x0BDA, pid: 0xB58E, realtek_pid: 0xB851 }, // RTL8851BU
+    OemChipMapping { vid: 0x0BDA, pid: 0xB59E, realtek_pid: 0xB851 }, // RTL8851BU
+    OemChipMapping { vid: 0x0BDA, pid: 0xB60E, realtek_pid: 0xB851 }, // RTL8851BU
+    OemChipMapping { vid: 0x0BDA, pid: 0xB81B, realtek_pid: 0xB85B }, // RTL8852BU
+    OemChipMapping { vid: 0x0BDA, pid: 0xB850, realtek_pid: 0xB851 }, // RTL8851BU
+    OemChipMapping { vid: 0x0BDA, pid: 0xB85D, realtek_pid: 0xB85B }, // RTL8852BU
+    OemChipMapping { vid: 0x0BDA, pid: 0xB85E, realtek_pid: 0xB851 }, // RTL8851BU
+    OemChipMapping { vid: 0x0BDA, pid: 0xC031, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x0BDA, pid: 0xC801, realtek_pid: 0xC85A }, // RTL8852CU
+    OemChipMapping { vid: 0x0BDA, pid: 0xC802, realtek_pid: 0xC85A }, // RTL8852CU
+    OemChipMapping { vid: 0x0BDA, pid: 0xC803, realtek_pid: 0xC85A }, // RTL8852CU
+    OemChipMapping { vid: 0x0BDA, pid: 0xC829, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x0BDA, pid: 0xC831, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x0BDA, pid: 0xC851, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x0CB5, pid: 0xC547, realtek_pid: 0xC82C }, // RTL8822CU
+    OemChipMapping { vid: 0x0CB8, pid: 0xC549, realtek_pid: 0xC852 }, // RTL8852AU
+    OemChipMapping { vid: 0x0CB8, pid: 0xC558, realtek_pid: 0xC85A }, // RTL8852CU
+    OemChipMapping { vid: 0x0CB8, pid: 0xC559, realtek_pid: 0xB85B }, // RTL8852BU
+    OemChipMapping { vid: 0x10EC, pid: 0xC125, realtek_pid: 0xC82C }, // RTL8822CU
+    OemChipMapping { vid: 0x1357, pid: 0xC123, realtek_pid: 0xB85B }, // RTL8852BU
+    OemChipMapping { vid: 0x1358, pid: 0xC123, realtek_pid: 0xC82C }, // RTL8822CU
+    OemChipMapping { vid: 0x1358, pid: 0xC125, realtek_pid: 0xC852 }, // RTL8852AU
+    OemChipMapping { vid: 0x1358, pid: 0xC127, realtek_pid: 0xC852 }, // RTL8852AU
+    OemChipMapping { vid: 0x13D3, pid: 0x3524, realtek_pid: 0xD723 }, // RTL8723DU
+    OemChipMapping { vid: 0x13D3, pid: 0x3525, realtek_pid: 0xD723 }, // RTL8723DU
+    OemChipMapping { vid: 0x13D3, pid: 0x3526, realtek_pid: 0xB82C }, // RTL8822BU
+    OemChipMapping { vid: 0x13D3, pid: 0x3529, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3530, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3531, realtek_pid: 0xB82C }, // RTL8822BU
+    OemChipMapping { vid: 0x13D3, pid: 0x3532, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3533, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3536, realtek_pid: 0xB82C }, // RTL8822BU
+    OemChipMapping { vid: 0x13D3, pid: 0x3537, realtek_pid: 0xB82C }, // RTL8822BU
+    OemChipMapping { vid: 0x13D3, pid: 0x3538, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3539, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3548, realtek_pid: 0xC82C }, // RTL8822CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3549, realtek_pid: 0xC82C }, // RTL8822CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3552, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3553, realtek_pid: 0xC82C }, // RTL8822CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3555, realtek_pid: 0xC82C }, // RTL8822CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3556, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3557, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3558, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3559, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3561, realtek_pid: 0xC852 }, // RTL8852AU
+    OemChipMapping { vid: 0x13D3, pid: 0x3562, realtek_pid: 0xC852 }, // RTL8852AU
+    OemChipMapping { vid: 0x13D3, pid: 0x3565, realtek_pid: 0xC852 }, // RTL8852AU
+    OemChipMapping { vid: 0x13D3, pid: 0x3566, realtek_pid: 0xC852 }, // RTL8852AU
+    OemChipMapping { vid: 0x13D3, pid: 0x3570, realtek_pid: 0xB85B }, // RTL8852BU
+    OemChipMapping { vid: 0x13D3, pid: 0x3571, realtek_pid: 0xB85B }, // RTL8852BU
+    OemChipMapping { vid: 0x13D3, pid: 0x3572, realtek_pid: 0xB85B }, // RTL8852BU
+    OemChipMapping { vid: 0x13D3, pid: 0x3586, realtek_pid: 0xC85A }, // RTL8852CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3587, realtek_pid: 0xC85A }, // RTL8852CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3591, realtek_pid: 0xB85B }, // RTL8852BU
+    OemChipMapping { vid: 0x13D3, pid: 0x3592, realtek_pid: 0xC85A }, // RTL8852CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3599, realtek_pid: 0xC85A }, // RTL8852CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3600, realtek_pid: 0xB851 }, // RTL8851BU
+    OemChipMapping { vid: 0x13D3, pid: 0x3601, realtek_pid: 0xB851 }, // RTL8851BU
+    OemChipMapping { vid: 0x13D3, pid: 0x3611, realtek_pid: 0xB85B }, // RTL8852BU
+    OemChipMapping { vid: 0x13D3, pid: 0x3612, realtek_pid: 0xC85A }, // RTL8852CU
+    OemChipMapping { vid: 0x13D3, pid: 0x3626, realtek_pid: 0xB851 }, // RTL8851BU
+    OemChipMapping { vid: 0x14B0, pid: 0x047A, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x2001, pid: 0x332F, realtek_pid: 0xC85A }, // RTL8852CU
+    OemChipMapping { vid: 0x2357, pid: 0x0607, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x2550, pid: 0x8761, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x2B89, pid: 0x3CFA, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x2B89, pid: 0x6275, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x2B89, pid: 0x8761, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x2C0A, pid: 0x8761, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x2C4E, pid: 0x0115, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x2FF8, pid: 0x3051, realtek_pid: 0xC82C }, // RTL8822CU
+    OemChipMapping { vid: 0x2FF8, pid: 0x3541, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x2FF8, pid: 0x3543, realtek_pid: 0xC821 }, // RTL8821CU
+    OemChipMapping { vid: 0x3188, pid: 0x8771, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x33F2, pid: 0x1688, realtek_pid: 0x8771 }, // RTL8761BU
+    OemChipMapping { vid: 0x6655, pid: 0x8771, realtek_pid: 0x8771 }, // RTL8761BU
 ];
 
 /// The controller vendor, guessed from the USB VID:PID. Decides which
@@ -495,7 +617,9 @@ pub fn resolve_realtek_pid(vid: u16, pid: u16, btstack_table: &[(u16, u16, &str)
 /// The vendor of a USB VID:PID (`realtek_pid` from resolve_realtek_pid:
 /// Some means Realtek whatever the VID)
 pub fn vendor_for_usb(vid: u16, pid: u16, realtek_pid: Option<u16>) -> ChipVendor {
-    if realtek_pid.is_some() {
+    // Also a chip whose firmware only Realtek's Windows driver has, under
+    // a module maker's VID (crate::realtek_btnic)
+    if realtek_pid.is_some() || crate::realtek_btnic::chip(vid, pid).is_some() {
         return ChipVendor::Realtek;
     }
     // Modules under their maker's VID (AzureWave, Foxconn, ...), which

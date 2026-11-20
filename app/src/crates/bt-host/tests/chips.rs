@@ -84,6 +84,30 @@ fn realtek_pid_resolution_btstack_table() {
     );
 }
 
+/// The OEM table's entries from Realtek's Windows drivers: each ID once, none
+/// that BTstack's table already takes (with Realtek's VID) or another
+/// vendor's loader lists, each resolving to its chip
+#[test]
+fn oem_table_entries() {
+    let table = bt_host::realtek_usb_firmware();
+    for (i, m) in OEM_TABLE.iter().enumerate() {
+        let id = format!("{:04X}:{:04X}", m.vid, m.pid);
+        assert!(OEM_TABLE[i + 1..].iter().all(|o| (o.vid, o.pid) != (m.vid, m.pid)), "{id} twice");
+        assert!(!(m.vid == REALTEK_VID && table.iter().any(|&(_, p, _)| p == m.pid)), "{id} is in BTstack's table");
+        assert!(!LOADER_CHIPS.iter().any(|&(_, v, p)| (v, p) == (m.vid, m.pid)), "{id} is another loader's");
+        assert_eq!(resolve_realtek_pid(m.vid, m.pid, table), Some(m.realtek_pid), "{id}");
+        assert_eq!(vendor_for_usb(m.vid, m.pid, Some(m.realtek_pid)), ChipVendor::Realtek);
+    }
+    // Laptop modules and dongles of the drivers' tables
+    let chip_of = |vid, pid| resolve_realtek_pid(vid, pid, table).and_then(realtek_chip_name);
+    assert_eq!(chip_of(0x13D3, 0x3571), Some("RTL8852BU"));
+    assert_eq!(chip_of(0x0489, 0xE122), Some("RTL8852CU"));
+    assert_eq!(chip_of(0x04CA, 0x4005), Some("RTL8822CU"));
+    assert_eq!(chip_of(0x0BDA, 0xB85E), Some("RTL8851BU"));
+    assert_eq!(chip_of(0x2357, 0x0607), Some("RTL8761BU"));
+    assert_eq!(display_name(0x13D3, 0x3529, Some(0xC821), ChipVendor::Realtek), "RTL8821CU (0x13D3:0x3529)");
+}
+
 #[test]
 fn vendors_and_names() {
     assert_eq!(vendor_for_usb(0x2357, 0x0604, Some(0x8771)), ChipVendor::Realtek);

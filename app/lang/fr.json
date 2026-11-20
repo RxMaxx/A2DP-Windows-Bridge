@@ -129,6 +129,7 @@
   "firmware.vendor_mediatek": "Adaptateur MediaTek. Le firmware provient du pilote Windows de MediaTek.",
   "firmware.vendor_qualcomm": "Adaptateur Qualcomm. Le firmware provient du pilote Windows de Qualcomm.",
   "firmware.vendor_realtek_driver": "Adaptateur Realtek RTL8852BD. Le firmware provient du pilote Windows de Realtek : gardez ce pilote installé.",
+  "firmware.vendor_realtek_driver_other": "Adaptateur Realtek. Le firmware provient du pilote Windows de Realtek : gardez ce pilote installé.",
   "firmware.vendor_broadcom": "Adaptateur Broadcom : aucun fichier Realtek requis.",
   "firmware.vendor_csr": "Adaptateur CSR : aucun fichier de firmware requis.",
   "firmware.vendor_barrot": "Adaptateur Barrot : aucun fichier de firmware requis.",

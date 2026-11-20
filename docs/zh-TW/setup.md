@@ -169,7 +169,7 @@ BlueCaster 會偵測介面卡的晶片組，並顯示需要哪些韌體檔案。
 | 晶片組 | 產品範例 | 備註 |
 |:--------|:-----------------|:------|
 | Realtek | TP-Link UB500, RTL8761BU | 已安裝 Realtek 的 Windows 驅動程式時使用其中的韌體，否則需要下載韌體（見上文）。測試最完整 |
-| Realtek | 筆電內建的 RTL8852BD（`0BDA:B853`） | linux-firmware 沒有這款晶片的韌體：BlueCaster 會從 Realtek 的 Windows 藍牙驅動程式讀取 `rtl8852bd_mp_chip_new.dat`，因此請保留該驅動程式（或將檔案放入韌體資料夾）。尚未在實際硬體上測試 |
+| Realtek | RTL8852BD（`0BDA:B853`）、RTL8852BT、RTL8922A | BlueCaster 會從 Realtek 的 Windows 藍牙驅動程式讀取韌體（例如 `rtl8852bd_mp_chip_new.dat`），因此請保留該驅動程式，或將記錄中列出的檔案放入韌體資料夾。尚未在實際硬體上測試 |
 | CSR | 一般的 CSR8510 接收器 | 隨插即用，不需要韌體 |
 | Barrot | Bluetooth 5.4 / 6.0 接收器（`33FA:0010`、`33FA:0012`） | 使用 ROM 韌體運作，不需要韌體。目前只有一份使用者回報 |
 | Marvell | Microsoft Surface Pro / Surface Book 內建（88W8897） | 不需要韌體檔案：Wi-Fi 驅動程式也會載入藍牙韌體，請保持 Wi-Fi 開啟。尚未在實際硬體上測試 |

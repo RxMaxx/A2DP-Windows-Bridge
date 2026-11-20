@@ -129,6 +129,7 @@
   "firmware.vendor_mediatek": "MediaTek-Adapter. Die Firmware stammt aus dem Windows-Treiber von MediaTek.",
   "firmware.vendor_qualcomm": "Qualcomm-Adapter. Die Firmware stammt aus dem Windows-Treiber von Qualcomm.",
   "firmware.vendor_realtek_driver": "Realtek-RTL8852BD-Adapter. Die Firmware stammt aus dem Windows-Treiber von Realtek. Lassen Sie diesen Treiber daher installiert.",
+  "firmware.vendor_realtek_driver_other": "Realtek-Adapter. Die Firmware stammt aus dem Windows-Treiber von Realtek. Lassen Sie diesen Treiber daher installiert.",
   "firmware.vendor_broadcom": "Broadcom-Adapter: keine Realtek-Dateien nötig.",
   "firmware.vendor_csr": "CSR-Adapter: keine Firmwaredateien nötig.",
   "firmware.vendor_barrot": "Barrot-Adapter: keine Firmwaredateien nötig.",
