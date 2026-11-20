@@ -458,6 +458,13 @@ impl BtHost {
         self.le_run(RUN_TIMEOUT, |ctx| ctx.device_infos()).unwrap_or_default()
     }
 
+    /// The coordinated sets the CSIP module knows: (the set's
+    /// `LeScanResult::set_id`, the identity addresses of its bonded and
+    /// connected members). Empty without LE Audio.
+    pub fn le_known_sets(&self) -> Vec<(u32, Vec<[u8; 6]>)> {
+        self.le_run(RUN_TIMEOUT, super::modules::csip::known_sets).unwrap_or_default()
+    }
+
     /// Headset volume through the modules (VCP), 0-127, None while unknown;
     /// any thread
     pub fn le_remote_volume(&self) -> Option<u8> {

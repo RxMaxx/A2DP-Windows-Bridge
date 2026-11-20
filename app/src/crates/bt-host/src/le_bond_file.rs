@@ -91,6 +91,26 @@ pub fn parse(data: &[u8]) -> Vec<StoredLeBond> {
     entries.into_iter().filter(|(t, _)| is_bond_tag(*t)).filter_map(|(_, v)| entry(&v)).collect()
 }
 
+/// Drops the bonds of the identity `addr` from the file `path` while no
+/// stack holds it (a running one deletes through BTstack instead:
+/// [`crate::BtHost::forget_le_bond`]). Returns how many were dropped; a
+/// missing file has none.
+pub fn forget(path: &Path, addr: &[u8; 6]) -> std::io::Result<usize> {
+    let data = match win_sys::dpapi::read_secret(path) {
+        Ok(d) => d,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e),
+    };
+    let mut kept = entries(&data);
+    let before = kept.len();
+    kept.retain(|(t, v)| !(is_bond_tag(*t) && entry(v).is_some_and(|b| b.addr == *addr)));
+    let dropped = before - kept.len();
+    if dropped > 0 {
+        win_sys::dpapi::write_secret(path, &format(&kept))?;
+    }
+    Ok(dropped)
+}
+
 /// The LE TLV of a running stack: in memory, the whole file rewritten
 /// (encrypted, temp file + rename) on every change
 pub struct TlvFile {
@@ -274,6 +294,28 @@ mod tests {
         assert_eq!(bonds.len(), 1);
         assert_eq!(bonds[0].ltk, [0x33; 16]);
         assert_eq!(TlvFile::open(&file).entries, vec![(BTD1, bond_value(b, 0x33, false))]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_forgotten_bond_leaves_the_file() {
+        let dir = std::env::temp_dir().join(format!("bluecaster-tlv-forget-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("le_audio_bonds.tlv");
+        assert_eq!(forget(&file, &[1; 6]).unwrap(), 0);
+        let a = [0xC0, 1, 2, 3, 4, 5];
+        let b = [0xD0, 1, 2, 3, 4, 5];
+        let gatt = u32::from_be_bytes(*b"GATT");
+        let data = tlv(&[(BTD0, bond_value(a, 0x22, false)), (gatt, vec![1]), (BTD1, bond_value(b, 0x33, false))]);
+        win_sys::dpapi::write_secret(&file, &data).unwrap();
+        assert_eq!(forget(&file, &a).unwrap(), 1);
+        assert_eq!(forget(&file, &a).unwrap(), 0);
+        let bonds = read(&file).unwrap();
+        assert_eq!(bonds.len(), 1);
+        assert_eq!(bonds[0].addr, b);
+        // Other entries stay
+        assert_eq!(TlvFile::open(&file).entries.len(), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
