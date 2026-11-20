@@ -124,6 +124,11 @@ fn display_names_like_v1() {
     assert_eq!(display_name(0x0CF3, 0xE300, None, ChipVendor::Qualcomm), "Qualcomm (0x0CF3:0xE300)");
     assert_eq!(vendor_for_usb(0x0489, 0xE0C7, None), ChipVendor::Qualcomm);
     assert_eq!(display_name(0x0CF3, 0xE400, None, ChipVendor::Qualcomm), "Qualcomm (0x0CF3:0xE400) [unsupported]");
+    // Qualcomm WCN785x, also in a Surface under Microsoft's VID (that ID only)
+    assert_eq!(display_name(0x0CF3, 0xE700, None, ChipVendor::Qualcomm), "Qualcomm (0x0CF3:0xE700)");
+    assert_eq!(vendor_for_usb(0x0489, 0xE0F3, None), ChipVendor::Qualcomm);
+    assert_eq!(vendor_for_usb(0x045E, 0x0C9E, None), ChipVendor::Qualcomm);
+    assert_eq!(vendor_for_usb(0x045E, 0x0C9D, None), ChipVendor::Unknown);
     assert_eq!(display_name(0x0A12, 0x0001, None, ChipVendor::Csr), "CSR (0x0A12:0x0001)");
     assert_eq!(display_name(0x0BDA, 0x1234, None, ChipVendor::Realtek), "0x0BDA:0x1234");
     assert_eq!(display_name(0x1234, 0x5678, None, ChipVendor::Unknown), "0x1234:0x5678");
