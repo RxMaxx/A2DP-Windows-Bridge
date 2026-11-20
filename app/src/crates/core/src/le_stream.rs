@@ -631,10 +631,28 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
     // The headset volume (VCP) for the volume slider (issue #86: disabled
     // while LE Audio streamed), as AVRCP's reports are for classic devices
     let mut shown_volume = None;
+    // CIS of the stream that get no SDU through while the others play (an
+    // earbud whose controller queue never empties)
+    let mut shown_stalled = 0;
     while !stopped() {
         inner.wait_tick(Duration::from_millis(200));
         if stopped() {
             break;
+        }
+        let stalled = host.le_stream_stats().cis_stalled;
+        if stalled != shown_stalled {
+            shown_stalled = stalled;
+            if stalled > 0 {
+                tracing::warn!("LE Audio: {stalled} CIS get no audio through, the others play on");
+                inner.notify(StreamState::Streaming, Msg::new("status.le_set_partial"));
+            } else {
+                tracing::info!("LE Audio: every CIS gets audio through again");
+                let partial = (host.le_set_members_missing() > 0).then(|| Msg::new("status.le_set_partial"));
+                inner.notify(
+                    StreamState::Streaming,
+                    mic_note.clone().or(partial).unwrap_or_else(|| Msg::new("status.connected")),
+                );
+            }
         }
         if let Some(v) = volume.as_mut() {
             v.tick(sync_volume, &crate::volume_sync::LeHeadphones(&host));
@@ -1104,6 +1122,7 @@ mod tests {
             overflows: 2,
             send_errors: 0,
             prefill: 5,
+            ..Default::default()
         };
         assert_eq!(
             le_stats_line(&s),

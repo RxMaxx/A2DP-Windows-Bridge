@@ -1423,7 +1423,11 @@ uint8_t bluecaster_cig_create(uint8_t cig_id, uint32_t sdu_interval_c_to_p, uint
 }
 
 /* One HCI ISO data packet with a complete SDU: handle | PB 0b10, no time
- * stamp, SDU header (sequence number, length). For CIS can-send-now. */
+ * stamp, SDU header (sequence number, length). The caller keeps the
+ * controller's queue (bt-host iso_send counts completions; BTstack does not
+ * check ISO space). BTSTACK_ACL_BUFFERS_FULL while BTstack's one outgoing
+ * packet buffer is taken: nothing sent, send it again after
+ * HCI_EVENT_TRANSPORT_PACKET_SENT. */
 uint8_t bluecaster_iso_send(uint16_t cis_handle, uint16_t sequence_number, const uint8_t *sdu, uint16_t len) {
     if ((uint32_t)len + 4u > HCI_ISO_PAYLOAD_SIZE) return ERROR_CODE_INVALID_HCI_COMMAND_PARAMETERS;
     if (hci_is_packet_buffer_reserved()) return BTSTACK_ACL_BUFFERS_FULL;

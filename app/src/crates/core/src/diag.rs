@@ -2534,6 +2534,7 @@ mod tests {
                 overflows: 3,
                 send_errors: 0,
                 prefill: 6,
+                ..Default::default()
             }),
             devices: vec![bt_host::LeDeviceInfo {
                 id: bt_host::LeDeviceId(1),

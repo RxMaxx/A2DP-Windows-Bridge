@@ -1,49 +1,119 @@
 //! ISO SDU sending on the BTstack thread (v1 Stream's sending half,
 //! le_audio_stream.cpp).
 //!
-//! On HCI_EVENT_CIS_CAN_SEND_NOW the sender takes the next SDU set from the
-//! shared jitter buffer ([`le_audio::sdu_queue::SduQueue`], silence on an
-//! underrun) and sends each CIS its SDU as one HCI ISO data packet:
-//! complete SDU (never fragmented: plan_stream only takes SDUs that fit),
-//! sequence number counting up per CIS, no time stamp (the controller
-//! places SDUs by sequence number). Two SDUs queued per CIS
-//! (hci_set_num_iso_packets_to_queue; queue x CIS within the controller's
-//! ISO buffers), and the [`le_audio::sdu_queue::SendGuard`] keeps the sent
-//! sets at most queue + 2 intervals ahead of real time. A round starts once
-//! every CIS still up got its SDU, so one CIS going down does not stall the
-//! others. Logs "LE Audio: no audio for SDU set N" and, at the end, "LE
-//! Audio: stopped sending: N SDU sets (...), S silence, U underruns, ...".
+//! Unicast (CIS) sending is paced by the SDU interval on the run loop's
+//! timer ([`TIMER_ISO`]). Each interval the sender takes the next SDU set
+//! from the shared jitter buffer ([`le_audio::sdu_queue::SduQueue`],
+//! silence on an underrun) and hands every CIS its SDU with that interval's
+//! sequence number. Each CIS then sends on its own: an SDU goes to the
+//! controller as one HCI ISO data packet (complete SDU, never fragmented:
+//! plan_stream only takes SDUs that fit; no time stamp) while that CIS has
+//! fewer than `depth` SDUs in the controller, counted from our sends and
+//! HCI Number Of Completed Packets. The sender runs [`LEAD_SETS`] intervals
+//! ahead of real time, so a late timer does not leave the controller
+//! without an SDU.
 //!
-//! A broadcast (BIG) is sent the same way on HCI_EVENT_BIS_CAN_SEND_NOW,
-//! which BTstack gives for every BIS of the BIG in BIS order once all of
-//! them have room. Several BIGs (broadcasts of their own, e.g. left and
-//! right) share one round: each BIG is asked, and the round ends once every
-//! BIS of all of them got its SDU.
+//! BTstack's CIS can-send-now is not used for sending: it grants the CIS of
+//! a CIG in lockstep and stops at the first CIS whose queue is full, so a
+//! CIS whose completions came late (a flush timeout of 10 ISO intervals) or
+//! never held up every other CIS too. A CIS whose controller queue is full
+//! keeps its SDUs waiting; beyond [`PENDING_MAX`] the oldest is dropped
+//! ("late"). Sequence numbers count SDU intervals, so a dropped SDU leaves a
+//! gap in the numbers (Core Vol 6 Part G 2: the controller uses them to
+//! place SDUs in their intervals).
 //!
-//! BTstack (1.8.3) refuses the CIS request with Command Disallowed until
-//! the CIG is active, which is only after the ISO data paths are set up;
-//! the stream can start before that (the ASE reaches Streaming in the same
-//! moment as the CIS), so a refused request is asked again 1 ms later.
+//! BTstack has one outgoing HCI packet buffer for ACL and ISO. While it is
+//! taken (an ISO packet or a GATT write still on its way to the controller)
+//! a send is refused with BTSTACK_ACL_BUFFERS_FULL; the same SDU goes again,
+//! with the same sequence number, on HCI_EVENT_TRANSPORT_PACKET_SENT (or the
+//! next completion or interval).
 //!
-//! No allocation per round: a sent set goes back to the queue's pool
-//! ([`le_audio::sdu_queue::SduQueue::recycle`]) when the next round starts,
-//! and the silence of an underrun is copied into a spare set.
+//! Depth per CIS: the CIS's share of the controller's ISO buffers
+//! ([`cis_queue_share`]), within what the flush timeout of LE CIS
+//! Established says the controller may hold ([`depth_for_flush`]).
+//! MediaTek controllers keep [`MEDIATEK_QUEUE_DEPTH`] or the Developer >
+//! Debug setting.
+//!
+//! Health: counters are published about once a second
+//! ([`BtHost::le_stream_stats`](crate::BtHost)); every 10 s an "LE stream
+//! health" line per CIS (SDUs per second, late SDUs, completion delay,
+//! queue peak). A CIS without a completion for [`STALL_MS`] while SDUs wait
+//! in the controller is stalled; when every CIS is, the stream is reported
+//! lost ([`IsoSender::take_stall`]), else the others play on and
+//! `LeStreamStats::cis_stalled` says how many do not.
+//!
+//! A broadcast (BIG) is sent in rounds on HCI_EVENT_BIS_CAN_SEND_NOW, which
+//! BTstack gives for every BIS of the BIG in BIS order once all of them
+//! have room. Several BIGs (broadcasts of their own, e.g. left and right)
+//! share one round: each BIG is asked, and the round ends once every BIS
+//! of all of them got its SDU, so all carry the same set and sequence
+//! number. The [`le_audio::sdu_queue::SendGuard`] keeps those rounds at
+//! most queue + 2 intervals ahead of real time.
+//!
+//! BTstack (1.8.3) refuses the CIS can-send-now request with Command
+//! Disallowed until the CIG is active, which is only after the ISO data
+//! paths are set up; the stream can start before that (the ASE reaches
+//! Streaming in the same moment as the CIS), so the sender asks again every
+//! 1 ms and starts once it is accepted.
+//!
+//! No allocation per interval: a set goes back to the queue's pool
+//! ([`le_audio::sdu_queue::SduQueue::recycle`]) once its SDUs are copied to
+//! the CIS, whose SDU buffers are reused.
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
-use btstack_sys::consts::{ERROR_CODE_COMMAND_DISALLOWED, ERROR_CODE_SUCCESS};
-use btstack_sys::events;
+use btstack_sys::consts::{
+    BTSTACK_ACL_BUFFERS_FULL, ERROR_CODE_COMMAND_DISALLOWED, ERROR_CODE_SUCCESS, HCI_EVENT_NUMBER_OF_COMPLETED_PACKETS,
+    HCI_EVENT_TRANSPORT_PACKET_SENT,
+};
+use btstack_sys::events::{self, LeCisEstablished};
 use btstack_sys::{HighTimerResolution, Stack};
 use le_audio::sdu_queue::{QueueStats, SduSet, SendCounters, SendGuard};
 
 use super::LeStreamStats;
 use super::core::SharedSduQueue;
 
-/// SDUs queued per CIS in the controller (at most)
+/// SDUs queued per BIS in the controller (at most), and the jitter
+/// buffer's prefill base
 pub const QUEUE_DEPTH: u8 = 2;
 
-/// The run loop timer of the send guard
+/// SDUs queued per CIS at most (within the controller's ISO buffers)
+pub const MAX_CIS_QUEUE_DEPTH: u8 = 16;
+
+/// SDUs queued per CIS at least when the buffers allow: the lead, the one
+/// on air and one more
+const MIN_CIS_QUEUE_DEPTH: u8 = 4;
+
+/// SDU sets the CIS sender runs ahead of real time
+pub const LEAD_SETS: u64 = 2;
+
+/// SDUs a CIS keeps waiting for room in the controller (the lead and the
+/// interval going on); beyond, the oldest is dropped as late
+pub const PENDING_MAX: usize = LEAD_SETS as usize + 1;
+
+/// SDU sets made at once after the run loop was held up; older intervals
+/// are skipped
+const CATCH_UP_MAX: u64 = 50;
+
+/// No SDU completed on a CIS for this long while SDUs wait in the
+/// controller: the CIS is stalled
+pub const STALL_MS: u32 = 2000;
+
+/// Counters published this often
+const STATS_MS: u32 = 1000;
+
+/// The "LE stream health" line this often
+const HEALTH_MS: u32 = 10_000;
+
+/// Completion delays kept per CIS for one health line
+const DELAY_SAMPLES_MAX: usize = 4096;
+
+/// LE CIS Established parameters kept (the latest per handle)
+const LINKS_MAX: usize = 8;
+
+/// The run loop timer of the sender
 pub(crate) const TIMER_ISO: u32 = 4;
 
 /// A CIS request refused while the CIG is not active yet is asked again
@@ -51,8 +121,8 @@ pub(crate) const TIMER_ISO: u32 = 4;
 const CIG_NOT_ACTIVE_RETRY_MS: u32 = 1;
 
 /// SDUs queued per CIS on a MediaTek controller (issue #86, measured on an
-/// MT7925: with [`QUEUE_DEPTH`] it completed the first three ISO packets
-/// and then none; with 12 it played; hci_transport's iso_intr has the rest)
+/// MT7925: with 2 it completed the first three ISO packets and then none;
+/// with 12 it played; hci_transport's iso_intr has the rest)
 pub const MEDIATEK_QUEUE_DEPTH: u8 = 12;
 
 /// Developer > Debug: SDUs queued per CIS on a MediaTek controller instead
@@ -87,13 +157,22 @@ fn depth_limit_for(mediatek: bool, debug: u8) -> u8 {
     }
 }
 
-/// SDUs BTstack queues per CIS: [`QUEUE_DEPTH`] ([`MEDIATEK_QUEUE_DEPTH`]
-/// or the Debug setting on MediaTek's),
-/// fewer when the controller has fewer ISO buffers than that for every
-/// CIS (queue x CIS must stay within Total_Num_ISO_Data_Packets, which
-/// Number Of Completed Packets frees again); 0: not even one per CIS
+/// SDUs queued per BIS (and the jitter buffer's prefill base):
+/// [`QUEUE_DEPTH`] ([`MEDIATEK_QUEUE_DEPTH`] or the Debug setting on
+/// MediaTek's), fewer when the controller has fewer ISO buffers than that
+/// for every stream (queue x streams must stay within
+/// Total_Num_ISO_Data_Packets, which Number Of Completed Packets frees
+/// again); 0: not even one per stream
 pub(crate) fn queue_depth(iso_packets: u8, cis: usize) -> u8 {
     queue_depth_within(iso_packets, cis, depth_limit())
+}
+
+/// The most SDUs one of `cis` CIS may have queued in the controller: its
+/// share of the ISO buffers, at most [`MAX_CIS_QUEUE_DEPTH`] (on MediaTek's:
+/// [`MEDIATEK_QUEUE_DEPTH`] or the Debug setting); 0: not even one per CIS
+pub(crate) fn cis_queue_share(iso_packets: u8, cis: usize) -> u8 {
+    let limit = if MEDIATEK.load(Ordering::Relaxed) { depth_limit() } else { MAX_CIS_QUEUE_DEPTH };
+    queue_depth_within(iso_packets, cis, limit)
 }
 
 fn queue_depth_within(iso_packets: u8, cis: usize, limit: u8) -> u8 {
@@ -103,11 +182,40 @@ fn queue_depth_within(iso_packets: u8, cis: usize, limit: u8) -> u8 {
     (iso_packets as usize / cis).min(limit as usize) as u8
 }
 
+/// SDUs a CIS needs queued with this flush timeout: the controller may
+/// hold an SDU until FT ISO intervals after its first event (a PDU the
+/// peer does not acknowledge completes only then), plus the lead and the
+/// one on air and one for timer jitter; within
+/// [`MIN_CIS_QUEUE_DEPTH`]..[`MAX_CIS_QUEUE_DEPTH`]
+pub(crate) fn depth_for_flush(ft: u8, iso_interval_us: u32, sdu_interval_us: u32) -> u8 {
+    let held = (u32::from(ft) * iso_interval_us).div_ceil(sdu_interval_us.max(1));
+    (held + LEAD_SETS as u32 + 2).clamp(u32::from(MIN_CIS_QUEUE_DEPTH), u32::from(MAX_CIS_QUEUE_DEPTH)) as u8
+}
+
+/// The depth a CIS stream uses: the share of the buffers, within the need
+/// of the flush timeout when known (MediaTek's: the share as it is)
+fn cis_depth(share: u8, mediatek: bool, flush_need: Option<u8>) -> u8 {
+    match flush_need {
+        Some(need) if !mediatek => share.min(need),
+        _ => share,
+    }
+}
+
+fn phy_name(phy: u8) -> &'static str {
+    match phy {
+        1 => "1M",
+        2 => "2M",
+        3 => "Coded",
+        _ => "?",
+    }
+}
+
 /// What the sender needs of BTstack (the Stack; a fake in the tests)
 pub(crate) trait IsoOut {
     fn time_ms(&self) -> u32;
     fn set_queue(&self, packets: u8);
     /// CIS can-send-now for every CIS of the CIG of `cis`: BTstack's status
+    /// (Command Disallowed while the CIG is not active)
     fn request_can_send(&self, cis: u16) -> u8;
     /// BIS can-send-now for every BIS of the BIG
     fn request_bis_can_send(&self, _big: u8) {}
@@ -146,29 +254,142 @@ impl IsoOut for Stack {
     }
 }
 
+/// An SDU waiting for room in the controller
+struct Pending {
+    seq: u16,
+    sdu: Vec<u8>,
+}
+
+/// One CIS of the running stream
+struct CisOut {
+    handle: u16,
+    /// Not reported down
+    alive: bool,
+    pending: VecDeque<Pending>,
+    /// SDU buffers to reuse
+    free: Vec<Vec<u8>>,
+    /// Run loop time of each SDU in the controller (oldest first)
+    in_flight: VecDeque<u32>,
+    /// Last completion, or the send that found the controller queue empty
+    progress_ms: u32,
+    stalled: bool,
+    sent: u64,
+    completed: u64,
+    /// Dropped without being sent (late, or the send failed)
+    late: u64,
+    /// For the health line: since the last one
+    window_sent: u64,
+    window_late: u64,
+    window_peak: usize,
+    delays_ms: Vec<u32>,
+}
+
+impl CisOut {
+    fn new(handle: u16, now: u32) -> CisOut {
+        CisOut {
+            handle,
+            alive: true,
+            pending: VecDeque::with_capacity(PENDING_MAX + 1),
+            free: Vec::with_capacity(PENDING_MAX + 1),
+            in_flight: VecDeque::with_capacity(usize::from(MAX_CIS_QUEUE_DEPTH)),
+            progress_ms: now,
+            stalled: false,
+            sent: 0,
+            completed: 0,
+            late: 0,
+            window_sent: 0,
+            window_late: 0,
+            window_peak: 0,
+            delays_ms: Vec::with_capacity(256),
+        }
+    }
+
+    /// The SDU of the next interval: waits for room in the controller, the
+    /// oldest waiting one dropped beyond [`PENDING_MAX`]
+    fn give(&mut self, seq: u16, sdu: &[u8]) {
+        if self.pending.len() >= PENDING_MAX
+            && let Some(old) = self.pending.pop_front()
+        {
+            self.late += 1;
+            self.window_late += 1;
+            self.free.push(old.sdu);
+        }
+        let mut buf = self.free.pop().unwrap_or_default();
+        buf.clear();
+        buf.extend_from_slice(sdu);
+        self.pending.push_back(Pending { seq, sdu: buf });
+    }
+
+    /// Number Of Completed Packets: `n` of its SDUs left the controller
+    fn on_completed(&mut self, n: u16, now: u32) {
+        for _ in 0..n {
+            let Some(at) = self.in_flight.pop_front() else { break };
+            if self.delays_ms.len() < DELAY_SAMPLES_MAX {
+                self.delays_ms.push(now.wrapping_sub(at));
+            }
+            self.completed += 1;
+        }
+        self.progress_ms = now;
+        if self.stalled {
+            self.stalled = false;
+            tracing::info!("LE Audio: CIS 0x{:04X}: SDUs complete again", self.handle);
+        }
+    }
+
+    fn down(&mut self) {
+        self.alive = false;
+        self.stalled = false;
+        self.in_flight.clear();
+        while let Some(p) = self.pending.pop_front() {
+            self.free.push(p.sdu);
+        }
+    }
+
+    /// "CIS 0x0060: 100.0 SDUs/s, 0 late, completion p50 12 ms p90 20 ms,
+    /// queue peak 3 of 10"; starts the next window
+    fn health(&mut self, secs: f64, depth: u8) -> String {
+        let delays = if self.delays_ms.is_empty() {
+            "no completion".to_string()
+        } else {
+            self.delays_ms.sort_unstable();
+            let at = |pct: usize| self.delays_ms[(self.delays_ms.len() * pct / 100).min(self.delays_ms.len() - 1)];
+            format!("completion p50 {} ms p90 {} ms", at(50), at(90))
+        };
+        let line = format!(
+            "CIS 0x{:04X}{}: {:.1} SDUs/s, {} late, {delays}, queue peak {} of {depth}",
+            self.handle,
+            if !self.alive {
+                " (down)"
+            } else if self.stalled {
+                " (stalled)"
+            } else {
+                ""
+            },
+            self.window_sent as f64 / secs.max(0.001),
+            self.window_late,
+            self.window_peak
+        );
+        self.window_sent = 0;
+        self.window_late = 0;
+        self.window_peak = self.in_flight.len();
+        self.delays_ms.clear();
+        line
+    }
+}
+
 /// The sender of the running stream
 #[derive(Default)]
 pub struct IsoSender {
     sending: bool,
     /// 1 ms system timer resolution while sending (as v1), so that the
-    /// guard timer and time_ms() don't move in 15.6 ms steps
+    /// timer and time_ms() don't move in 15.6 ms steps
     timer_resolution: Option<HighTimerResolution>,
     /// Sending to BIGs (broadcasts): each handle with the index of its
     /// first BIS in `cis_handles`; empty: a CIG
     bigs: Vec<(u8, usize)>,
-    /// The CIS (or BIS) handles in plan order
-    cis_handles: Vec<u16>,
-    seq: Vec<u16>,
-    /// Per CIS: not reported down
-    alive: Vec<bool>,
-    /// Per CIS: has its SDU of the current round
-    served: Vec<bool>,
-    round_open: bool,
-    current: SduSet,
     queue: Option<SharedSduQueue>,
-    guard: SendGuard,
     frame_us: u32,
-    /// Run loop time of the first round
+    /// Run loop time of the first interval (CIS: once the CIG is active)
     t0_ms: Option<u32>,
     /// sets_sent, sdus_sent, send_errors (the rest is the queue's)
     counters: SendCounters,
@@ -177,15 +398,47 @@ pub struct IsoSender {
     queue_stats: QueueStats,
     /// The jitter buffer's prefill (sets)
     prefill: usize,
+    /// CIS requests asked again because the CIG was not active yet
+    cig_retries: u32,
+    /// Published for BtHost::le_stream_stats
+    stats_out: Arc<Mutex<LeStreamStats>>,
+
+    // ---- CIS ----
+    cis: Vec<CisOut>,
+    /// SDUs queued per CIS in the controller at most
+    depth: u8,
+    /// The CIG is active: pacing runs
+    active: bool,
+    /// SDU sets taken so far (the next one's sequence number)
+    produced: u64,
+    /// Intervals skipped after the run loop was held up
+    skipped: u64,
+    /// Sends refused while BTstack's packet buffer was taken (sent again)
+    busy: u64,
+    /// The CIS that sends first next time
+    next_cis: usize,
+    last_stats_ms: u32,
+    last_health_ms: u32,
+    /// Every CIS stalled: why, until taken
+    stall: Option<String>,
+    stall_reported: bool,
+    /// LE CIS Established of the recent CIS (any stream)
+    links: Vec<LeCisEstablished>,
+
+    // ---- BIG (rounds) ----
+    /// The BIS handles in plan order
+    cis_handles: Vec<u16>,
+    seq: Vec<u16>,
+    /// Per BIS: has its SDU of the current round
+    served: Vec<bool>,
+    round_open: bool,
+    current: SduSet,
+    guard: SendGuard,
     /// Send guard waits: how many, the run loop time the current one is
     /// due, and how late the timer fired at most (ms)
     guard_waits: u64,
     guard_due_ms: Option<u32>,
     guard_late_ms: u32,
-    /// CIS requests asked again because the CIG was not active yet
-    cig_retries: u32,
-    /// Published for BtHost::le_stream_stats
-    stats_out: Arc<Mutex<LeStreamStats>>,
 }
 
 impl IsoSender {
@@ -193,21 +446,40 @@ impl IsoSender {
         IsoSender { stats_out, ..IsoSender::default() }
     }
 
-    /// Starts sending on these CIS (plan order) from `queue` (configured
-    /// for `queue_depth` already), one set per `frame_us`
+    /// Starts sending on these CIS (plan order) from `queue`, one set per
+    /// `frame_us`; `share`: [`cis_queue_share`]
     pub(crate) fn start(
         &mut self,
         out: &dyn IsoOut,
         cis_handles: &[u16],
         queue: SharedSduQueue,
         frame_us: u32,
-        queue_depth: u8,
+        share: u8,
     ) {
         self.bigs.clear();
-        self.begin(out, cis_handles, queue, frame_us, queue_depth);
+        self.reset(queue, frame_us);
+        let need = self.flush_need(cis_handles, frame_us);
+        let mediatek = MEDIATEK.load(Ordering::Relaxed);
+        self.depth = cis_depth(share, mediatek, need).max(1);
+        let now = out.time_ms();
+        self.cis = cis_handles.iter().map(|&h| CisOut::new(h, now)).collect();
+        self.cis_handles = cis_handles.to_vec();
+        self.publish();
+        out.set_queue(self.depth);
+        self.timer_resolution = Some(HighTimerResolution::new());
+        self.sending = true;
+        tracing::info!("LE Audio: sending ISO SDUs on {} CIS (queue {})", cis_handles.len(), self.depth);
+        tracing::debug!(
+            "LE Audio: ISO sender: CIS {cis_handles:04X?}, frame {} us, prefill {} set(s), {share} buffer(s) per \
+             CIS, flush timeout needs {}, lead {LEAD_SETS} set(s)",
+            self.frame_us,
+            self.prefill,
+            need.map_or("?".to_string(), |n| n.to_string())
+        );
+        self.activate(out);
     }
 
-    /// As [`IsoSender::start`] for the BIS of a BIG (in BIS order)
+    /// As [`IsoSender::start_bigs`] for one BIG
     #[cfg(test)]
     pub(crate) fn start_big(
         &mut self,
@@ -221,8 +493,10 @@ impl IsoSender {
         self.start_bigs(out, &[(big, bis_handles.to_vec())], queue, frame_us, queue_depth);
     }
 
-    /// As [`IsoSender::start`] for the BIS of several BIGs (each in BIS
-    /// order; the SDU set has one SDU per BIS in this order)
+    /// Starts sending on the BIS of several BIGs (each in BIS order; the
+    /// SDU set has one SDU per BIS in this order), in rounds of BTstack's
+    /// BIS can-send-now: each BIG is asked, and the round ends once every
+    /// BIS of all of them got its SDU (one set per interval for all)
     pub(crate) fn start_bigs(
         &mut self,
         out: &dyn IsoOut,
@@ -231,47 +505,54 @@ impl IsoSender {
         frame_us: u32,
         queue_depth: u8,
     ) {
-        let mut handles = Vec::new();
+        let mut bis_handles = Vec::new();
         self.bigs.clear();
         for (big, bis) in bigs {
-            self.bigs.push((*big, handles.len()));
-            handles.extend_from_slice(bis);
+            self.bigs.push((*big, bis_handles.len()));
+            bis_handles.extend_from_slice(bis);
         }
-        self.begin(out, &handles, queue, frame_us, queue_depth);
-    }
-
-    fn begin(&mut self, out: &dyn IsoOut, cis_handles: &[u16], queue: SharedSduQueue, frame_us: u32, queue_depth: u8) {
-        self.cis_handles = cis_handles.to_vec();
-        self.seq = vec![0; cis_handles.len()];
-        self.alive = vec![true; cis_handles.len()];
-        self.served = vec![false; cis_handles.len()];
+        let bis_handles = &bis_handles[..];
+        self.reset(queue, frame_us);
+        self.cis.clear();
+        self.cis_handles = bis_handles.to_vec();
+        self.seq = vec![0; bis_handles.len()];
+        self.served = vec![false; bis_handles.len()];
         self.round_open = false;
         self.current = SduSet::new();
-        self.queue = Some(queue);
-        self.frame_us = frame_us.max(1);
         self.guard = SendGuard::new(self.frame_us, u64::from(queue_depth) + 2);
-        self.t0_ms = None;
-        self.counters = SendCounters::default();
-        self.bytes_sent = 0;
-        self.queue_stats = QueueStats::default();
-        self.prefill = self.queue.as_ref().map_or(0, |q| q.lock().unwrap_or_else(|e| e.into_inner()).prefill());
         self.guard_waits = 0;
         self.guard_due_ms = None;
         self.guard_late_ms = 0;
-        self.cig_retries = 0;
         self.publish();
         out.set_queue(queue_depth);
         self.timer_resolution = Some(HighTimerResolution::new());
         self.sending = true;
-        let kind = if self.bigs.is_empty() { "CIS" } else { "BIS" };
-        tracing::info!("LE Audio: sending ISO SDUs on {} {kind} (queue {queue_depth})", cis_handles.len());
+        tracing::info!("LE Audio: sending ISO SDUs on {} BIS (queue {queue_depth})", bis_handles.len());
         tracing::debug!(
-            "LE Audio: ISO sender: {kind} {cis_handles:04X?}, frame {} us, prefill {} set(s), guard lead {} set(s)",
+            "LE Audio: ISO sender: BIS {bis_handles:04X?}, frame {} us, prefill {} set(s), guard lead {} set(s)",
             self.frame_us,
             self.prefill,
             u64::from(queue_depth) + 2
         );
         self.request_next(out);
+    }
+
+    fn reset(&mut self, queue: SharedSduQueue, frame_us: u32) {
+        self.prefill = queue.lock().unwrap_or_else(|e| e.into_inner()).prefill();
+        self.queue = Some(queue);
+        self.frame_us = frame_us.max(1);
+        self.t0_ms = None;
+        self.counters = SendCounters::default();
+        self.bytes_sent = 0;
+        self.queue_stats = QueueStats::default();
+        self.cig_retries = 0;
+        self.active = false;
+        self.produced = 0;
+        self.skipped = 0;
+        self.busy = 0;
+        self.next_cis = 0;
+        self.stall = None;
+        self.stall_reported = false;
     }
 
     /// Stops sending (logs the totals)
@@ -280,6 +561,7 @@ impl IsoSender {
             return;
         }
         self.sending = false;
+        self.active = false;
         self.timer_resolution = None;
         out.timer_stop();
         if let Some(q) = &self.queue {
@@ -291,8 +573,28 @@ impl IsoSender {
                 q.recycle(current);
             }
         }
+        for c in &self.cis {
+            tracing::info!(
+                "LE Audio: CIS 0x{:04X}: {} SDUs sent, {} completed, {} late, {} in the controller at the end",
+                c.handle,
+                c.sent,
+                c.completed,
+                c.late,
+                c.in_flight.len()
+            );
+        }
+        for c in &mut self.cis {
+            c.down();
+        }
         self.publish();
         tracing::info!("{}", self.send_counters().stopped_message());
+        if self.busy > 0 || self.skipped > 0 {
+            tracing::debug!(
+                "LE Audio: {} send(s) waited for BTstack's packet buffer, {} interval(s) skipped",
+                self.busy,
+                self.skipped
+            );
+        }
         if self.guard_waits > 0 {
             // The run loop's timer follows the system timer resolution
             // (v1 raised it to 1 ms while sending)
@@ -307,18 +609,79 @@ impl IsoSender {
         }
     }
 
-    #[cfg(test)]
-    pub fn sending(&self) -> bool {
-        self.sending
+    /// Every CIS stalled (no SDU completed for [`STALL_MS`]): why, once;
+    /// the caller reports the stream lost
+    pub(crate) fn take_stall(&mut self) -> Option<String> {
+        self.stall.take()
     }
 
-    /// HCI_EVENT_CIS_CAN_SEND_NOW
-    pub(crate) fn on_cis_can_send_now(&mut self, out: &dyn IsoOut, packet: &[u8]) {
-        if !self.sending || !self.bigs.is_empty() {
+    /// HCI events (all of them): LE CIS Established (logged and kept for
+    /// the depth), Number Of Completed Packets and the transport's packet
+    /// sent (room again: send)
+    pub(crate) fn on_hci_event(&mut self, out: &dyn IsoOut, packet: &[u8]) {
+        if let Some(e) = events::le_cis_established(packet) {
+            self.on_cis_established(e);
             return;
         }
-        let Some(ev) = events::cis_can_send_now(packet) else { return };
-        self.on_can_send(out, ev.cis_handle, ev.group_complete);
+        if !self.sending || !self.active {
+            return;
+        }
+        match packet.first() {
+            Some(&HCI_EVENT_NUMBER_OF_COMPLETED_PACKETS) => {
+                let now = out.time_ms();
+                let mut ours = false;
+                for (handle, n) in events::completed_packets(packet) {
+                    if let Some(c) = self.cis.iter_mut().find(|c| c.handle == handle && c.alive) {
+                        c.on_completed(n, now);
+                        ours = true;
+                    }
+                }
+                if ours {
+                    self.flush(out);
+                }
+            }
+            Some(&HCI_EVENT_TRANSPORT_PACKET_SENT) => self.flush(out),
+            _ => {}
+        }
+    }
+
+    fn on_cis_established(&mut self, e: LeCisEstablished) {
+        if e.status != ERROR_CODE_SUCCESS {
+            return;
+        }
+        tracing::info!(
+            "LE Audio: CIS 0x{:04X} parameters: NSE {}, BN {} / {}, FT {} / {}, max PDU {} / {}, ISO interval \
+             {:.2} ms, transport latency {:.1} / {:.1} ms, PHY {} / {} (C->P / P->C)",
+            e.cis_handle,
+            e.nse,
+            e.bn_c_to_p,
+            e.bn_p_to_c,
+            e.ft_c_to_p,
+            e.ft_p_to_c,
+            e.max_pdu_c_to_p,
+            e.max_pdu_p_to_c,
+            f64::from(e.iso_interval) * 1.25,
+            f64::from(e.transport_latency_c_to_p) / 1000.0,
+            f64::from(e.transport_latency_p_to_c) / 1000.0,
+            phy_name(e.phy_c_to_p),
+            phy_name(e.phy_p_to_c)
+        );
+        self.links.retain(|l| l.cis_handle != e.cis_handle);
+        if self.links.len() >= LINKS_MAX {
+            self.links.remove(0);
+        }
+        self.links.push(e);
+    }
+
+    /// The most SDUs the flush timeouts of these CIS need queued; None when
+    /// none of them is known
+    fn flush_need(&self, handles: &[u16], frame_us: u32) -> Option<u8> {
+        handles
+            .iter()
+            .filter_map(|h| self.links.iter().find(|l| l.cis_handle == *h))
+            .filter(|l| l.bn_c_to_p > 0 && l.iso_interval > 0)
+            .map(|l| depth_for_flush(l.ft_c_to_p, u32::from(l.iso_interval) * 1250, frame_us))
+            .max()
     }
 
     /// HCI_EVENT_BIS_CAN_SEND_NOW: the last BIS of all BIGs completes the
@@ -337,14 +700,13 @@ impl IsoSender {
             return;
         }
         let handle = self.cis_handles[index];
-        self.on_can_send(out, handle, false);
+        self.on_bis_can_send(out, handle);
     }
 
-    fn on_can_send(&mut self, out: &dyn IsoOut, handle: u16, group_complete: bool) {
+    fn on_bis_can_send(&mut self, out: &dyn IsoOut, handle: u16) {
         let Some(index) = self.cis_handles.iter().position(|&h| h == handle) else { return };
         if !self.round_open || self.served[index] {
-            // First CIS of a round (whichever CIS is up): the next frame
-            // interval for all CIS
+            // First BIS of a round: the next frame interval for all BIS
             self.start_round();
         }
         if self.current.len() == self.cis_handles.len() {
@@ -360,111 +722,297 @@ impl IsoSender {
                 self.counters.sdus_sent += 1;
                 self.bytes_sent += self.current[index].len() as u64;
             } else {
-                self.counters.send_errors += 1;
-                let n = self.counters.send_errors;
-                if n <= 10 || n.is_power_of_two() {
-                    tracing::debug!(
-                        "LE Audio: ISO send on 0x{:04X} failed (0x{status:02X}), {n} send error(s) so far",
-                        handle
-                    );
-                }
+                self.send_error(handle, status);
             }
-        } else {
-            tracing::trace!(
-                "LE Audio: SDU set has {} SDUs for {} CIS, nothing sent on 0x{:04X}",
-                self.current.len(),
-                self.cis_handles.len(),
-                handle
-            );
         }
         self.served[index] = true;
-        // BTstack's group_complete is never set while the CIG's last CIS is
-        // down: also count the CIS that are up ourselves
-        if group_complete || self.round_done() {
+        if self.served.iter().all(|&s| s) {
             self.round_open = false;
             self.publish();
             self.request_next(out);
         }
     }
 
-    fn start_round(&mut self) {
-        let mut underrun = None;
-        if let Some(q) = &self.queue {
-            let mut q = q.lock().unwrap_or_else(|e| e.into_inner());
-            tracing::trace!("LE Audio: SDU round {}, {} set(s) buffered", self.counters.sets_sent + 1, q.len());
-            let next = match q.pop() {
-                Some(set) => set,
-                None => {
-                    let mut set = q.spare().unwrap_or_default();
-                    let silence = q.silence();
-                    let same_shape =
-                        set.len() == silence.len() && set.iter().zip(silence).all(|(a, b)| a.len() == b.len());
-                    if same_shape {
-                        for (dst, src) in set.iter_mut().zip(silence) {
-                            dst.copy_from_slice(src);
-                        }
-                    } else {
-                        set = silence.clone();
-                    }
-                    set
-                }
-            };
-            underrun = q.take_underrun();
-            let old = std::mem::replace(&mut self.current, next);
-            if !old.is_empty() {
-                q.recycle(old);
-            }
-            self.queue_stats = q.stats();
-            self.prefill = q.prefill();
+    fn send_error(&mut self, handle: u16, status: u8) {
+        self.counters.send_errors += 1;
+        let n = self.counters.send_errors;
+        if n <= 10 || n.is_power_of_two() {
+            tracing::debug!("LE Audio: ISO send on 0x{handle:04X} failed (0x{status:02X}), {n} send error(s) so far");
         }
+    }
+
+    /// The next set of the jitter buffer, or the silence set on an underrun
+    fn take_set(&mut self) -> SduSet {
+        let Some(q) = &self.queue else { return SduSet::new() };
+        let mut q = q.lock().unwrap_or_else(|e| e.into_inner());
+        tracing::trace!("LE Audio: SDU set {}, {} set(s) buffered", self.counters.sets_sent + 1, q.len());
+        let set = match q.pop() {
+            Some(set) => set,
+            None => {
+                let mut set = q.spare().unwrap_or_default();
+                let silence = q.silence();
+                let same_shape = set.len() == silence.len() && set.iter().zip(silence).all(|(a, b)| a.len() == b.len());
+                if same_shape {
+                    for (dst, src) in set.iter_mut().zip(silence) {
+                        dst.copy_from_slice(src);
+                    }
+                } else {
+                    set = silence.clone();
+                }
+                set
+            }
+        };
+        let underrun = q.take_underrun();
+        self.queue_stats = q.stats();
+        self.prefill = q.prefill();
+        drop(q);
         if let Some(u) = underrun {
             tracing::warn!("{u}");
         }
         self.counters.sets_sent += 1;
         if self.counters.sets_sent.is_multiple_of(1000) {
-            tracing::debug!(
-                "{} (guard waits {}, timer late up to {} ms)",
-                self.send_counters().stats_message(),
-                self.guard_waits,
-                self.guard_late_ms
-            );
+            tracing::debug!("{}", self.send_counters().stats_message());
         }
+        set
+    }
+
+    fn recycle(&self, set: SduSet) {
+        if let Some(q) = &self.queue
+            && !set.is_empty()
+        {
+            q.lock().unwrap_or_else(|e| e.into_inner()).recycle(set);
+        }
+    }
+
+    fn start_round(&mut self) {
+        let next = self.take_set();
+        let old = std::mem::replace(&mut self.current, next);
+        self.recycle(old);
         self.guard.round_started();
         self.round_open = true;
         self.served.fill(false);
     }
 
-    /// A CIS of the stream disconnected: rounds no longer wait for it
+    /// A CIS of the stream disconnected: the others go on
     pub(crate) fn on_cis_down(&mut self, out: &dyn IsoOut, handle: u16) {
         if !self.sending {
             return;
         }
-        for (i, &h) in self.cis_handles.iter().enumerate() {
-            if h == handle {
-                self.alive[i] = false;
-            }
+        for c in self.cis.iter_mut().filter(|c| c.handle == handle) {
+            c.down();
         }
         tracing::debug!(
             "LE Audio: ISO sender: CIS 0x{handle:04X} down, {} of {} still up",
-            self.alive.iter().filter(|&&a| a).count(),
-            self.alive.len()
+            self.cis.iter().filter(|c| c.alive).count(),
+            self.cis.len()
         );
-        // The round may have waited for this CIS only
-        if self.alive.iter().any(|&a| a) && self.round_open && self.round_done() {
-            self.round_open = false;
-            self.request_next(out);
+        if self.active {
+            self.flush(out);
         }
     }
 
-    /// The guard's timer fired: ask for the next round
+    /// TIMER_ISO: the next interval (CIS), the CIG asked again, or the
+    /// guard's wait is over (BIG)
     pub(crate) fn on_timer(&mut self, out: &dyn IsoOut) {
         if let Some(due) = self.guard_due_ms.take() {
             let late = out.time_ms().wrapping_sub(due) as i32;
             tracing::trace!("LE Audio: send guard timer, {late} ms late");
             self.guard_late_ms = self.guard_late_ms.max(late.max(0) as u32);
         }
-        if self.sending {
-            self.request_events(out);
+        if !self.sending {
+            return;
+        }
+        if !self.bigs.is_empty() {
+            self.request_bigs(out);
+        } else if self.active {
+            self.tick(out);
+        } else {
+            self.activate(out);
+        }
+    }
+
+    /// Starts pacing once BTstack accepts a CIS request (the CIG is active)
+    fn activate(&mut self, out: &dyn IsoOut) {
+        let Some(handle) = self.cis.iter().find(|c| c.alive).map(|c| c.handle) else { return };
+        let status = out.request_can_send(handle);
+        if status == ERROR_CODE_COMMAND_DISALLOWED {
+            // The CIG is not active yet (ISO data paths being set up)
+            self.cig_retries += 1;
+            tracing::debug!("LE Audio: CIG not active yet, asking again in {CIG_NOT_ACTIVE_RETRY_MS} ms");
+            out.timer_start(CIG_NOT_ACTIVE_RETRY_MS);
+            return;
+        }
+        let now = out.time_ms();
+        self.active = true;
+        self.t0_ms = Some(now);
+        self.last_stats_ms = now;
+        self.last_health_ms = now;
+        for c in &mut self.cis {
+            c.progress_ms = now;
+        }
+        self.tick(out);
+    }
+
+    /// One interval (or more after a late timer): the due SDU sets to the
+    /// CIS, sending, the health checks, the timer for the next one
+    fn tick(&mut self, out: &dyn IsoOut) {
+        let now = out.time_ms();
+        let t0 = *self.t0_ms.get_or_insert(now);
+        let elapsed_ms = u64::from(now.wrapping_sub(t0));
+        let frame = u64::from(self.frame_us);
+        let due = elapsed_ms * 1000 / frame + LEAD_SETS;
+        if due > self.produced + CATCH_UP_MAX {
+            let skip = due - CATCH_UP_MAX - self.produced;
+            tracing::debug!("LE Audio: ISO sender held up {elapsed_ms} ms in: {skip} interval(s) skipped");
+            self.skipped += skip;
+            self.produced += skip;
+        }
+        while self.produced < due {
+            self.produce();
+        }
+        self.flush(out);
+        self.check(now);
+        let next_ms = ((self.produced + 1 - LEAD_SETS) * frame).div_ceil(1000);
+        let wait = next_ms.saturating_sub(elapsed_ms).clamp(1, 1000) as u32;
+        out.timer_start(wait);
+    }
+
+    /// The next SDU set to every CIS that is up, with its interval's
+    /// sequence number
+    fn produce(&mut self) {
+        let seq = self.produced as u16;
+        self.produced += 1;
+        let set = self.take_set();
+        if set.len() == self.cis.len() {
+            for (c, sdu) in self.cis.iter_mut().zip(&set) {
+                if c.alive {
+                    c.give(seq, sdu);
+                }
+            }
+        } else {
+            tracing::trace!("LE Audio: SDU set has {} SDUs for {} CIS, nothing sent", set.len(), self.cis.len());
+        }
+        self.recycle(set);
+    }
+
+    /// Sends what waits, one SDU per CIS in turn, while each has room in
+    /// the controller; stops while BTstack's packet buffer is taken
+    fn flush(&mut self, out: &dyn IsoOut) {
+        let n = self.cis.len();
+        if !self.active || n == 0 {
+            return;
+        }
+        let depth = usize::from(self.depth);
+        let now = out.time_ms();
+        let mut sent = false;
+        loop {
+            let mut any = false;
+            for k in 0..n {
+                let i = (self.next_cis + k) % n;
+                let c = &mut self.cis[i];
+                if !c.alive || c.in_flight.len() >= depth {
+                    continue;
+                }
+                let Some(p) = c.pending.front() else { continue };
+                let status = out.send(c.handle, p.seq, &p.sdu);
+                tracing::trace!(
+                    "LE Audio: ISO SDU on 0x{:04X}: seq {}, {} bytes, status 0x{status:02X}",
+                    c.handle,
+                    p.seq,
+                    p.sdu.len()
+                );
+                if status == BTSTACK_ACL_BUFFERS_FULL {
+                    // Sent again (same SDU, same number) once the buffer
+                    // is free; this CIS first
+                    self.busy += 1;
+                    self.next_cis = i;
+                    return;
+                }
+                let Some(p) = c.pending.pop_front() else { continue };
+                if status == ERROR_CODE_SUCCESS {
+                    if c.in_flight.is_empty() {
+                        c.progress_ms = now;
+                    }
+                    c.in_flight.push_back(now);
+                    c.window_peak = c.window_peak.max(c.in_flight.len());
+                    c.sent += 1;
+                    c.window_sent += 1;
+                    self.counters.sdus_sent += 1;
+                    self.bytes_sent += p.sdu.len() as u64;
+                } else {
+                    c.late += 1;
+                    c.window_late += 1;
+                    let handle = c.handle;
+                    self.send_error(handle, status);
+                }
+                self.cis[i].free.push(p.sdu);
+                any = true;
+            }
+            if !any {
+                break;
+            }
+            sent = true;
+        }
+        // The next CIS goes first next time
+        if sent {
+            self.next_cis = (self.next_cis + 1) % n;
+        }
+    }
+
+    /// Stall watchdog, counters once a second, the health line every 10 s
+    fn check(&mut self, now: u32) {
+        let mut up = 0;
+        let mut stalled = 0;
+        for c in self.cis.iter_mut().filter(|c| c.alive) {
+            up += 1;
+            if !c.stalled && !c.in_flight.is_empty() && now.wrapping_sub(c.progress_ms) >= STALL_MS {
+                c.stalled = true;
+                tracing::warn!(
+                    "LE Audio: CIS 0x{:04X}: no SDU completed for {} s ({} SDU(s) in the controller)",
+                    c.handle,
+                    now.wrapping_sub(c.progress_ms) / 1000,
+                    c.in_flight.len()
+                );
+            }
+            stalled += usize::from(c.stalled);
+        }
+        if up > 0 && stalled == up && !self.stall_reported {
+            self.stall_reported = true;
+            let why = format!("no SDU completed on any CIS for {} s", STALL_MS / 1000);
+            tracing::warn!("LE Audio: ISO sending stalled: {why}");
+            self.stall = Some(why);
+        } else if stalled > 0 && stalled < up && self.stall.is_none() {
+            tracing::trace!("LE Audio: {stalled} of {up} CIS stalled, the others play on");
+        }
+        if now.wrapping_sub(self.last_stats_ms) >= STATS_MS {
+            self.last_stats_ms = now;
+            self.refresh_queue_stats();
+            self.publish();
+        }
+        let since = now.wrapping_sub(self.last_health_ms);
+        if since >= HEALTH_MS {
+            self.last_health_ms = now;
+            let secs = f64::from(since) / 1000.0;
+            let depth = self.depth;
+            let per_cis: Vec<String> = self.cis.iter_mut().map(|c| c.health(secs, depth)).collect();
+            let s = self.stats();
+            tracing::info!(
+                "LE stream health: {} | {} silence set(s), {} underrun(s), {} jitter buffer overflow(s), {} send \
+                 error(s)",
+                per_cis.join(" | "),
+                s.silence_sets,
+                s.underruns,
+                s.overflows,
+                s.send_errors
+            );
+        }
+    }
+
+    fn refresh_queue_stats(&mut self) {
+        if let Some(q) = &self.queue {
+            let q = q.lock().unwrap_or_else(|e| e.into_inner());
+            self.queue_stats = q.stats();
+            self.prefill = q.prefill();
         }
     }
 
@@ -480,7 +1028,17 @@ impl IsoSender {
             overflows: c.overflows,
             send_errors: c.send_errors,
             prefill: self.prefill as u32,
+            late_sdus: self.cis.iter().map(|c| c.late).sum(),
+            cis_stalled: self.cis_stalled(),
         }
+    }
+
+    /// Stalled CIS while others play; 0 when none plays (the stream is
+    /// lost then, not partial)
+    fn cis_stalled(&self) -> u32 {
+        let up = self.cis.iter().filter(|c| c.alive).count();
+        let stalled = self.cis.iter().filter(|c| c.alive && c.stalled).count();
+        if stalled < up { stalled as u32 } else { 0 }
     }
 
     fn send_counters(&self) -> SendCounters {
@@ -497,39 +1055,23 @@ impl IsoSender {
         *self.stats_out.lock().unwrap_or_else(|e| e.into_inner()) = self.stats();
     }
 
-    fn round_done(&self) -> bool {
-        self.alive.iter().zip(&self.served).all(|(&alive, &served)| !alive || served)
-    }
-
-    fn request_events(&mut self, out: &dyn IsoOut) {
-        if !self.bigs.is_empty() {
-            for &(big, _) in &self.bigs {
-                out.request_bis_can_send(big);
-            }
-            return;
-        }
-        // BTstack requests CAN_SEND_NOW for every CIS of the CIG from any of
-        // its handles: take one that is still up
-        if let Some(i) = self.alive.iter().position(|&a| a) {
-            let status = out.request_can_send(self.cis_handles[i]);
-            if status == ERROR_CODE_COMMAND_DISALLOWED {
-                // The CIG is not active yet (ISO data paths being set up)
-                self.cig_retries += 1;
-                tracing::debug!("LE Audio: CIG not active yet, asking again in {CIG_NOT_ACTIVE_RETRY_MS} ms");
-                out.timer_start(CIG_NOT_ACTIVE_RETRY_MS);
-            }
+    /// BIS can-send-now of every BIG (one round for all)
+    fn request_bigs(&self, out: &dyn IsoOut) {
+        for &(big, _) in &self.bigs {
+            out.request_bis_can_send(big);
         }
     }
 
+    /// BIG: the next round now, or once the guard allows it
     fn request_next(&mut self, out: &dyn IsoOut) {
-        if !self.sending || self.cis_handles.is_empty() {
+        if self.bigs.is_empty() || !self.sending || self.cis_handles.is_empty() {
             return;
         }
         let now = out.time_ms();
         let t0 = *self.t0_ms.get_or_insert(now);
         let elapsed_ms = u64::from(now.wrapping_sub(t0));
         if self.guard.may_send(elapsed_ms * 1000) {
-            self.request_events(out);
+            self.request_bigs(out);
             return;
         }
         // Ahead of real time (a controller that completes SDUs early): wait
@@ -547,7 +1089,7 @@ impl IsoSender {
 mod tests {
     use std::cell::{Cell, RefCell};
 
-    use btstack_sys::consts::{HCI_EVENT_BIS_CAN_SEND_NOW, HCI_EVENT_CIS_CAN_SEND_NOW};
+    use btstack_sys::consts::HCI_EVENT_BIS_CAN_SEND_NOW;
     use le_audio::sdu_queue::SduQueue;
 
     use super::*;
@@ -558,11 +1100,18 @@ mod tests {
         log: RefCell<Vec<String>>,
         /// CIS requests still refused with Command Disallowed (CIG not active)
         refuse: Cell<u32>,
+        /// Sends still refused with BTSTACK_ACL_BUFFERS_FULL
+        busy: Cell<u32>,
     }
 
     impl Fake {
         fn take(&self) -> Vec<String> {
             self.log.borrow_mut().drain(..).collect()
+        }
+
+        /// The sends of the log so far, the rest dropped
+        fn sends(&self) -> Vec<String> {
+            self.take().into_iter().filter(|l| l.starts_with("send")).collect()
         }
     }
 
@@ -585,6 +1134,11 @@ mod tests {
             self.log.borrow_mut().push(format!("request BIG {big}"));
         }
         fn send(&self, cis: u16, seq: u16, sdu: &[u8]) -> u8 {
+            if self.busy.get() > 0 {
+                self.busy.set(self.busy.get() - 1);
+                self.log.borrow_mut().push(format!("busy {cis:x} #{seq}"));
+                return BTSTACK_ACL_BUFFERS_FULL;
+            }
             self.log.borrow_mut().push(format!("send {cis:x} #{seq} {:x}", sdu[0]));
             0
         }
@@ -596,13 +1150,31 @@ mod tests {
         }
     }
 
-    fn can_send(cis: u16, group_complete: bool) -> [u8; 8] {
-        [HCI_EVENT_CIS_CAN_SEND_NOW, 6, 1, 0, cis as u8, (cis >> 8) as u8, 0, group_complete as u8]
-    }
-
     /// As BTstack 1.8.1 emits it: without the BIS handle
     fn bis_can_send(big: u8, index: u8, _bis: u16) -> [u8; 4] {
         [HCI_EVENT_BIS_CAN_SEND_NOW, 2, big, index]
+    }
+
+    fn completed(handle: u16, n: u16) -> [u8; 7] {
+        [HCI_EVENT_NUMBER_OF_COMPLETED_PACKETS, 5, 1, handle as u8, (handle >> 8) as u8, n as u8, (n >> 8) as u8]
+    }
+
+    const PACKET_SENT: [u8; 2] = [HCI_EVENT_TRANSPORT_PACKET_SENT, 0];
+
+    fn queue(cis: usize) -> SharedSduQueue {
+        let q: SharedSduQueue = Arc::new(Mutex::new(SduQueue::new()));
+        q.lock().unwrap().configure(QUEUE_DEPTH, vec![vec![0xEE; 4]; cis]);
+        q
+    }
+
+    fn set(tag: u8) -> SduSet {
+        vec![vec![tag; 4], vec![tag; 4]]
+    }
+
+    /// Advances the fake clock to `ms` and fires the timer
+    fn at(s: &mut IsoSender, out: &Fake, ms: u32) {
+        out.now.set(ms);
+        s.on_timer(out);
     }
 
     #[test]
@@ -610,14 +1182,10 @@ mod tests {
         let out = Fake::default();
         let stats = Arc::new(Mutex::new(LeStreamStats::default()));
         let mut s = IsoSender::new(stats.clone());
-        let q: SharedSduQueue = Arc::new(Mutex::new(SduQueue::new()));
-        q.lock().unwrap().configure(2, vec![vec![0xEE; 4], vec![0xEE; 4]]);
+        let q = queue(2);
         s.start_big(&out, 0, &[0x10, 0x11], q.clone(), 10_000, 2);
         assert_eq!(out.take(), ["queue 2", "request BIG 0"]);
-        // CIS events do not reach a BIG
-        s.on_cis_can_send_now(&out, &can_send(0x10, true));
-        assert!(out.take().is_empty());
-        // Another BIG's events neither
+        // Another BIG's events do not count
         s.on_bis_can_send_now(&out, &bis_can_send(1, 0, 0x10));
         assert!(out.take().is_empty());
         s.on_bis_can_send_now(&out, &bis_can_send(0, 0, 0x10));
@@ -657,55 +1225,143 @@ mod tests {
         assert_eq!(stats.lock().unwrap().sdus_sent, 4);
     }
 
-    fn set(tag: u8) -> SduSet {
-        vec![vec![tag; 4], vec![tag; 4]]
-    }
-
     #[test]
-    fn rounds_sequence_numbers_silence_and_guard() {
+    fn cis_paced_by_the_sdu_interval_with_a_lead() {
         let out = Fake::default();
         let stats = Arc::new(Mutex::new(LeStreamStats::default()));
         let mut s = IsoSender::new(stats.clone());
-        let q: SharedSduQueue = Arc::new(Mutex::new(SduQueue::new()));
-        q.lock().unwrap().configure(2, vec![vec![0xEE; 4], vec![0xEE; 4]]);
-        s.start(&out, &[0x60, 0x61], q.clone(), 10_000, 2);
-        assert_eq!(out.take(), ["queue 2", "request 60"]);
-        // Prefilling (queue + 3 = 5 sets): silence
-        s.on_cis_can_send_now(&out, &can_send(0x60, false));
-        s.on_cis_can_send_now(&out, &can_send(0x61, true));
-        assert_eq!(out.take(), ["send 60 #0 ee", "send 61 #0 ee", "request 60"]);
+        let q = queue(2);
+        s.start(&out, &[0x60, 0x61], q.clone(), 10_000, 8);
+        // Two sets at once (the lead); BTstack's buffer is taken after
+        // every packet in real life, not in this fake
+        assert_eq!(
+            out.take(),
+            ["queue 8", "request 60", "send 60 #0 ee", "send 61 #0 ee", "send 60 #1 ee", "send 61 #1 ee", "timer 10"]
+        );
+        // Nothing more before the next interval
+        at(&mut s, &out, 5);
+        assert_eq!(out.take(), ["timer 5"]);
         for tag in 1..=5 {
             q.lock().unwrap().push(set(tag));
         }
-        s.on_cis_can_send_now(&out, &can_send(0x61, false));
-        s.on_cis_can_send_now(&out, &can_send(0x60, false));
-        assert_eq!(out.take(), ["send 61 #1 1", "send 60 #1 1", "request 60"]);
-        // A CIS asked again before the other got its SDU starts a new round
-        // (v1: served twice = next round)
-        s.on_cis_can_send_now(&out, &can_send(0x60, false));
-        s.on_cis_can_send_now(&out, &can_send(0x60, false));
-        assert_eq!(out.take(), ["send 60 #2 2", "send 60 #3 3"]);
-        s.on_cis_can_send_now(&out, &can_send(0x61, true));
-        // 4 rounds within the same millisecond: the guard (lead 4) waits
-        assert_eq!(out.take(), ["send 61 #2 3", "timer 10"]);
-        out.now.set(10);
-        s.on_timer(&out);
-        assert_eq!(out.take(), ["request 60"]);
-        let st = *stats.lock().unwrap();
-        assert_eq!((st.sets_sent, st.sdus_sent, st.silence_sets, st.underruns, st.sets_encoded), (4, 7, 1, 0, 5));
-        // The right CIS goes down: rounds go on with the left one only
-        s.on_cis_down(&out, 0x61);
-        out.now.set(20);
-        s.on_cis_can_send_now(&out, &can_send(0x60, false));
-        assert_eq!(out.take(), ["send 60 #4 4", "request 60"]);
+        at(&mut s, &out, 10);
+        assert_eq!(out.take(), ["send 61 #2 1", "send 60 #2 1", "timer 10"]);
+        // A timer 25 ms late: the intervals it missed go out at once
+        at(&mut s, &out, 45);
+        assert_eq!(
+            out.sends(),
+            ["send 60 #3 2", "send 61 #3 2", "send 60 #4 3", "send 61 #4 3", "send 60 #5 4", "send 61 #5 4"]
+        );
         s.stop(&out);
-        assert_eq!(out.take(), ["timer stop"]);
-        assert!(!s.sending());
         let st = *stats.lock().unwrap();
-        assert_eq!((st.sets_sent, st.sdus_sent), (5, 8));
-        assert_eq!(queue_depth_within(64, 2, QUEUE_DEPTH), 2);
-        assert_eq!(queue_depth_within(3, 2, QUEUE_DEPTH), 1);
-        assert_eq!(queue_depth_within(1, 2, QUEUE_DEPTH), 0);
+        assert_eq!((st.sets_sent, st.sdus_sent, st.silence_sets, st.sets_encoded, st.late_sdus), (6, 12, 2, 5, 0));
+    }
+
+    #[test]
+    fn a_cis_that_never_completes_does_not_stop_the_other() {
+        let out = Fake::default();
+        let stats = Arc::new(Mutex::new(LeStreamStats::default()));
+        let mut s = IsoSender::new(stats.clone());
+        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 4);
+        out.take();
+        let mut right = Vec::new();
+        for i in 1..=100u32 {
+            at(&mut s, &out, i * 10);
+            // The left CIS completes its SDUs, the right one never
+            s.on_hci_event(&out, &completed(0x60, 1));
+            for l in out.sends() {
+                if l.starts_with("send 61") {
+                    right.push(l);
+                }
+            }
+        }
+        // The right CIS stops at its queue depth; the left one goes on
+        assert_eq!(right.len(), 2, "{right:?}");
+        let left = s.cis[0].sent;
+        assert!(left >= 100, "{left}");
+        // Its SDUs past the queue are dropped as late, the numbers of the
+        // right one keep counting intervals
+        assert!(s.cis[1].late >= 95, "{}", s.cis[1].late);
+        let seqs: Vec<u16> = s.cis[1].pending.iter().map(|p| p.seq).collect();
+        assert_eq!(seqs, [99, 100, 101]);
+        // 2 s without a completion: stalled, the other plays on (no failure)
+        at(&mut s, &out, 2010);
+        assert!(s.take_stall().is_none());
+        assert_eq!(stats.lock().unwrap().cis_stalled, 1);
+        // Completions again: it sends the SDUs of now, not those of before
+        s.on_hci_event(&out, &completed(0x61, 4));
+        assert_eq!(
+            out.sends().iter().filter(|l| l.starts_with("send 61")).cloned().collect::<Vec<_>>(),
+            ["send 61 #200 ee", "send 61 #201 ee", "send 61 #202 ee"]
+        );
+        assert_eq!(s.stats().cis_stalled, 0);
+    }
+
+    #[test]
+    fn every_cis_stalled_reports_the_stream_lost_once() {
+        let out = Fake::default();
+        let stats = Arc::new(Mutex::new(LeStreamStats::default()));
+        let mut s = IsoSender::new(stats.clone());
+        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 4);
+        let mut bytes = Vec::new();
+        for i in 1..=250u32 {
+            at(&mut s, &out, i * 10);
+            bytes.push(stats.lock().unwrap().bytes_sent);
+            if i < 200 {
+                assert!(s.take_stall().is_none(), "at {i}");
+            }
+        }
+        // Counters published while nothing completes; nothing sent after
+        // the queues filled (a live bit rate of 0)
+        assert_eq!(bytes[100], bytes[249]);
+        assert!(stats.lock().unwrap().late_sdus > 300);
+        assert!(s.stats().late_sdus > 400);
+        assert_eq!(s.take_stall().as_deref(), Some("no SDU completed on any CIS for 2 s"));
+        at(&mut s, &out, 2600);
+        assert!(s.take_stall().is_none());
+    }
+
+    #[test]
+    fn a_refused_send_goes_again_with_the_same_sequence_number() {
+        let out = Fake::default();
+        let mut s = IsoSender::new(Arc::default());
+        out.busy.set(1);
+        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 4);
+        // The first send found BTstack's packet buffer taken (a GATT write)
+        assert_eq!(out.take(), ["queue 4", "request 60", "busy 60 #0", "timer 10"]);
+        s.on_hci_event(&out, &PACKET_SENT);
+        assert_eq!(out.sends(), ["send 60 #0 ee", "send 61 #0 ee", "send 60 #1 ee", "send 61 #1 ee"]);
+        // The second CIS's turn is kept while the buffer is taken
+        out.busy.set(1);
+        at(&mut s, &out, 10);
+        s.on_hci_event(&out, &completed(0x60, 2));
+        assert_eq!(out.take(), ["busy 61 #2", "timer 10", "send 61 #2 ee", "send 60 #2 ee"]);
+        assert_eq!((s.busy, s.counters.send_errors), (2, 0));
+    }
+
+    #[test]
+    fn a_failed_send_is_dropped_and_counted() {
+        struct Failing(Fake);
+        impl IsoOut for Failing {
+            fn time_ms(&self) -> u32 {
+                self.0.time_ms()
+            }
+            fn set_queue(&self, _: u8) {}
+            fn request_can_send(&self, _: u16) -> u8 {
+                0
+            }
+            fn send(&self, cis: u16, seq: u16, sdu: &[u8]) -> u8 {
+                self.0.send(cis, seq, sdu);
+                if cis == 0x61 { 0x02 } else { 0 }
+            }
+            fn timer_start(&self, _: u32) {}
+            fn timer_stop(&self) {}
+        }
+        let out = Failing(Fake::default());
+        let mut s = IsoSender::new(Arc::default());
+        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 4);
+        assert_eq!(out.0.sends(), ["send 60 #0 ee", "send 61 #0 ee", "send 60 #1 ee", "send 61 #1 ee"]);
+        assert_eq!((s.counters.send_errors, s.cis[1].late, s.cis[1].sent), (2, 2, 0));
     }
 
     #[test]
@@ -713,18 +1369,50 @@ mod tests {
         let out = Fake::default();
         out.refuse.set(2);
         let mut s = IsoSender::new(Arc::new(Mutex::new(LeStreamStats::default())));
-        let q: SharedSduQueue = Arc::new(Mutex::new(SduQueue::new()));
-        q.lock().unwrap().configure(2, vec![vec![0xEE; 4]]);
-        s.start(&out, &[0x60], q, 10_000, 2);
+        s.start(&out, &[0x60], queue(1), 10_000, 2);
         assert_eq!(out.take(), ["queue 2", "request 60", "timer 1"]);
-        s.on_timer(&out);
+        at(&mut s, &out, 1);
         assert_eq!(out.take(), ["request 60", "timer 1"]);
-        // Active now: no further retry
-        s.on_timer(&out);
-        assert_eq!(out.take(), ["request 60"]);
-        s.on_cis_can_send_now(&out, &can_send(0x60, true));
-        assert_eq!(out.take(), ["send 60 #0 ee", "request 60"]);
+        // Active now: pacing starts from here
+        at(&mut s, &out, 2);
+        assert_eq!(out.take(), ["request 60", "send 60 #0 ee", "send 60 #1 ee", "timer 10"]);
         assert_eq!(s.cig_retries, 2);
+    }
+
+    #[test]
+    fn a_cis_going_down_leaves_the_others_sending() {
+        let out = Fake::default();
+        let mut s = IsoSender::new(Arc::default());
+        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 4);
+        out.take();
+        s.on_cis_down(&out, 0x61);
+        at(&mut s, &out, 10);
+        s.on_hci_event(&out, &completed(0x60, 1));
+        assert_eq!(out.sends(), ["send 60 #2 ee"]);
+        // A CIS that is down is not stalled either
+        for i in 2..=300u32 {
+            at(&mut s, &out, i * 10);
+            s.on_hci_event(&out, &completed(0x60, 1));
+        }
+        assert!(s.take_stall().is_none());
+        assert_eq!(s.stats().cis_stalled, 0);
+    }
+
+    #[test]
+    fn health_line_and_completion_delays() {
+        let mut c = CisOut::new(0x60, 0);
+        for t in 0..10 {
+            c.in_flight.push_back(t * 10);
+            c.window_sent += 1;
+        }
+        c.window_peak = 10;
+        for t in 0..10u32 {
+            c.on_completed(1, t * 10 + 5 + t);
+        }
+        assert_eq!(c.completed, 10);
+        let line = c.health(0.1, 10);
+        assert_eq!(line, "CIS 0x0060: 100.0 SDUs/s, 0 late, completion p50 10 ms p90 14 ms, queue peak 10 of 10");
+        assert_eq!(c.health(1.0, 10), "CIS 0x0060: 0.0 SDUs/s, 0 late, no completion, queue peak 0 of 10");
     }
 
     #[test]
@@ -741,25 +1429,73 @@ mod tests {
         assert_eq!(queue_depth_within(24, 2, 6), 6);
         assert_eq!(queue_depth_within(24, 2, 20), 12);
         assert_eq!(queue_depth_within(24, 0, 6), 0);
+        assert_eq!(queue_depth_within(64, 2, QUEUE_DEPTH), 2);
+        assert_eq!(queue_depth_within(3, 2, QUEUE_DEPTH), 1);
+        assert_eq!(queue_depth_within(1, 2, QUEUE_DEPTH), 0);
+    }
+
+    #[test]
+    fn cis_depth_from_buffers_and_flush_timeout() {
+        // FT 10 at a 10 ms ISO interval holds an SDU up to 100 ms: 10 + lead
+        // 2 + 2, cut to the 10 buffers each of 2 CIS has of 20
+        assert_eq!(depth_for_flush(10, 10_000, 10_000), 14);
+        assert_eq!(cis_depth(queue_depth_within(20, 2, MAX_CIS_QUEUE_DEPTH), false, Some(14)), 10);
+        // FT 2: 6 are enough
+        assert_eq!(depth_for_flush(2, 10_000, 10_000), 6);
+        assert_eq!(cis_depth(10, false, Some(6)), 6);
+        // FT 1 at 7.5 ms
+        assert_eq!(depth_for_flush(1, 7_500, 7_500), 5);
+        assert_eq!(depth_for_flush(0, 7_500, 7_500), MIN_CIS_QUEUE_DEPTH);
+        // A long flush timeout is capped
+        assert_eq!(depth_for_flush(30, 20_000, 10_000), MAX_CIS_QUEUE_DEPTH);
+        // Unknown flush timeout: the share; MediaTek's: the share as it is
+        assert_eq!(cis_depth(10, false, None), 10);
+        assert_eq!(cis_depth(12, true, Some(5)), 12);
+        // 64 buffers for 2 CIS: 16 at most
+        assert_eq!(queue_depth_within(64, 2, MAX_CIS_QUEUE_DEPTH), 16);
+    }
+
+    #[test]
+    fn depth_follows_the_flush_timeout_of_cis_established() {
+        let out = Fake::default();
+        let mut s = IsoSender::new(Arc::default());
+        // LE CIS Established v1: handle 0x60, NSE 2, BN 1/0, FT 10/10,
+        // max PDU 155/0, ISO interval 8 x 1.25 ms
+        let mut ev = vec![0x3E, 29, 0x19, 0x00, 0x60, 0x00];
+        ev.extend_from_slice(&[0; 6]); // sync delays
+        ev.extend_from_slice(&[0x40, 0x73, 0x01, 0x40, 0x73, 0x01]); // 95 ms both ways
+        ev.extend_from_slice(&[2, 2, 2, 1, 0, 10, 10, 155, 0, 0, 0, 8, 0]);
+        let e = events::le_cis_established(&ev).unwrap();
+        assert_eq!((e.cis_handle, e.nse, e.ft_c_to_p, e.max_pdu_c_to_p, e.iso_interval), (0x60, 2, 10, 155, 8));
+        assert_eq!(e.transport_latency_c_to_p, 95_040);
+        s.on_hci_event(&out, &ev);
+        s.start(&out, &[0x60], queue(1), 10_000, 16);
+        assert_eq!(s.depth, 14);
+        s.stop(&out);
+        // Without parameters: the share
+        let mut s = IsoSender::new(Arc::default());
+        s.start(&out, &[0x61], queue(1), 10_000, 16);
+        assert_eq!(s.depth, 16);
     }
 
     #[test]
     fn underrun_sends_silence() {
         let out = Fake::default();
         let mut s = IsoSender::new(Arc::default());
-        let q: SharedSduQueue = Arc::new(Mutex::new(SduQueue::new()));
-        q.lock().unwrap().configure(1, vec![vec![0xEE; 4]]);
-        s.start(&out, &[0x60], q.clone(), 10_000, 1);
-        for tag in 1..=4 {
+        let q = queue(1);
+        s.start(&out, &[0x60], q.clone(), 10_000, 8);
+        out.take();
+        for tag in 1..=5 {
             q.lock().unwrap().push(vec![vec![tag; 4]]);
         }
-        for _ in 0..5 {
-            out.now.set(out.now.get() + 10);
-            s.on_cis_can_send_now(&out, &can_send(0x60, true));
+        for i in 1..=6u32 {
+            at(&mut s, &out, i * 10);
         }
-        let sends: Vec<String> = out.take().into_iter().filter(|l| l.starts_with("send")).collect();
-        assert_eq!(sends, ["send 60 #0 1", "send 60 #1 2", "send 60 #2 3", "send 60 #3 4", "send 60 #4 ee"]);
+        assert_eq!(
+            out.sends(),
+            ["send 60 #2 1", "send 60 #3 2", "send 60 #4 3", "send 60 #5 4", "send 60 #6 5", "send 60 #7 ee"]
+        );
         let st = s.stats();
-        assert_eq!((st.underruns, st.silence_sets), (1, 1));
+        assert_eq!((st.underruns, st.silence_sets), (1, 3));
     }
 }

@@ -726,6 +726,7 @@ mod tests {
             overflows: 3,
             send_errors: 1,
             prefill: 6,
+            ..Default::default()
         };
         let earlier = bt_host::LeStreamStats { sdus_sent: 1800, bytes_sent: 279000, ..le };
         let (_, total) = link_sample(0, &stats, None, t0, 48000, Some((2, earlier)), false);

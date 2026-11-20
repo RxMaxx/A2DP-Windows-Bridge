@@ -50,7 +50,7 @@ use le_audio::plan::{PlannedAse, StreamPlan, choose_streaming_contexts, codec_co
 use super::LeDeviceId;
 use super::core::{CON_HANDLE_INVALID, LeCtx, LeDevice};
 use super::gatt_client::{GattChar, PROPERTY_INDICATE, PROPERTY_NOTIFY};
-use super::iso_send::queue_depth;
+use super::iso_send::cis_queue_share;
 
 /// Completion of [`read_device`]: true when done (also without PACS /
 /// ASCS), false when the link went down or a read failed
@@ -527,7 +527,8 @@ pub trait UnicastEnv {
     fn disconnect_cis(&mut self, handle: u16) -> u8;
     /// Total_Num_ISO_Data_Packets of the controller
     fn iso_packet_count(&self) -> u8;
-    fn start_sending(&mut self, cis_handles: &[u16], queue_depth: u8, frame_us: u32);
+    /// `queue_share`: the most SDUs a CIS may queue in the controller
+    fn start_sending(&mut self, cis_handles: &[u16], queue_share: u8, frame_us: u32);
     fn stop_sending(&mut self);
     /// The microphone: ISO data of these CIS (source CIS in plan order) to
     /// the receiver
@@ -903,13 +904,13 @@ impl Unicast {
 
             Phase::Streaming => {
                 let handles: Vec<u16> = plan.sink_cis().map(|c| c.cis_handle).collect();
-                // BTstack queues up to `queue` SDUs per CIS and sends each as
-                // one HCI ISO data packet (plan_stream made sure none needs
-                // fragmenting): queue x CIS must stay within the
-                // controller's Total_Num_ISO_Data_Packets
-                let depth = queue_depth(env.iso_packet_count(), handles.len());
+                // Each CIS queues up to its share of the controller's
+                // Total_Num_ISO_Data_Packets, one SDU per HCI ISO data packet
+                // (plan_stream made sure none needs fragmenting); the
+                // sender narrows it to what the flush timeout needs
+                let depth = cis_queue_share(env.iso_packet_count(), handles.len());
                 tracing::debug!(
-                    "LE Audio: streaming on CIS {handles:04X?}: {} ISO buffers -> queue depth {depth} per CIS",
+                    "LE Audio: streaming on CIS {handles:04X?}: {} ISO buffers -> up to {depth} queued per CIS",
                     env.iso_packet_count()
                 );
                 if depth == 0 {
@@ -2008,7 +2009,7 @@ mod tests {
         both(&mut u, &mut env, AseState::Streaming);
         assert_eq!(u.phase(), Phase::Streaming);
         assert!(u.streaming());
-        assert_eq!(env.take(), ["send [60, 61] queue 2 10000 us", "streaming true"]);
+        assert_eq!(env.take(), ["send [60, 61] queue 4 10000 us", "streaming true"]);
         assert_eq!(*outcome.borrow(), Some(Ok(())));
         assert!(u.uses_handle(0x41) && u.uses_handle(0x61) && !u.uses_handle(0x42));
         assert_eq!(u.plan().unwrap().contexts, CONTEXT_MEDIA);
@@ -2226,7 +2227,7 @@ mod tests {
         env.set_state(0, 3, AseState::Streaming);
         u.on_ase_update(&mut env, LeDeviceId(0), 3);
         assert_eq!(u.phase(), Phase::Streaming);
-        assert_eq!(env.take(), ["send [60] queue 2 10000 us", "streaming true"]);
+        assert_eq!(env.take(), ["send [60] queue 8 10000 us", "streaming true"]);
         assert_eq!(*outcome.borrow(), Some(Ok(())));
 
         // Stop: the source ASE goes Disabling and waits for Receiver Stop
@@ -2345,7 +2346,7 @@ mod tests {
         );
         each(&mut u, &mut env, AseState::Streaming);
         // Only the CIS with a sink ASE: the encode thread fills one SDU
-        assert_eq!(env.take(), ["send [60] queue 2 10000 us", "streaming true"]);
+        assert_eq!(env.take(), ["send [60] queue 8 10000 us", "streaming true"]);
     }
 
     #[test]
