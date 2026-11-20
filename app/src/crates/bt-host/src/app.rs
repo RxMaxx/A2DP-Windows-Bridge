@@ -32,7 +32,7 @@ use crate::sdp_services::SdpServices;
 use crate::shared::Shared;
 use crate::stats::LinkStats;
 use crate::{AfhClassification, ConnectFailure, Controls, DiscoveredDevice, HostEvent, InitFailure, MediaKey};
-use crate::{intel, mediatek, qualcomm, realtek_btnic};
+use crate::{broadcom, intel, mediatek, qualcomm, realtek_btnic};
 
 pub(crate) type Job = Box<dyn FnOnce(&mut HostApp, &Stack) + Send>;
 
@@ -76,6 +76,8 @@ pub(crate) struct Setup {
     /// HostConfig::realtek_firmware_file
     pub realtek_firmware_file: Option<PathBuf>,
     pub broadcom_ids: Vec<(u16, u16)>,
+    /// HostConfig::broadcom_marks
+    pub broadcom_marks: Option<std::sync::Arc<dyn broadcom::PatchMarks>>,
     /// HFP audio gateway for the headphones' battery level
     pub battery: bool,
     /// The HFP audio gateway also offers the audio connection
@@ -388,6 +390,30 @@ impl HostApp {
         self.start_loader(stack, Box::new(loader));
     }
 
+    /// The patch of Broadcom's Windows driver (crate::broadcom), then HCI
+    /// init: the firmware folder first, then the driver. A .hcd in the
+    /// firmware folder for the adapter goes BTstack's way instead, during
+    /// HCI init (the transport is installed already).
+    pub fn start_broadcom_loader(&mut self, stack: &Stack) {
+        let dir = self.setup.firmware_dir.clone();
+        if find_bcm_hcd(&dir, &self.setup.broadcom_ids).is_some() {
+            tracing::info!("Broadcom adapter: the firmware folder's .hcd is used instead of Broadcom's driver's patch");
+            self.setup_hci_and_power_on(stack, None);
+            return;
+        }
+        tracing::info!("Broadcom adapter: checking its patch");
+        // No .hcd in the folder: BTstack's PatchRAM check after Read Local
+        // Version has nothing to do
+        self.bcm_checked = true;
+        let mut loader = broadcom::Loader::new(Box::new(move |name| {
+            read_firmware_file(&dir, "brcm", name).or_else(|| broadcom::from_windows_driver(name))
+        }));
+        if let Some(marks) = self.setup.broadcom_marks.clone() {
+            loader = loader.with_marks(marks, env!("CARGO_PKG_VERSION"));
+        }
+        self.start_loader(stack, Box::new(loader));
+    }
+
     /// A tool (the chip probe, a chip script) on the transport installed
     /// already, in place of HCI init: its report goes to `setup.probe`
     pub fn start_tool(&mut self, stack: &Stack, make: crate::ToolLoader) {
@@ -531,7 +557,13 @@ impl HostApp {
                     e => e.to_string(),
                 };
                 self.show_loader_done(vendor, said, false);
-                self.init_failed(InitFailure::Failed);
+                // The adapter's start fails with the advice to replug it
+                let failure = if matches!(e, bringup::LoadError::Replug(_)) {
+                    InitFailure::NeedsReplug
+                } else {
+                    InitFailure::Failed
+                };
+                self.init_failed(failure);
             }
         }
     }

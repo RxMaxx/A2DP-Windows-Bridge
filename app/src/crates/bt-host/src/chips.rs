@@ -96,7 +96,8 @@ pub enum ChipVendor {
     Realtek,
     /// ibt-*.sfi + ibt-*.ddc, legacy and TLV bootloaders
     Intel,
-    /// optional *.hcd PatchRAM
+    /// The PatchRAM of Broadcom's Windows driver (crate::broadcom), or an
+    /// *.hcd of the firmware folder; else its ROM
     Broadcom,
     /// ROM firmware, nothing to load
     Csr,
@@ -473,8 +474,9 @@ pub fn vendor_for_usb(vid: u16, pid: u16, realtek_pid: Option<u16>) -> ChipVendo
         0x0A12 => ChipVendor::Csr,
         0x0E8D => ChipVendor::MediaTek,
         0x0CF3 => ChipVendor::Qualcomm, // Qualcomm Atheros
-        // OEM adapters with a Broadcom chip under their own VID
-        0x0B05 if pid == 0x17CB => ChipVendor::Broadcom, // ASUS BT400
+        // OEM adapters with a Broadcom chip under their own VID (ASUS
+        // BT400, laptop modules): the IDs of Broadcom's Windows driver
+        _ if crate::broadcom::is_broadcom_usb(vid, pid) => ChipVendor::Broadcom,
         // Barrot ROM dongles (Linux btusb's Barrot entries); not the whole
         // VID: no list says which other devices use it
         0x33FA if matches!(pid, 0x0010 | 0x0012) => ChipVendor::Barrot,
