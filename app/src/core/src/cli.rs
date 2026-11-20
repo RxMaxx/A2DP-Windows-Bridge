@@ -143,6 +143,9 @@ Development / testing:
                         Disconnect / Connect in the app (A2DP)
   --wait-off            headphones turned off: wait for them, as the app does
   --services            once streaming, list the services the device gives in SDP
+  --ipc                 serve the IPC pipe during the run (needs
+                        BLUECASTER_INSTANCE, so it never takes the installed
+                        core's pipe)
   --eq <point>[,<point>...]
                         the playback EQ on, a point as <Hz>:<dB>[:<Q>[:<type>]]
                         (type peak, lowshelf, highshelf, highpass, lowpass;
@@ -197,6 +200,8 @@ struct Args {
     probe: bool,
     /// --services: once streaming, the services the device lists in SDP
     services: bool,
+    /// --ipc: the IPC pipe served during the run (a test instance's only)
+    ipc: bool,
     /// --headset-mic [on|auto], --mic-output: headset mode once streaming
     headset_mic: HeadsetMic,
     mic_output: Option<String>,
@@ -298,6 +303,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
         scan: None,
         probe: false,
         services: false,
+        ipc: false,
         headset_mic: HeadsetMic::Off,
         mic_output: None,
         voice_codec: None,
@@ -402,6 +408,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
             }
             "--probe" => a.probe = true,
             "--services" => a.services = true,
+            "--ipc" => a.ipc = true,
             "--headset-mic" => {
                 // An optional mode; alone: on
                 let mode = match it.peek().map(|s| s.as_str()) {
@@ -544,8 +551,12 @@ pub fn run(args: &[String]) -> i32 {
         eoutln!("Cannot create HCI capture file {}: {e}", path.display());
         return 1;
     }
+    if a.ipc && ipc::instance_suffix().is_empty() {
+        eoutln!("--ipc needs BLUECASTER_INSTANCE (a test instance's own pipe)");
+        return 2;
+    }
     let (tx, rx) = mpsc::channel();
-    let service = Service::new(
+    let service = Arc::new(Service::new(
         ServiceOptions {
             config_dir: bluecaster_core::paths::config_dir(),
             hci_tcp: a.hci_tcp.clone(),
@@ -554,7 +565,10 @@ pub fn run(args: &[String]) -> i32 {
             usb: a.usb.as_ref().map(|(_, s)| s.clone()).unwrap_or_default(),
         },
         tx,
-    );
+    ));
+    if a.ipc {
+        serve_ipc(service.clone());
+    }
     if !a.eq.is_empty() {
         let eq = bluecaster_core::media_eq::MediaEq { enabled: true, bands: a.eq.clone() };
         outln!("Playback EQ: {} point(s)", eq.settings().bands().len());
@@ -971,6 +985,31 @@ fn stream_session(
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return false,
         }
+    }
+}
+
+/// --ipc: the IPC pipe of this test instance, for the run (the emulator's
+/// RFCOMM passthrough case). The state the clients see is not kept up to
+/// date: the service's events stay with the command line.
+fn serve_ipc(service: Arc<Service>) {
+    let spawned = std::thread::Builder::new().name("ipc".into()).spawn(move || {
+        let rt = match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
+            Ok(rt) => rt,
+            Err(e) => return eoutln!("IPC runtime: {e}"),
+        };
+        let sid = match win_sys::pipe::current_user_sid() {
+            Ok(sid) => sid,
+            Err(e) => return eoutln!("cannot read the user SID: {e}"),
+        };
+        let state = crate::state::CoreState::new(service, Box::new(|_| {}), Box::new(|| {}), Box::new(|_| {}));
+        let (name, old_name) = (ipc::pipe_name(&sid), ipc::old_pipe_name(&sid));
+        outln!("IPC: serving the pipe of instance {}", ipc::instance_suffix().trim_start_matches('-'));
+        if let Err(e) = rt.block_on(crate::server::serve(state, name, old_name)) {
+            eoutln!("IPC server: {e}");
+        }
+    });
+    if let Err(e) = spawned {
+        eoutln!("IPC thread: {e}");
     }
 }
 
