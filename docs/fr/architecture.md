@@ -522,6 +522,7 @@ ci-dessous :
 | `profiles.json` | Profils |
 | `devices\devices.txt` | Appareils connus |
 | `devices\le_audio_devices.txt` | LE Audio : les entrées LE Audio de la liste des appareils |
+| `devices\le_audio_sets.txt` | LE Audio : les ensembles coordonnés des appareils enregistrés (seulement les adresses des membres ; les deux écouteurs d'une paire forment un seul appareil) |
 | `devices\device_codecs.json` | Ce que chaque appareil classique a proposé lors de sa dernière connexion (et si des écouteurs OPPO se sont vu demander le Hi-Res) |
 | `pairing\link_keys.txt` | Clés de liaison : les casques associés avec la v1 ou la 2.0.x se reconnectent sans nouvelle association |
 | `pairing\le_audio_bonds.tlv`, `pairing\le_audio_csip.txt` | LE Audio : les liaisons LE (avec les valeurs CCC persistantes du serveur GATT) et les ensembles coordonnés |

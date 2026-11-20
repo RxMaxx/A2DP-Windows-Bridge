@@ -337,6 +337,7 @@ AAC と SBC は、A2DP の仕様で定義された標準のコーデック ID �
 | `profiles.json` | プロファイル |
 | `devices\devices.txt` | 既知のデバイス |
 | `devices\le_audio_devices.txt` | LE Audio: デバイス一覧の LE Audio の項目 |
+| `devices\le_audio_sets.txt` | LE Audio: 保存済みデバイスのコーディネートセット（メンバーのアドレスのみ。左右のイヤホンは 1 台のデバイスとして扱います） |
 | `devices\device_codecs.json` | クラシックの各デバイスが前回の接続で提示した内容（と、OPPO のイヤホンに Hi-Res を求めたかどうか） |
 | `pairing\link_keys.txt` | リンクキー。v1 や 2.0.x でペアリングしたヘッドホンは、ペアリングし直さずに再接続する |
 | `pairing\le_audio_bonds.tlv`、`pairing\le_audio_csip.txt` | LE Audio: LE のボンディング情報（GATT サーバーが保持する CCC の値を含む）とコーディネートセット |

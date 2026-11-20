@@ -519,6 +519,7 @@ renames on its first start, sorting the files into these folders:
 | `profiles.json` | Profiles |
 | `devices\devices.txt` | Known devices |
 | `devices\le_audio_devices.txt` | LE Audio: the LE Audio entries of the device list |
+| `devices\le_audio_sets.txt` | LE Audio: the coordinated sets of the saved devices (member addresses only; both earbuds of a pair are one device) |
 | `devices\device_codecs.json` | What each classic device offered when it last connected (and whether OPPO earbuds were asked for Hi-Res) |
 | `pairing\link_keys.txt` | Link keys: headphones paired with v1 or 2.0.x reconnect without pairing again |
 | `pairing\le_audio_bonds.tlv`, `pairing\le_audio_csip.txt` | LE Audio: LE bonds (with the GATT server's persistent CCC values) and coordinated sets |

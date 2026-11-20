@@ -11,6 +11,7 @@ pub mod default_input;
 pub mod devices;
 mod health;
 mod le_media;
+pub mod le_sets;
 mod le_stream;
 pub mod link;
 pub mod media_eq;

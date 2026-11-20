@@ -17,7 +17,7 @@ use bluecaster_core::settings::Settings as CoreSettings;
 use bluecaster_core::vendor;
 use bluecaster_core::{
     CodecStopKind, LeStreamDetails, ScannedDevice, Service, ServiceEvent, SourceRequest, StreamRequest,
-    StreamState as CoreStreamState, VolumeSync, devices,
+    StreamState as CoreStreamState, VolumeSync, devices, le_sets,
 };
 use bt_host::chips::{self, ChipVendor};
 use bt_host::{HeadsetMic, LinkStats};
@@ -838,6 +838,43 @@ fn saved_devices(
         }
     }
     list
+}
+
+/// Saved LE Audio entries that are members of one coordinated set (two
+/// earbuds saved as two devices) become one entry: the one with the user's
+/// profiles or volume stays, else the one saved first, and the others'
+/// profiles and volume move to it (bluecaster_core::le_sets). Returns how
+/// many entries went, the profiles when they changed (not saved yet), and
+/// whether `settings` (the saved volumes) changed.
+fn merge_le_set_entries(
+    dir: &Path,
+    sets: &le_sets::KnownSets,
+    settings: &mut CoreSettings,
+) -> (usize, Option<Vec<CoreProfile>>, bool) {
+    let saved_le = devices::load_le(dir);
+    let mut list = profiles::load(dir);
+    let merges = le_sets::merges(&saved_le, sets, |a| {
+        list.iter().any(|p| p.le_audio && p.device_address.eq_ignore_ascii_case(a))
+            || settings.saved_volumes.contains_key(&a.to_uppercase())
+    });
+    if merges.is_empty() {
+        return (0, None, false);
+    }
+    for m in &merges {
+        if let Err(e) = devices::remove_le(dir, &m.drop) {
+            tracing::warn!("devices: merging a coordinated set's entries: {e}");
+        }
+        // Kept with the device from now on
+        if let Some(group) = sets.group_of(&m.keep)
+            && let Err(e) = le_sets::remember(dir, group)
+        {
+            tracing::warn!("devices: cannot keep the coordinated set: {e}");
+        }
+    }
+    tracing::info!("devices: {} saved LE Audio entries merged into the entry of their coordinated set", merges.len());
+    let profiles_moved = le_sets::move_profiles(&mut list, &merges, &saved_le);
+    let volumes_moved = le_sets::move_volumes(&mut settings.saved_volumes, &merges);
+    (merges.len(), profiles_moved.then_some(list), volumes_moved)
 }
 
 /// A scan's entry as the UI lists it (not saved yet)
@@ -1818,7 +1855,19 @@ impl CoreState {
         balloon: Box<dyn Fn(BalloonRequest) + Send + Sync>,
     ) -> Arc<CoreState> {
         let dir = service.config_dir().to_path_buf();
-        let settings = service.settings();
+        let mut settings = service.settings();
+        // Two earbuds of one set saved as two devices (a set learned in an
+        // earlier session, or kept with their bonds): one entry
+        let (_, merged_profiles, volumes) = merge_le_set_entries(&dir, &service.known_le_sets(), &mut settings);
+        if let Some(list) = merged_profiles
+            && let Err(e) = profiles::save(&dir, &list)
+        {
+            tracing::warn!("devices: saving the profiles of merged entries: {e}");
+        }
+        if volumes {
+            let _ = settings.save(&dir);
+            service.set_settings(settings.clone());
+        }
         let legacy = settings.legacy_max_media_payload();
         let profiles: Vec<Profile> = profiles::load(&dir).iter().map(|p| to_ipc_profile(p, legacy)).collect();
         let active = Some(settings.last_profile.clone()).filter(|n| profiles.iter().any(|p| &p.name == n));
@@ -2242,6 +2291,10 @@ impl CoreState {
                 }));
                 return;
             }
+            ServiceEvent::LeSetLearned => {
+                self.merge_le_sets();
+                return;
+            }
             // Another saved device connected while the one streamed was off
             // (issue #86): its own profile starts, as a connect on Home
             ServiceEvent::OtherDeviceBack(addr) => {
@@ -2318,6 +2371,28 @@ impl CoreState {
         }
     }
 
+    /// A connection learned a coordinated set: saved entries of it become
+    /// one ([`merge_le_set_entries`]), published
+    fn merge_le_sets(&self) {
+        let dir = self.config_dir();
+        let mut settings = self.service.settings();
+        let (merged, list, volumes) = merge_le_set_entries(&dir, &self.service.known_le_sets(), &mut settings);
+        if let Some(list) = list {
+            let (_, s) = self.snapshot();
+            let active = s.active_profile.filter(|a| list.iter().any(|p| &p.name == a));
+            if self.save_profiles(&list, active).is_err() {
+                tracing::warn!("devices: saving the profiles of merged entries failed");
+            }
+        }
+        if volumes {
+            let _ = settings.save(&dir);
+            self.service.set_settings(settings);
+        }
+        if merged > 0 {
+            self.refresh_devices();
+        }
+    }
+
     fn save_profiles(&self, list: &[CoreProfile], active: Option<String>) -> Result<(), ErrorInfo> {
         let dir = self.config_dir();
         profiles::save(&dir, list).map_err(|_| err("profile.save_failed", "error.profile_save"))?;
@@ -2335,7 +2410,14 @@ impl CoreState {
     fn forget_device(&self, address: &str, le_audio: bool) -> Result<Value, ErrorInfo> {
         let dir = self.config_dir();
         let mut list = profiles::load(&dir);
-        let of_it = |p: &CoreProfile| p.le_audio == le_audio && p.device_address.eq_ignore_ascii_case(address);
+        // An LE Audio device of a coordinated set: every member goes (both
+        // earbuds of a pair are one device)
+        let mut members = vec![address.to_uppercase()];
+        if le_audio && let Some(group) = self.service.known_le_sets().group_of(address) {
+            members.extend(group.iter().filter(|m| !m.eq_ignore_ascii_case(address)).cloned());
+        }
+        let is_member = |a: &str| members.iter().any(|m| m.eq_ignore_ascii_case(a));
+        let of_it = |p: &CoreProfile| p.le_audio == le_audio && is_member(&p.device_address);
         let (_, s) = self.snapshot();
         let streaming = s.stream.profile.as_ref().is_some_and(|n| list.iter().any(|p| p.name == *n && of_it(p)));
         if streaming && s.stream.state != StreamState::Idle {
@@ -2344,6 +2426,15 @@ impl CoreState {
         }
         let r = if le_audio { devices::remove_le(&dir, address) } else { devices::remove(&dir, address) };
         r.map_err(|_| err("device.forget_failed", "error.device_forget"))?;
+        for m in members.iter().skip(1) {
+            if let Err(e) = devices::remove_le(&dir, m) {
+                tracing::warn!("devices: removing another member of the set: {e}");
+            }
+        }
+        if members.len() > 1 {
+            le_sets::forget(&dir, address);
+            tracing::info!("device forgotten with the other {} member(s) of its coordinated set", members.len() - 1);
+        }
         let gone: Vec<String> = list.iter().filter(|p| of_it(p)).map(|p| p.name.clone()).collect();
         list.retain(|p| !of_it(p));
         let active = s.active_profile.filter(|a| !gone.contains(a));
@@ -2351,10 +2442,15 @@ impl CoreState {
         // Off every list now (Home, Codecs, the sidebar): what
         // follows may wait for the stack (up to seconds per entry)
         self.refresh_devices();
-        self.service.forget_device(address, le_audio);
-        crate::pairing::forget_services(&dir, address, le_audio);
+        for m in &members {
+            self.service.forget_device(m, le_audio);
+            crate::pairing::forget_services(&dir, m, le_audio);
+        }
         let mut settings = self.service.settings();
-        let volume = settings.saved_volumes.remove(&address.to_uppercase()).is_some();
+        let mut volume = false;
+        for m in &members {
+            volume |= settings.saved_volumes.remove(m).is_some();
+        }
         let last = gone.contains(&settings.last_profile);
         if last {
             settings.last_profile.clear();
@@ -3224,6 +3320,16 @@ impl CoreState {
                 if pos.is_none() {
                     default_mic_output(&mut merged, &self.snapshot().1.stream, &list);
                 }
+                let known = if merged.le_audio { devices::load_le(&dir) } else { devices::load(&dir) };
+                // Another earbud of a saved set is that saved device: its
+                // profile is the saved device's, no second entry
+                if merged.le_audio
+                    && let Some(d) = self.service.known_le_sets().saved_entry(&merged.device_address, &known)
+                    && !d.address.eq_ignore_ascii_case(&merged.device_address)
+                {
+                    tracing::info!("profile: a member of a saved coordinated set, saved for the set's device");
+                    merged.device_address = d.address.clone();
+                }
                 let before = pos.map(|i| list[i].clone());
                 // Only the device's codec order changed (its cards dragged):
                 // the stream goes on unless the order changes its codec
@@ -3245,7 +3351,6 @@ impl CoreState {
                 // The profile's device joins the saved ones of its kind (as
                 // a connection saves it)
                 let address = merged.device_address.clone();
-                let known = if merged.le_audio { devices::load_le(&dir) } else { devices::load(&dir) };
                 if !known.iter().any(|d| d.address == address) {
                     let r = if merged.le_audio {
                         devices::save_le(&dir, &address, &merged.device_name)
@@ -6027,6 +6132,109 @@ mod tests {
         assert_eq!(saved(&state), [(kept.to_string(), false)]);
         let names: Vec<String> = state.snapshot().1.profiles.into_iter().map(|p| p.name).collect();
         assert_eq!(names, ["Speaker | Auto"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn state_in(dir: &Path) -> Arc<CoreState> {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let options = bluecaster_core::ServiceOptions {
+            config_dir: dir.to_path_buf(),
+            hci_tcp: None,
+            capture: bt_host::HciCapture::new(),
+            afh: None,
+            usb: Default::default(),
+        };
+        CoreState::new(Arc::new(Service::new(options, tx)), Box::new(|_| {}), Box::new(|| {}), Box::new(|_| {}))
+    }
+
+    /// Both earbuds of a pair saved as two devices: one entry, at startup
+    /// (set known from before) or once a connection learns the set
+    #[test]
+    fn earbuds_of_one_set_become_one_saved_device() {
+        let dir = std::env::temp_dir().join(format!("bluecaster-state-sets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(paths::devices_dir(&dir)).unwrap();
+        let (left, right, other) = ("C0:00:00:00:00:01", "C0:00:00:00:00:02", "00:A2:D0:00:00:33");
+        devices::save_le(&dir, left, "Buds").unwrap();
+        devices::save_le(&dir, right, "Buds").unwrap();
+        devices::save(&dir, other, "Speaker").unwrap();
+        // The profile is the right one's: it stays
+        let profile = |name: &str, address: &str| CoreProfile {
+            name: name.into(),
+            device_address: address.into(),
+            device_name: "Buds".into(),
+            le_audio: true,
+            ..CoreProfile::default()
+        };
+        profiles::save(&dir, &[profile("Buds LE Audio", right)]).unwrap();
+        let state = state_in(&dir);
+        // Not known as one set yet: two entries
+        let saved_le = |state: &CoreState| -> Vec<String> {
+            let s = state.snapshot().1;
+            s.devices.iter().filter(|d| d.saved && d.le_audio).map(|d| d.address.clone()).collect()
+        };
+        assert_eq!(saved_le(&state), [left, right]);
+
+        // A connection learned the set
+        le_sets::remember(&dir, &[left.into(), right.into()]).unwrap();
+        let mut events = state.subscribe();
+        state.on_service_event(ServiceEvent::LeSetLearned);
+        assert_eq!(saved_le(&state), [right]);
+        assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|(_, e)| matches!(*e, Event::Devices(_))));
+        assert_eq!(devices::load_le(&dir).len(), 1);
+        // The other earbud is the same device from now on
+        devices::save_le(&dir, left, "Buds").unwrap();
+        assert_eq!(devices::load_le(&dir).len(), 1);
+
+        // Saved twice again by an older version, the left one with a
+        // profile and a volume: merged at startup into the one set up
+        std::fs::write(paths::le_devices_file(&dir), format!("{right}|Buds\n{left}|Buds (L)\n")).unwrap();
+        profiles::save(&dir, &[profile("Left", left)]).unwrap();
+        let mut settings = CoreSettings::default();
+        settings.saved_volumes.insert(left.into(), 55);
+        settings.save(&dir).unwrap();
+        let state = state_in(&dir);
+        assert_eq!(saved_le(&state), [left]);
+        assert_eq!(state.snapshot().1.profiles[0].device_address, left);
+
+        // Removing it removes every member
+        devices::save_le(&dir, right, "").unwrap();
+        std::fs::write(paths::le_devices_file(&dir), format!("{left}|Buds\n{right}|Buds\n")).unwrap();
+        profiles::save(&dir, &[profile("Left", left), profile("Right", right)]).unwrap();
+        state.forget_device(left, true).unwrap();
+        assert!(devices::load_le(&dir).is_empty());
+        assert!(profiles::load(&dir).is_empty());
+        assert!(le_sets::load(&dir).is_empty());
+        assert!(!state.service.settings().saved_volumes.contains_key(left));
+        assert_eq!(devices::load(&dir).len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A profile saved for the other earbud of a saved set is the saved
+    /// device's
+    #[test]
+    fn a_profile_for_another_member_goes_to_the_saved_device() {
+        let dir = std::env::temp_dir().join(format!("bluecaster-state-set-profile-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(paths::devices_dir(&dir)).unwrap();
+        let (left, right) = ("C0:00:00:00:00:11", "C0:00:00:00:00:12");
+        devices::save_le(&dir, left, "Buds").unwrap();
+        le_sets::remember(&dir, &[left.into(), right.into()]).unwrap();
+        let state = state_in(&dir);
+        let profile = CoreProfile {
+            name: "Buds LE Audio".into(),
+            device_address: right.into(),
+            device_name: "Buds".into(),
+            le_audio: true,
+            ..CoreProfile::default()
+        };
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let r = rt.block_on(
+            state.handle(Method::ProfileSave { profile: Box::new(to_ipc_profile(&profile, 679)), original_name: None }),
+        );
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(devices::load_le(&dir).len(), 1);
+        assert_eq!(profiles::load(&dir)[0].device_address, left);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

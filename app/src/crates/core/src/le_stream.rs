@@ -614,6 +614,8 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
         tracing::info!("LE Audio streaming: {}", started.status.summary);
     };
     report(&started, audio.as_ref(), mic_note.as_ref());
+    // The set first: the other earbud is never saved as a device of its own
+    inner.learn_le_set(&host, &req.device, &started.status.devices, le.extra_devices.is_empty());
     inner.save_le_device(&addr, &req.device_name);
 
     // Windows volume <-> headset volume through the VCP module

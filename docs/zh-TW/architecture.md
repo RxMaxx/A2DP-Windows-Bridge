@@ -337,6 +337,7 @@ AAC 與 SBC 使用 A2DP 規格中定義的標準 Codec ID。
 | `profiles.json` | 設定檔 |
 | `devices\devices.txt` | 已知裝置 |
 | `devices\le_audio_devices.txt` | LE Audio：裝置清單中的 LE Audio 項目 |
+| `devices\le_audio_sets.txt` | LE Audio：已儲存裝置的協調集（僅成員位址；一對耳機視為一個裝置） |
 | `devices\device_codecs.json` | 每個傳統藍牙裝置上次連線時提供的內容（以及是否曾向 OPPO 耳機要求 Hi-Res） |
 | `pairing\link_keys.txt` | 連結金鑰：與 v1 或 2.0.x 配對過的耳機不需重新配對即可重新連線 |
 | `pairing\le_audio_bonds.tlv`、`pairing\le_audio_csip.txt` | LE Audio：LE 綁定資訊（含 GATT 伺服器持久保存的 CCC 值）以及協調集 |

@@ -496,6 +496,7 @@ LHDC V5와 LDAC보다는 뒤입니다(issue #86의 순서).
 | `profiles.json` | 프로필 |
 | `devices\devices.txt` | 알려진 장치 |
 | `devices\le_audio_devices.txt` | LE Audio: 장치 목록의 LE Audio 항목 |
+| `devices\le_audio_sets.txt` | LE Audio: 저장된 장치의 코디네이티드 세트(구성원 주소만 저장하며, 한 쌍의 이어버드는 장치 하나로 취급) |
 | `devices\device_codecs.json` | 각 클래식 장치가 마지막으로 연결했을 때 제공한 내용 (그리고 OPPO 이어폰에 Hi-Res를 요청했는지 여부) |
 | `pairing\link_keys.txt` | 링크 키: v1이나 2.0.x에서 페어링한 헤드폰은 다시 페어링하지 않고 다시 연결됨 |
 | `pairing\le_audio_bonds.tlv`, `pairing\le_audio_csip.txt` | LE Audio: LE 본딩 정보(GATT 서버가 유지하는 CCC 값 포함)와 조정 세트 |

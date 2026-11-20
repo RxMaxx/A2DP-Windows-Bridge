@@ -522,6 +522,7 @@ unten genannten Ordner):
 | `profiles.json` | Profile |
 | `devices\devices.txt` | Bekannte Geräte |
 | `devices\le_audio_devices.txt` | LE Audio: die LE-Audio-Einträge der Geräteliste |
+| `devices\le_audio_sets.txt` | LE Audio: die koordinierten Sets der gespeicherten Geräte (nur die Adressen der Mitglieder; beide Ohrhörer eines Paars sind ein Gerät) |
 | `devices\device_codecs.json` | Was jedes klassische Gerät bei seiner letzten Verbindung angeboten hat (und ob OPPO-Ohrhörer nach Hi-Res gefragt wurden) |
 | `pairing\link_keys.txt` | Link Keys: Mit v1 oder 2.0.x gekoppelte Kopfhörer verbinden sich ohne erneute Kopplung wieder |
 | `pairing\le_audio_bonds.tlv`, `pairing\le_audio_csip.txt` | LE Audio: LE-Bonds (mit den dauerhaften CCC-Werten des GATT-Servers) und koordinierte Sets |
