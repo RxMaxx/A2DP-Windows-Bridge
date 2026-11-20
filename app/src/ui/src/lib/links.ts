@@ -121,23 +121,46 @@ export interface ChipReport {
   summary: string;
   /** "copy diagnostic info" text: only the Windows build is taken from it */
   info: string;
-  /** The probe report's file name */
-  file: string;
+  /** The probe report itself, as JSON */
+  report: string;
 }
 
-/** A new chip report with what the probe read; the user attaches the file */
-export function chipReportUrl(r: ChipReport): string {
+/** Characters of the whole query of a chip report: GitHub refuses very long
+ *  URLs (a bug report's info is cut at MAX_INFO_CHARS, plus the other fields) */
+const MAX_CHIP_QUERY = 7000;
+
+/** A new chip report with what the probe read. The report itself goes into
+ *  the issue when the URL can carry it (attach: false); otherwise its field
+ *  stays empty, so GitHub refuses the issue until the file is attached
+ *  (attach: true). A file name in the field passed as an answer, and many
+ *  reports came without the file (#518). */
+export function chipReportUrl(r: ChipReport): { url: string; attach: boolean } {
   const q = new URLSearchParams({
     template: "chip_report.yml",
     title: `Chip support: ${r.summary.split(",")[0]}`,
     version: r.version,
     adapter: r.adapter,
     chip: r.summary,
-    probe: `${r.file}\n(drag the file here from the Explorer window BlueCaster opened)`,
   });
   const os = /OS\s*:\s*Windows build (\d+) \(([^)]+)\)/.exec(r.info);
   if (os) q.set("windows", `Windows build ${os[1]} (${os[2]})`);
-  return `${REPO}/issues/new?${q.toString()}`;
+  let attach = true;
+  try {
+    const v: unknown = JSON.parse(r.report);
+    // Readable when it fits, one line when only that fits
+    for (const text of [JSON.stringify(v, null, 1), JSON.stringify(v)]) {
+      const p = new URLSearchParams(q);
+      p.set("probe", `\`\`\`json\n${text}\n\`\`\``);
+      if (p.toString().length <= MAX_CHIP_QUERY) {
+        q.set("probe", p.get("probe")!);
+        attach = false;
+        break;
+      }
+    }
+  } catch {
+    // Not JSON: the file is attached instead
+  }
+  return { url: `${REPO}/issues/new?${q.toString()}`, attach };
 }
 
 /** The firmware download page for an adapter's vendor */

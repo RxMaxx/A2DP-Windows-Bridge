@@ -1220,6 +1220,8 @@ pub struct ProbeResult {
     /// "Intel, Bluetooth 5.3 (HCI 12), LMP subversion 0x3102, 8 of 8
     /// commands answered"
     pub summary: String,
+    /// The same report on one line, for a chip report issue
+    pub report: String,
 }
 
 /// A chip script checked before it runs (adapter.check_script)

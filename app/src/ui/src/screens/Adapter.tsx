@@ -32,7 +32,7 @@ import {
   loaderOutcome,
   vendorFirmware,
 } from "../lib/chips";
-import { baseName, chipReportUrl, LINKS, vendorFirmwareUrl } from "../lib/links";
+import { chipReportUrl, LINKS, vendorFirmwareUrl } from "../lib/links";
 import { AdapterHung, hiddenByHung } from "./Home";
 
 /** The adapters BlueCaster can use first (WinUSB), the ones without a driver
@@ -142,19 +142,19 @@ export function Adapter() {
       .finally(() => setProbing(false));
   };
   // Developer mode: the keys Windows kept for this adapter's devices
-  /** A prefilled chip report in the browser, the file shown in Explorer to
-   *  drag into it */
+  /** A prefilled chip report in the browser, with the probe report in it;
+   *  one too long for the URL is shown in Explorer to drag into it */
   const reportChip = (a: AdapterInfo, r: ProbeResult) =>
     void app.run(async () => {
       const info = (await core.request("diag.info", { mask: true })).text;
-      const url = chipReportUrl({
+      const { url, attach } = chipReportUrl({
         version: snap().update.current_version,
         adapter: a.display_name,
         summary: r.summary,
         info,
-        file: baseName(r.path),
+        report: r.report ?? "",
       });
-      await core.transport.revealPath(r.path);
+      if (attach) await core.transport.revealPath(r.path);
       await core.transport.openUrl(url);
     });
   // The *_fw.bin files in the settings folder: chips the table lacks
