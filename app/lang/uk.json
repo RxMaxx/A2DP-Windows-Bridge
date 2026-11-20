@@ -129,6 +129,7 @@
   "firmware.vendor_mediatek": "Адаптер MediaTek. Мікропрограма береться з драйвера MediaTek для Windows.",
   "firmware.vendor_qualcomm": "Адаптер Qualcomm. Мікропрограма береться з драйвера Qualcomm для Windows.",
   "firmware.vendor_realtek_driver": "Адаптер Realtek RTL8852BD. Мікропрограма береться з драйвера Realtek для Windows, тому не видаляйте цей драйвер.",
+  "firmware.vendor_realtek_driver_other": "Адаптер Realtek. Мікропрограма береться з драйвера Realtek для Windows, тому не видаляйте цей драйвер.",
   "firmware.vendor_broadcom": "Адаптер Broadcom: файли Realtek не потрібні.",
   "firmware.vendor_csr": "Адаптер CSR: файли мікропрограми не потрібні.",
   "firmware.vendor_barrot": "Адаптер Barrot: файли мікропрограми не потрібні.",

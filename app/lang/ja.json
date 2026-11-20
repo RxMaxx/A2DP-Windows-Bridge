@@ -129,6 +129,7 @@
   "firmware.vendor_mediatek": "MediaTek アダプター。ファームウェアは MediaTek の Windows ドライバーから読み込みます。",
   "firmware.vendor_qualcomm": "Qualcomm アダプター。ファームウェアは Qualcomm の Windows ドライバーから読み込みます。",
   "firmware.vendor_realtek_driver": "Realtek RTL8852BD アダプター。ファームウェアは Realtek の Windows ドライバーから読み込むため、そのドライバーはアンインストールしないでください。",
+  "firmware.vendor_realtek_driver_other": "Realtek アダプター。ファームウェアは Realtek の Windows ドライバーから読み込むため、そのドライバーはアンインストールしないでください。",
   "firmware.vendor_broadcom": "Broadcom アダプター。Realtek のファイルは不要です。",
   "firmware.vendor_csr": "CSR アダプター。ファームウェアファイルは不要です。",
   "firmware.vendor_barrot": "Barrot アダプター。ファームウェアファイルは不要です。",

@@ -129,6 +129,7 @@
   "firmware.vendor_mediatek": "MediaTek 适配器。固件来自 MediaTek 的 Windows 驱动程序。",
   "firmware.vendor_qualcomm": "Qualcomm 适配器。固件来自 Qualcomm 的 Windows 驱动程序。",
   "firmware.vendor_realtek_driver": "Realtek RTL8852BD 适配器。固件来自 Realtek 的 Windows 驱动程序，请勿卸载该驱动程序。",
+  "firmware.vendor_realtek_driver_other": "Realtek 适配器。固件来自 Realtek 的 Windows 驱动程序，请勿卸载该驱动程序。",
   "firmware.vendor_broadcom": "Broadcom 适配器：无需 Realtek 文件。",
   "firmware.vendor_csr": "CSR 适配器：无需固件文件。",
   "firmware.vendor_barrot": "Barrot 适配器：无需固件文件。",

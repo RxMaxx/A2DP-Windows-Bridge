@@ -615,7 +615,7 @@ impl Inner {
             let _ = events.lock().unwrap_or_else(|e| e.into_inner()).send(ServiceEvent::Loader(p.clone()));
         }));
         tracing::debug!(
-            "host config: transport {:?}, firmware dir {:?}, realtek pid {:04x} files {:?}, intel loader {}, mediatek loader {}, qualcomm loader {}, realtek driver chip {:04X?}, broadcom ids {}, LE {} (cli {:?})",
+            "host config: transport {:?}, firmware dir {:?}, realtek pid {:04x} files {:?}, intel loader {}, mediatek loader {}, qualcomm loader {}, atheros loader {}, realtek driver chip {:04X?}, broadcom ids {}, LE {} (cli {:?})",
             c.transport,
             c.firmware_dir,
             c.realtek_pid,
@@ -623,6 +623,7 @@ impl Inner {
             c.intel_loader,
             c.mediatek_loader,
             c.qualcomm_loader,
+            c.atheros_loader,
             c.realtek_driver_chip,
             c.broadcom_ids.len(),
             c.le_audio.is_some(),
@@ -672,7 +673,10 @@ impl Inner {
                 }
             }
         }
-        Err(Msg::new(if last == InitFailure::NoAnswer { "error.btstack_no_answer" } else { "error.btstack_init" }))
+        // An adapter a firmware loader left needing a power cycle: the same
+        // advice as for one that does not answer (unplug it, or shut down)
+        let needs_replug = matches!(last, InitFailure::NoAnswer | InitFailure::NeedsReplug);
+        Err(Msg::new(if needs_replug { "error.btstack_no_answer" } else { "error.btstack_init" }))
     }
 
     /// Remembers whether the adapter the stack opened has LE Audio's

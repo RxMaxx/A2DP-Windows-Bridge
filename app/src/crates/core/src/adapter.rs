@@ -119,14 +119,17 @@ const BUILTIN_VENDOR_CLASS: &[(u16, u16)] = &[
 
 /// VID:PIDs the USB transport opens besides Bluetooth-class devices (bt-host
 /// adds BTstack's Realtek table, CSR and Intel): v1's built-in vendor-class
-/// list, the OEM adapters with a Realtek chip, and the WinUSB adapters whose
+/// list, the OEM adapters with a Realtek chip, the adapters of Broadcom's
+/// Windows driver (bt_host::broadcom), and the WinUSB adapters whose
 /// interface 0 was found to be vendor-class Bluetooth with the HCI pipes
 pub fn usb_known_ids(vendor_class: &[(u16, u16)]) -> Vec<(u16, u16)> {
     let mut ids: Vec<(u16, u16)> = BUILTIN_VENDOR_CLASS.to_vec();
     ids.extend(chips::OEM_TABLE.iter().map(|m| (m.vid, m.pid)));
-    for id in vendor_class {
-        if !ids.contains(id) {
-            ids.push(*id);
+    // The adapters of Broadcom's Windows driver, some of them vendor-class
+    let broadcom = bt_host::broadcom::ADAPTERS.iter().map(|a| (a.0, a.1));
+    for id in broadcom.chain(vendor_class.iter().copied()) {
+        if !ids.contains(&id) {
+            ids.push(id);
         }
     }
     ids
@@ -142,7 +145,7 @@ pub fn realtek_driver_firmware(fw_stem: &str) -> Option<std::path::PathBuf> {
 
 /// Fills the chipset part of `config` from the settings and the present
 /// adapters
-pub fn configure(config: &mut HostConfig, settings: &Settings, _config_dir: &Path) {
+pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path) {
     config.afh = Some(Box::new(WifiAfh::default()));
     if matches!(config.transport, TransportConfig::Tcp(_)) {
         return; // a virtual controller: no chipset, no firmware
@@ -262,12 +265,16 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, _config_dir: &Pat
                 && chips::chip_supported(a.vendor, a.device.vid, a.device.pid)
                 && !a.device.in_use()
         });
-        // Qualcomm: the same
+        // Qualcomm: the same; the AR30xx have a loader of their own
+        let ar30xx = |a: &Adapter| chips::QUALCOMM_AR30XX.contains(&(a.device.vid, a.device.pid));
         config.qualcomm_loader = winusb.iter().any(|a| {
             a.vendor == ChipVendor::Qualcomm
+                && !ar30xx(a)
                 && chips::chip_supported(a.vendor, a.device.vid, a.device.pid)
                 && !a.device.in_use()
         });
+        config.atheros_loader =
+            winusb.iter().any(|a| a.vendor == ChipVendor::Qualcomm && ar30xx(a) && !a.device.in_use());
         // A Realtek chip whose firmware comes from Realtek's Windows driver
         // (the RTL8852BD): the first one present, never one in use
         config.realtek_driver_chip = winusb
@@ -280,11 +287,13 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, _config_dir: &Pat
             .map(|a| (a.device.vid, a.device.pid));
         config.broadcom_ids =
             winusb.iter().filter(|a| a.vendor == ChipVendor::Broadcom).map(|a| (a.device.vid, a.device.pid)).collect();
+        config.broadcom_marks = Some(std::sync::Arc::new(BroadcomPatchMarks { dir: config_dir.to_path_buf() }));
         tracing::debug!(
-            "adapter: intel bootloader download {}, mediatek download {}, qualcomm download {}, realtek driver chip {:04X?}, broadcom patchram ids {:04X?}",
+            "adapter: intel bootloader download {}, mediatek download {}, qualcomm download {}, atheros download {}, realtek driver chip {:04X?}, broadcom patchram ids {:04X?}",
             config.intel_loader,
             config.mediatek_loader,
             config.qualcomm_loader,
+            config.atheros_loader,
             config.realtek_driver_chip,
             config.broadcom_ids
         );
@@ -463,6 +472,36 @@ struct AdapterCaps {
     /// Device Manager's name while Windows' Bluetooth ran it
     #[serde(default, skip_serializing_if = "Option::is_none")]
     windows_name: Option<String>,
+    /// The app version Broadcom's patch failed with on it (bt-host's
+    /// broadcom loader): while it is this app's, the ROM runs
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    broadcom_patch_failed: Option<String>,
+}
+
+/// The failed-patch marks of bt-host's Broadcom loader, in
+/// adapter_caps.json (per VID:PID, with the app version)
+pub struct BroadcomPatchMarks {
+    pub dir: std::path::PathBuf,
+}
+
+impl bt_host::broadcom::PatchMarks for BroadcomPatchMarks {
+    fn failed_with(&self, vid: u16, pid: u16) -> Option<String> {
+        load_caps(&self.dir).get(&caps_key(vid, pid)).and_then(|c| c.broadcom_patch_failed.clone())
+    }
+
+    fn set_failed(&self, vid: u16, pid: u16, version: Option<&str>) {
+        let mut caps = load_caps(&self.dir);
+        let entry = caps.entry(caps_key(vid, pid)).or_default();
+        if entry.broadcom_patch_failed.as_deref() == version {
+            return;
+        }
+        entry.broadcom_patch_failed = version.map(str::to_owned);
+        tracing::debug!(
+            "adapter caps: {} Broadcom patch failed {version:?}, saving adapter_caps.json",
+            caps_key(vid, pid)
+        );
+        write_caps(&self.dir, &caps);
+    }
 }
 
 fn caps_key(vid: u16, pid: u16) -> String {
@@ -660,6 +699,27 @@ mod tests {
         // The other values stay
         assert_eq!(address(&dir, 0x0BDA, 0xA729).as_deref(), Some("00:11:22:33:44:55"));
         assert_eq!(le_audio(&dir, 0x0BDA, 0xA729), Some(false));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn broadcom_patch_marks_are_kept_per_adapter() {
+        use bt_host::broadcom::PatchMarks;
+        let dir = std::env::temp_dir().join(format!("bluecaster-bcm-marks-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        save_hci_version(&dir, 0x0B05, 0x17CB, 6);
+        let marks = BroadcomPatchMarks { dir: dir.clone() };
+        assert_eq!(marks.failed_with(0x0B05, 0x17CB), None);
+        marks.set_failed(0x0B05, 0x17CB, Some("3.0.2"));
+        assert_eq!(marks.failed_with(0x0B05, 0x17CB).as_deref(), Some("3.0.2"));
+        assert_eq!(marks.failed_with(0x0A5C, 0x21E8), None);
+        // The adapter's other values stay; dropping the mark leaves them
+        assert_eq!(hci_version(&dir, 0x0B05, 0x17CB), Some(6));
+        marks.set_failed(0x0B05, 0x17CB, None);
+        assert_eq!(marks.failed_with(0x0B05, 0x17CB), None);
+        assert_eq!(hci_version(&dir, 0x0B05, 0x17CB), Some(6));
+        let text = std::fs::read_to_string(crate::paths::adapter_caps_file(&dir)).unwrap();
+        assert!(!text.contains("broadcom_patch_failed"), "{text}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

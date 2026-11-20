@@ -129,6 +129,7 @@
   "firmware.vendor_mediatek": "Адаптер MediaTek. Прошивка берётся из драйвера MediaTek для Windows.",
   "firmware.vendor_qualcomm": "Адаптер Qualcomm. Прошивка берётся из драйвера Qualcomm для Windows.",
   "firmware.vendor_realtek_driver": "Адаптер Realtek RTL8852BD. Прошивка берётся из драйвера Realtek для Windows, поэтому не удаляйте этот драйвер.",
+  "firmware.vendor_realtek_driver_other": "Адаптер Realtek. Прошивка берётся из драйвера Realtek для Windows, поэтому не удаляйте этот драйвер.",
   "firmware.vendor_broadcom": "Адаптер Broadcom: файлы Realtek не нужны.",
   "firmware.vendor_csr": "Адаптер CSR: файлы прошивки не нужны.",
   "firmware.vendor_barrot": "Адаптер Barrot: файлы прошивки не нужны.",
