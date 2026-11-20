@@ -2348,6 +2348,9 @@ impl CoreState {
         list.retain(|p| !of_it(p));
         let active = s.active_profile.filter(|a| !gone.contains(a));
         self.save_profiles(&list, active)?;
+        // Off every list now (Home, Codecs, the sidebar): what
+        // follows may wait for the stack (up to seconds per entry)
+        self.refresh_devices();
         self.service.forget_device(address, le_audio);
         crate::pairing::forget_services(&dir, address, le_audio);
         let mut settings = self.service.settings();
@@ -2360,6 +2363,7 @@ impl CoreState {
             let _ = settings.save(&dir);
             self.service.set_settings(settings);
         }
+        // Published again only if a scan changed the list meanwhile
         self.refresh_devices();
         Ok(Value::Null)
     }
@@ -5950,6 +5954,79 @@ mod tests {
         let list = saved_devices(&dir, &[], &codecs);
         assert_eq!(list.len(), 1);
         assert!(!list[0].le_audio);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A removed device stayed on Home and Codecs for a while
+    #[test]
+    fn forgetting_takes_a_device_off_the_lists_at_once() {
+        let dir = std::env::temp_dir().join(format!("bluecaster-state-forget-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A dual-mode headset (both kinds), LE Audio earbuds alone, another device
+        let (dual, set, kept) = ("00:A2:D0:00:00:31", "00:A2:D0:00:00:32", "00:A2:D0:00:00:33");
+        devices::save(&dir, dual, "Phones").unwrap();
+        devices::save_le(&dir, dual, "Phones").unwrap();
+        devices::save_le(&dir, set, "Buds").unwrap();
+        devices::save(&dir, kept, "Speaker").unwrap();
+        let profile = |name: &str, address: &str, le_audio: bool| CoreProfile {
+            name: name.into(),
+            device_address: address.into(),
+            le_audio,
+            ..CoreProfile::default()
+        };
+        let list = [
+            profile("Phones | Auto", dual, false),
+            profile("Phones LE Audio", dual, true),
+            profile("Buds LE Audio", set, true),
+            profile("Speaker | Auto", kept, false),
+        ];
+        profiles::save(&dir, &list).unwrap();
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let options = bluecaster_core::ServiceOptions {
+            config_dir: dir.clone(),
+            hci_tcp: None,
+            capture: bt_host::HciCapture::new(),
+            afh: None,
+            usb: Default::default(),
+        };
+        let state =
+            CoreState::new(Arc::new(Service::new(options, tx)), Box::new(|_| {}), Box::new(|| {}), Box::new(|_| {}));
+        state.refresh_devices();
+        state.publish(Event::Profiles {
+            profiles: list.iter().map(|p| to_ipc_profile(p, 679)).collect(),
+            active_profile: Some("Buds LE Audio".into()),
+        });
+        let saved = |state: &CoreState| -> Vec<(String, bool)> {
+            let s = state.snapshot().1;
+            s.devices.iter().filter(|d| d.saved).map(|d| (d.address.clone(), d.le_audio)).collect()
+        };
+        assert_eq!(saved(&state).len(), 4);
+
+        // The profiles, then the device list, each once
+        let mut events = state.subscribe();
+        state.forget_device(set, true).unwrap();
+        let kinds: Vec<&str> = std::iter::from_fn(|| events.try_recv().ok())
+            .filter_map(|(_, e)| match *e {
+                Event::Profiles { .. } => Some("profiles"),
+                Event::Devices(_) => Some("devices"),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(kinds, ["profiles", "devices"]);
+        assert!(!saved(&state).iter().any(|(a, _)| a == set));
+        let s = state.snapshot().1;
+        assert!(s.profiles.iter().all(|p| p.device_address != set));
+        assert_eq!(s.active_profile, None);
+
+        // Both kinds of the dual-mode headset, one after the other (Audio
+        // Devices removes both): only the other device and its profile stay
+        state.forget_device(dual, true).unwrap();
+        assert_eq!(saved(&state), [(dual.to_string(), false), (kept.to_string(), false)]);
+        state.forget_device(dual, false).unwrap();
+        assert_eq!(saved(&state), [(kept.to_string(), false)]);
+        let names: Vec<String> = state.snapshot().1.profiles.into_iter().map(|p| p.name).collect();
+        assert_eq!(names, ["Speaker | Auto"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
