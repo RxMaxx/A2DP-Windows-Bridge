@@ -795,7 +795,9 @@ impl Stack {
     }
 
     /// One complete SDU as an HCI ISO data packet (no time stamp), at most
-    /// [`ISO_SDU_MAX`] bytes; call it on CIS can-send-now
+    /// [`ISO_SDU_MAX`] bytes. The caller keeps within the controller's ISO
+    /// buffers; [`crate::consts::BTSTACK_ACL_BUFFERS_FULL`]: BTstack's
+    /// packet buffer is taken, nothing was sent
     pub fn iso_send(&self, cis_handle: u16, sequence_number: u16, sdu: &[u8]) -> u8 {
         if !self.le_initialized() {
             return ERROR_CODE_COMMAND_DISALLOWED;
