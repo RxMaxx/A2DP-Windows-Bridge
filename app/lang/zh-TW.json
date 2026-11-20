@@ -940,6 +940,7 @@
   "ipc.error.failed": "要求失敗：%s",
   "ipc.error.rfcomm_not_connected": "裝置未連線到 BlueCaster",
   "ipc.error.rfcomm_service_not_found": "裝置不提供此服務",
+  "ipc.error.rfcomm_service_reserved": "此服務僅供 BlueCaster 使用",
   "ipc.error.rfcomm_open_failed": "無法開啟 RFCOMM 通道 (%s)",
   "ipc.error.rfcomm_no_channel": "沒有這個 RFCOMM 通道",
   "ipc.error.rfcomm_busy": "RFCOMM 通道忙碌中，請再試一次。",

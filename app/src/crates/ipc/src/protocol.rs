@@ -2056,6 +2056,8 @@ pub enum Method {
     /// "disconnected"), or the device closes it ("remote"). Answered within
     /// 20 s, also behind other opens: wait at least 25 s. -> RfcommOpened.
     /// Errors: rfcomm.not_connected, rfcomm.service_not_found,
+    /// rfcomm.service_reserved (headset / hands-free 0x1108, 0x1112,
+    /// 0x111E, 0x111F: the core's own headset microphone link),
     /// rfcomm.open_failed (also when out of time: a channel that opens
     /// later is closed), rfcomm.busy (too many channels, or out of time
     /// behind other opens).
@@ -2672,6 +2674,18 @@ mod tests {
         assert_eq!(
             m(serde_json::json!({"method": "diag.subscribe", "params": {"logs": "info", "link": true}})),
             Method::DiagSubscribe { logs: Some(LogLevel::Info), link: true, receiver: None }
+        );
+        // Each call sets both: a missing `logs` turns the log lines off, a
+        // missing `link` is refused
+        assert_eq!(
+            m(serde_json::json!({"method": "diag.subscribe", "params": {"link": true}})),
+            Method::DiagSubscribe { logs: None, link: true, receiver: None }
+        );
+        assert!(
+            serde_json::from_value::<Method>(
+                serde_json::json!({"method": "diag.subscribe", "params": {"logs": "info"}})
+            )
+            .is_err()
         );
         let custom = m(serde_json::json!({"method": "stream.start_custom", "params": {
             "device": "AA:BB:CC:DD:EE:FF", "codec": "sbc", "quality": "hq", "source": "tone"}}));
