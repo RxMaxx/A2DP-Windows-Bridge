@@ -95,6 +95,8 @@ sequenceDiagram
 
 `stream.state` 是 `idle`、`connecting`、`streaming`、`reconnecting`、`error` 之一；`stream.message` 以[消息键](#errors-and-messages)说明原因。
 
+每个客户端无需订阅即可收到状态事件。只有在状态发生变化时才会发送事件，因此连接可能长时间收不到任何消息。
+
 **修订号。** 每个状态事件都带有下一个修订号（`rev` + 1）。出现跳号说明丢失了事件：请发送 `state.snapshot` 获取新快照。如果客户端读取太慢，核心也会主动向其发送新的 `snapshot`。非状态事件（`link`、`log`、`receiver`、`rfcomm_data`、`rfcomm_closed`）带有当前修订号，不会使其递增。
 
 核心关闭时会发送事件 `bye` 并关闭管道。
@@ -136,14 +138,19 @@ sequenceDiagram
 | `diag.info` | `{"mask": bool}`（可选） | `DiagInfo`（“复制诊断信息”的文本） |
 | `rfcomm.open`、`rfcomm.send`、`rfcomm.close` | 请参阅 [RFCOMM 直通](#rfcomm-passthrough) | |
 
+调用 `diag.subscribe` 时，请始终同时传入 `logs` 和 `link`。每次调用都会同时设置两者，因此省略 `logs` 会关闭日志事件。
+
 以下方法供 BlueCaster 窗口使用，工具使用时需谨慎：`profile.save` / `profile.delete`、`settings.set`（替换**全部**设置：请发送包含你的更改的最新 `settings`，切勿只发送部分对象）、`device.forget` / `device.rename`、`adapter.*`（`adapter.assign_winusb` 和 `adapter.restore_driver` 会显示 UAC 提示；开发者模式的芯片工具 `adapter.probe` 和 `adapter.run_script` 会停止蓝牙堆栈）、`app.quit`。其余方法服务于窗口自己的页面，可能随时更改，恕不另行通知：`stream.start_custom`、其他 `device.*` 方法（`device.import_windows_pairings` 会显示 UAC 提示）、`audio.apps`、`audio.mixer` / `audio.mixer_set`、上述两个以外的 `diag.*`、`receiver.*` 和 `app.*`。完整的方法列表（含参数和结果）见 `protocol.rs` 中的 `Method` 枚举。
 
 ## RFCOMM 直通 {#rfcomm-passthrough}
 
 当 `welcome.features` 包含 `"rfcomm"` 时可用（2.0.2-beta.10 及更高版本）。工具可以借此通过 BlueCaster 现有的链路访问耳机自己的 RFCOMM 服务（厂商控制应用：电量、降噪、EQ）；通过 BlueCaster 连接的耳机，Windows 本身是看不到的。
 
-- `rfcomm.open {address, uuid}` → `{channel_id, mtu}`。`address` 必须是正在串流的设备；核心绝不会为此建立连接或配对（而是返回 `rfcomm.not_connected`）。`uuid` 是完整的 128 位 UUID，或基于蓝牙基础 UUID 的 16 位 `"xxxx"`。即使排在其他打开请求之后，应答也会在 20 秒内到达，因此请至少等待 25 秒。错误：`rfcomm.not_connected`、`rfcomm.service_not_found`、`rfcomm.open_failed`、`rfcomm.busy`。
+- `rfcomm.open {address, uuid}` → `{channel_id, mtu}`。`address` 必须是正在串流的设备；核心绝不会为此建立连接或配对（而是返回 `rfcomm.not_connected`）。`uuid` 是完整的 128 位 UUID，或基于蓝牙基础 UUID 的 16 位 `"xxxx"`。即使排在其他打开请求之后，应答也会在 20 秒内到达，因此请至少等待 25 秒。错误：`rfcomm.not_connected`、`rfcomm.service_not_found`、`rfcomm.service_reserved`、`rfcomm.open_failed`、`rfcomm.busy`。
+- 耳机和免提服务（`1108`、`1112`、`111E`、`111F`）无论使用哪种 UUID 形式，都会被拒绝并返回 `rfcomm.service_reserved`。BlueCaster 将它们用于耳机麦克风。
+- RFCOMM 直通需要经典蓝牙（A2DP）连接。对于通过 LE Audio 连接的设备，`rfcomm.open` 始终返回 `rfcomm.not_connected`。
 - `rfcomm.send {channel_id, data}` → `null`。`data` 为 base64（标准，带填充），每个请求最多 64 KiB，按请求顺序以最多 `mtu` 大小的帧发送。错误：`rfcomm.no_channel`、`rfcomm.busy`（队列已满，未发送）、`rfcomm.timeout`（不确定是否已发送：请勿重复发送，请重新打开信道）。
+- 发送大量数据（例如固件更新）时，请放慢速度。信道与音频共用同一条无线链路，快速发送大量数据可能导致声音中断。
 - 收到的数据以 `rfcomm_data` 事件 `{channel_id, data}` 到达，且只发给打开该信道的连接。
 - `rfcomm.close {channel_id}` → `null`，在此之前发送的数据全部发出后返回；之后不会再收到 `rfcomm_closed`。
 - 管道连接结束时，信道也会关闭；信道还可能随 `rfcomm_closed` 事件 `{channel_id, reason}` 关闭：`remote`（设备关闭了信道或链路断开）、`disconnected`（A2DP 连接结束）、`stopped`（蓝牙堆栈停止）、`overflow`（客户端未读取的接收数据超过 1 MiB）。
