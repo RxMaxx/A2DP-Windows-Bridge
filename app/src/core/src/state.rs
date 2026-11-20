@@ -561,9 +561,14 @@ fn vendor_note(vendor: ChipVendor, vid: u16, pid: u16) -> Option<Msg> {
         ChipVendor::Actions => "firmware.vendor_actions",
         ChipVendor::MediaTek => "firmware.vendor_mediatek",
         ChipVendor::Qualcomm => "firmware.vendor_qualcomm",
-        // The RTL8852BD: its firmware comes from Realtek's Windows driver
-        ChipVendor::Realtek if bt_host::realtek_btnic::chip(vid, pid).is_some() => "firmware.vendor_realtek_driver",
-        ChipVendor::Realtek | ChipVendor::Unknown => return None,
+        // Chips whose firmware comes from Realtek's Windows driver: the
+        // RTL8852BD's note names it, the others' (RTL8922A, RTL8852BT) not
+        ChipVendor::Realtek => match bt_host::realtek_btnic::chip(vid, pid) {
+            Some(("RTL8852BD", _)) => "firmware.vendor_realtek_driver",
+            Some(_) => "firmware.vendor_realtek_driver_other",
+            None => return None,
+        },
+        ChipVendor::Unknown => return None,
     };
     Some(Msg::new(key))
 }
@@ -5640,13 +5645,23 @@ mod tests {
         assert_eq!(vendor_note(ChipVendor::Qualcomm, 0x0CF3, 0xE300).unwrap().key, "firmware.vendor_qualcomm");
         assert_eq!(vendor_note(ChipVendor::Qualcomm, 0x0489, 0xE0C7).unwrap().key, "firmware.vendor_qualcomm");
         assert_eq!(vendor_note(ChipVendor::Qualcomm, 0x0CF3, 0xE400).unwrap().key, "firmware.vendor_unsupported");
-        // MediaTek: the MT79xx and the MT7927 have a loader, the others none
-        // (MT7663)
+        // MediaTek: the MT79xx, the MT7927 and the MT7663 have a loader, the
+        // others none (MT7630)
         assert_eq!(vendor_note(ChipVendor::MediaTek, 0x0E8D, 0x7925).unwrap().key, "firmware.vendor_mediatek");
         assert_eq!(vendor_note(ChipVendor::MediaTek, 0x0E8D, 0x0608).unwrap().key, "firmware.vendor_mediatek");
         assert_eq!(vendor_note(ChipVendor::MediaTek, 0x0E8D, 0x7927).unwrap().key, "firmware.vendor_mediatek");
-        assert_eq!(vendor_note(ChipVendor::MediaTek, 0x0E8D, 0x7663).unwrap().key, "firmware.vendor_unsupported");
+        assert_eq!(vendor_note(ChipVendor::MediaTek, 0x0E8D, 0x7630).unwrap().key, "firmware.vendor_unsupported");
         assert!(vendor_note(ChipVendor::Realtek, 0x0BDA, 0x8771).is_none());
+        // Realtek chips whose firmware comes from Realtek's Windows driver
+        assert_eq!(vendor_note(ChipVendor::Realtek, 0x0BDA, 0xB853).unwrap().key, "firmware.vendor_realtek_driver");
+        assert_eq!(
+            vendor_note(ChipVendor::Realtek, 0x0BDA, 0xB892).unwrap().key,
+            "firmware.vendor_realtek_driver_other"
+        );
+        assert_eq!(
+            vendor_note(ChipVendor::Realtek, 0x13D3, 0x3618).unwrap().key,
+            "firmware.vendor_realtek_driver_other"
+        );
         // ROM dongles and Wi-Fi-loaded combos: a note, never "unsupported"
         assert_eq!(vendor_note(ChipVendor::Barrot, 0x33FA, 0x0010).unwrap().key, "firmware.vendor_barrot");
         assert_eq!(vendor_note(ChipVendor::Marvell, 0x1286, 0x204C).unwrap().key, "firmware.vendor_marvell");

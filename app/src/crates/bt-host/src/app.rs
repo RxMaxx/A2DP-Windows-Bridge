@@ -32,7 +32,7 @@ use crate::sdp_services::SdpServices;
 use crate::shared::Shared;
 use crate::stats::LinkStats;
 use crate::{AfhClassification, ConnectFailure, Controls, DiscoveredDevice, HostEvent, InitFailure, MediaKey};
-use crate::{broadcom, intel, mediatek, qualcomm, realtek_btnic};
+use crate::{atheros, broadcom, intel, mediatek, qualcomm, realtek_btnic};
 
 pub(crate) type Job = Box<dyn FnOnce(&mut HostApp, &Stack) + Send>;
 
@@ -370,6 +370,18 @@ impl HostApp {
         tracing::info!("Qualcomm adapter: checking its firmware, folder {}", dir.display());
         let loader = qualcomm::Loader::new(Box::new(move |name| {
             read_firmware_file(&dir, "qca", name).or_else(|| qualcomm::from_windows_driver(name))
+        }));
+        self.start_loader(stack, Box::new(loader));
+    }
+
+    /// The Qualcomm Atheros AR30xx patch and system configuration download
+    /// (crate::atheros), then HCI init: the firmware folder first, then
+    /// Qualcomm Atheros' Windows driver
+    pub fn start_atheros_loader(&mut self, stack: &Stack) {
+        let dir = self.setup.firmware_dir.clone();
+        tracing::info!("Qualcomm Atheros adapter: checking its firmware, folder {}", dir.display());
+        let loader = atheros::Loader::new(Box::new(move |name| {
+            read_firmware_file(&dir, "qca", name).or_else(|| atheros::from_windows_driver(name))
         }));
         self.start_loader(stack, Box::new(loader));
     }
