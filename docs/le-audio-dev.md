@@ -593,6 +593,10 @@ SDU), encrypted with the right code (synced) and a wrong one (MIC failure,
 no audio), mono 24_2_2. Not done yet: `run_test.py` cases and
 `bluecaster_decode` support for BIS (the decoder change in `tools/a2dp_decode`
 is unfinished).
+`--layout auracast-split` starts two sinks, one following "<name> L" and
+one "<name> R" (for `--auracast-split`). Checked by hand on 2026-11-21: both
+BIGs up, each sink got every SDU of its BIS; a refused LE Create BIG for
+either broadcast ends the other and removes both advertising sets.
 Real hardware: not tried.
 
 ## LE Audio off
