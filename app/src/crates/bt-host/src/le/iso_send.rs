@@ -47,8 +47,11 @@
 //! have room. Several BIGs (broadcasts of their own, e.g. left and right)
 //! share one round: each BIG is asked, and the round ends once every BIS
 //! of all of them got its SDU, so all carry the same set and sequence
-//! number. The [`le_audio::sdu_queue::SendGuard`] keeps those rounds at
-//! most queue + 2 intervals ahead of real time.
+//! number. A BIS send refused while BTstack's packet buffer is taken is
+//! neither sent nor failed: the same SDU goes again with the same sequence
+//! number on HCI_EVENT_TRANSPORT_PACKET_SENT (or 1 ms later), and the round
+//! waits for it. The [`le_audio::sdu_queue::SendGuard`] keeps those rounds
+//! at most queue + 2 intervals ahead of real time.
 //!
 //! BTstack (1.8.3) refuses the CIS can-send-now request with Command
 //! Disallowed until the CIG is active, which is only after the ISO data
@@ -431,6 +434,9 @@ pub struct IsoSender {
     seq: Vec<u16>,
     /// Per BIS: has its SDU of the current round
     served: Vec<bool>,
+    /// BIS whose send of the current round was refused while BTstack's
+    /// packet buffer was taken: sent again, same SDU and sequence number
+    bis_retry: Vec<usize>,
     round_open: bool,
     current: SduSet,
     guard: SendGuard,
@@ -517,6 +523,7 @@ impl IsoSender {
         self.cis_handles = bis_handles.to_vec();
         self.seq = vec![0; bis_handles.len()];
         self.served = vec![false; bis_handles.len()];
+        self.bis_retry.clear();
         self.round_open = false;
         self.current = SduSet::new();
         self.guard = SendGuard::new(self.frame_us, u64::from(queue_depth) + 2);
@@ -623,6 +630,13 @@ impl IsoSender {
             self.on_cis_established(e);
             return;
         }
+        if self.sending && !self.bigs.is_empty() {
+            // A BIS send refused while the packet buffer was taken
+            if packet.first() == Some(&HCI_EVENT_TRANSPORT_PACKET_SENT) && !self.bis_retry.is_empty() {
+                self.retry_bis(out);
+            }
+            return;
+        }
         if !self.sending || !self.active {
             return;
         }
@@ -709,6 +723,22 @@ impl IsoSender {
             // First BIS of a round: the next frame interval for all BIS
             self.start_round();
         }
+        self.bis_retry.retain(|&i| i != index);
+        if !self.send_bis(out, index) {
+            // Refused while BTstack's packet buffer is taken: again once it
+            // is free (transport packet sent; the timer if that is missed)
+            self.bis_retry.push(index);
+            out.timer_start(1);
+            return;
+        }
+        self.end_round_if_done(out);
+    }
+
+    /// Sends the BIS its SDU of the current round; false: refused while
+    /// BTstack's packet buffer was taken (nothing sent, nothing counted:
+    /// the same SDU goes again with the same sequence number)
+    fn send_bis(&mut self, out: &dyn IsoOut, index: usize) -> bool {
+        let handle = self.cis_handles[index];
         if self.current.len() == self.cis_handles.len() {
             let status = out.send(handle, self.seq[index], &self.current[index]);
             tracing::trace!(
@@ -717,6 +747,10 @@ impl IsoSender {
                 self.seq[index],
                 self.current[index].len()
             );
+            if status == BTSTACK_ACL_BUFFERS_FULL {
+                self.busy += 1;
+                return false;
+            }
             self.seq[index] = self.seq[index].wrapping_add(1);
             if status == ERROR_CODE_SUCCESS {
                 self.counters.sdus_sent += 1;
@@ -726,7 +760,24 @@ impl IsoSender {
             }
         }
         self.served[index] = true;
-        if self.served.iter().all(|&s| s) {
+        true
+    }
+
+    /// The BIS refused before go again (in order) until one is refused
+    fn retry_bis(&mut self, out: &dyn IsoOut) {
+        while let Some(&index) = self.bis_retry.first() {
+            if !self.send_bis(out, index) {
+                out.timer_start(1);
+                return;
+            }
+            self.bis_retry.remove(0);
+        }
+        self.end_round_if_done(out);
+    }
+
+    /// Every BIS of every BIG has its SDU: the next round
+    fn end_round_if_done(&mut self, out: &dyn IsoOut) {
+        if self.round_open && self.served.iter().all(|&s| s) {
             self.round_open = false;
             self.publish();
             self.request_next(out);
@@ -791,6 +842,7 @@ impl IsoSender {
         self.guard.round_started();
         self.round_open = true;
         self.served.fill(false);
+        self.bis_retry.clear();
     }
 
     /// A CIS of the stream disconnected: the others go on
@@ -814,7 +866,8 @@ impl IsoSender {
     /// TIMER_ISO: the next interval (CIS), the CIG asked again, or the
     /// guard's wait is over (BIG)
     pub(crate) fn on_timer(&mut self, out: &dyn IsoOut) {
-        if let Some(due) = self.guard_due_ms.take() {
+        let guard_wait = self.guard_due_ms.take();
+        if let Some(due) = guard_wait {
             let late = out.time_ms().wrapping_sub(due) as i32;
             tracing::trace!("LE Audio: send guard timer, {late} ms late");
             self.guard_late_ms = self.guard_late_ms.max(late.max(0) as u32);
@@ -823,7 +876,11 @@ impl IsoSender {
             return;
         }
         if !self.bigs.is_empty() {
-            self.request_bigs(out);
+            if !self.bis_retry.is_empty() {
+                self.retry_bis(out);
+            } else if guard_wait.is_some() {
+                self.request_bigs(out);
+            }
         } else if self.active {
             self.tick(out);
         } else {
@@ -1197,6 +1254,61 @@ mod tests {
         assert_eq!(out.take(), ["send 10 #1 ee", "send 11 #1 ee", "request BIG 0"]);
         s.stop(&out);
         assert_eq!(stats.lock().unwrap().sdus_sent, 4);
+    }
+
+    #[test]
+    fn a_refused_bis_send_goes_again_in_the_same_round() {
+        let out = Fake::default();
+        let stats = Arc::new(Mutex::new(LeStreamStats::default()));
+        let mut s = IsoSender::new(stats.clone());
+        s.start_big(&out, 0, &[0x10, 0x11], queue(2), 10_000, 2);
+        assert_eq!(out.take(), ["queue 2", "request BIG 0"]);
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 0, 0x10));
+        // BTstack's packet buffer is still taken for the second BIS
+        out.busy.set(1);
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 1, 0x11));
+        assert_eq!(out.take(), ["send 10 #0 ee", "busy 11 #0", "timer 1"]);
+        // Free again: the same SDU with the same number, then the round ends
+        s.on_hci_event(&out, &PACKET_SENT);
+        assert_eq!(out.take(), ["send 11 #0 ee", "request BIG 0"]);
+        // The retry's timer fires late: no extra request
+        at(&mut s, &out, 1);
+        assert!(out.take().is_empty());
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 0, 0x10));
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 1, 0x11));
+        assert_eq!(out.take(), ["send 10 #1 ee", "send 11 #1 ee", "request BIG 0"]);
+        s.stop(&out);
+        let st = *stats.lock().unwrap();
+        assert_eq!((st.sets_sent, st.sdus_sent, st.send_errors), (2, 4, 0));
+    }
+
+    #[test]
+    fn a_refused_send_on_the_second_big_keeps_both_bigs_on_one_set() {
+        let out = Fake::default();
+        let stats = Arc::new(Mutex::new(LeStreamStats::default()));
+        let mut s = IsoSender::new(stats.clone());
+        let q = queue(2);
+        s.start_bigs(&out, &[(0, vec![0x10]), (1, vec![0x20])], q.clone(), 10_000, 2);
+        out.take();
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 0, 0x10));
+        out.busy.set(2);
+        s.on_bis_can_send_now(&out, &bis_can_send(1, 0, 0x20));
+        // Still taken when the timer fires, free on the packet sent
+        at(&mut s, &out, 1);
+        assert_eq!(out.take(), ["send 10 #0 ee", "busy 20 #0", "timer 1", "busy 20 #0", "timer 1"]);
+        s.on_hci_event(&out, &PACKET_SENT);
+        assert_eq!(out.take(), ["send 20 #0 ee", "request BIG 0", "request BIG 1"]);
+        // The next round: both BIGs carry the next set with the next number
+        for tag in 1..=5 {
+            q.lock().unwrap().push(set(tag));
+        }
+        s.on_bis_can_send_now(&out, &bis_can_send(1, 0, 0x20));
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 0, 0x10));
+        assert_eq!(out.take(), ["send 20 #1 1", "send 10 #1 1", "request BIG 0", "request BIG 1"]);
+        s.stop(&out);
+        let st = *stats.lock().unwrap();
+        assert_eq!((st.sdus_sent, st.send_errors), (4, 0));
+        assert_eq!(s.busy, 2);
     }
 
     #[test]

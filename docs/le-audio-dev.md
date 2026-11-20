@@ -391,7 +391,10 @@ While sending, the system timer resolution is 1 ms
 (`btstack_sys::HighTimerResolution`, like v1's `timeBeginPeriod(1)`);
 otherwise BTstack's Windows run loop and its clock move in 15.6 ms steps.
 A broadcast (BIG) is still sent in rounds on `HCI_EVENT_BIS_CAN_SEND_NOW`,
-with a send guard keeping the rounds at most queue + 2 intervals ahead.
+with a send guard keeping the rounds at most queue + 2 intervals ahead. A
+BIS send refused with 0x57 (the packet buffer taken, typically for the
+second BIS of the first round) waits in the round and goes again with the
+same SDU and sequence number on `HCI_EVENT_TRANSPORT_PACKET_SENT`.
 
 The UI's ISO counters (`LinkSample.iso`) come from `BtHost::le_stream_stats()`
 (sets, silence, underruns, dropped, prefill).
