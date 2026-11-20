@@ -1913,12 +1913,12 @@ impl UnicastEnv for LeCtx<'_> {
         self.core.shared.iso_buffers().1
     }
 
-    fn start_sending(&mut self, cis_handles: &[u16], queue_depth: u8, frame_us: u32) {
+    fn start_sending(&mut self, cis_handles: &[u16], queue_share: u8, frame_us: u32) {
         let queue = self.core.queue.get_or_insert_with(|| Arc::new(Mutex::new(SduQueue::new()))).clone();
         tracing::debug!(
-            "LE Audio: start sending on CIS {cis_handles:04X?}, queue depth {queue_depth}, frame {frame_us} us"
+            "LE Audio: start sending on CIS {cis_handles:04X?}, up to {queue_share} queued per CIS, frame {frame_us} us"
         );
-        self.core.iso.start(self.stack, cis_handles, queue, frame_us, queue_depth);
+        self.core.iso.start(self.stack, cis_handles, queue, frame_us, queue_share);
     }
 
     fn stop_sending(&mut self) {
@@ -2215,6 +2215,8 @@ impl LeCore {
 
     pub(crate) fn on_hci(&mut self, stack: &Stack, packet: &[u8]) {
         if self.initialized {
+            // LE CIS Established, completed packets, packet sent
+            self.iso.on_hci_event(stack, packet);
             self.run(stack, |ctx| ctx.on_hci(packet));
         }
     }
@@ -2249,10 +2251,10 @@ impl LeCore {
         }
     }
 
-    /// The ISO handler: HCI_EVENT_CIS_CAN_SEND_NOW / _BIS_CAN_SEND_NOW, and
-    /// HCI ISO data (the microphone of source ASEs). The packet type comes
-    /// first: an ISO data packet's first byte is the handle's low byte and
-    /// could look like an event code.
+    /// The ISO handler: HCI_EVENT_BIS_CAN_SEND_NOW (CIS sending does not use
+    /// can-send-now), and HCI ISO data (the microphone of source ASEs). The
+    /// packet type comes first: an ISO data packet's first byte is the
+    /// handle's low byte and could look like an event code.
     pub(crate) fn on_iso(&mut self, stack: &Stack, packet_type: u8, packet: &[u8]) {
         if !self.initialized {
             return;
@@ -2264,13 +2266,17 @@ impl LeCore {
             return;
         }
         if packet_type == HCI_EVENT_PACKET {
-            self.iso.on_cis_can_send_now(stack, packet);
             self.iso.on_bis_can_send_now(stack, packet);
         }
     }
 
     pub(crate) fn on_iso_timer(&mut self, stack: &Stack) {
         self.iso.on_timer(stack);
+        // No SDU completed on any CIS for a while: as a link lost (the
+        // stream is set up again)
+        if let Some(why) = self.iso.take_stall() {
+            self.run(stack, |ctx| ctx.stream_lost(&why));
+        }
     }
 
     /// TIMER_LE: the due timers of run_after
