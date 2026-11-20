@@ -311,6 +311,10 @@ pub struct StreamInfo {
     /// reconnect for it
     #[serde(default)]
     pub hi_res_set: bool,
+    /// LHDC V5 low latency is in the configuration in use (Settings'
+    /// lhdcv5_low_latency, accepted by the device)
+    #[serde(default)]
+    pub low_latency: bool,
     /// Where the audio comes from
     #[serde(default)]
     pub source: Option<SourceInfo>,
@@ -1021,6 +1025,11 @@ pub struct Settings {
     pub include_alphas: bool,
     /// The headphones' buttons act as Windows media keys (every device)
     pub media_keys: bool,
+    /// LHDC V5 asks for low latency (P9 LL, 10 ms encode interval) where
+    /// the device lists it; from the next connection (an older core has
+    /// none: off)
+    #[serde(default)]
+    pub lhdcv5_low_latency: bool,
     /// Connect a device that went away again by itself (on by default).
     /// Off: the session ends and the adapter is released.
     #[serde(default = "yes")]

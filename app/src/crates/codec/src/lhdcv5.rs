@@ -165,8 +165,15 @@ impl LhdcV5Encoder {
 
         let init_err = |e: lhdcv5_sys::Error| EncoderError::Init { codec: CODEC, what: e.to_string() };
         let mut enc = LhdcV5Enc::new().map_err(init_err)?;
-        enc.init_encoder(config.sample_rate, encoder_bits, bitrate_inx, enc_mtu as u32, ffi::LHDC_ENC_INTERVAL_20MS)
+        // Android encodes every 10 ms instead of 20 with low latency on
+        let interval = if config.peer.lhdcv5_low_latency {
+            ffi::LHDC_ENC_INTERVAL_10MS
+        } else {
+            ffi::LHDC_ENC_INTERVAL_20MS
+        };
+        enc.init_encoder(config.sample_rate, encoder_bits, bitrate_inx, enc_mtu as u32, interval)
             .map_err(init_err)?;
+        tracing::info!("LHDC V5: encode interval {interval} ms");
 
         let block_size = match enc.block_size() {
             Ok(n) if n > 0 => n as usize,

@@ -204,6 +204,7 @@ pub(crate) fn diag_text(state: &state::CoreState, mask: bool) -> String {
         abr: i.abr,
         bitrate_capped: i.bitrate_capped,
         hi_res_set: i.hi_res_set,
+        low_latency: i.low_latency,
         source: core_source(i.source.as_ref()),
         details: i.details.clone().map(|d| Box::new(core_codec_details(*d))),
     });

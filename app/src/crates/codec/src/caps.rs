@@ -82,6 +82,8 @@ const LHDCV5_VERSION_1: u8 = 0x01;
 const LHDCV5_VERSION_MASK: u8 = 0x0F;
 const LHDCV5_FRAME_5MS: u8 = 0x10;
 const LHDCV5_CAPS_P8: u8 = LHDCV5_VERSION_1 | LHDCV5_FRAME_5MS;
+/// P9[6] Low Latency (A2DP_LHDCV5_FEATURE_LL)
+const LHDCV5_FEATURE_LL: u8 = 0x40;
 
 // Opus (Android a2dp_vendor_opus_constants.h; PipeWire OPUS_G_*): one byte,
 //   bits 2..0 channel mode 0x01 mono 0x02 stereo 0x04 dual mono,
@@ -923,6 +925,17 @@ impl RemoteCaps {
         self.lhdcv5_info[7] & LHDCV5_BITRATE_LIMITS_MASK
     }
 
+    /// The sink lists LHDC V5 low latency (P9[6])
+    pub fn lhdcv5_lists_low_latency(&self) -> bool {
+        self.lhdcv5_info[9] & LHDCV5_FEATURE_LL != 0
+    }
+
+    /// LHDC V5 low latency goes into the configuration: on in the settings
+    /// and listed by the sink
+    pub fn lhdcv5_low_latency(&self) -> bool {
+        crate::lhdcv5_low_latency_wanted() && self.lhdcv5_lists_low_latency()
+    }
+
     /// The sample rates the sink lists for `kind`, lowest first, as the
     /// codec settings offer them (issue #86); empty when it said none.
     /// aptX Adaptive lists 96 kHz only when the sink can take it
@@ -1490,6 +1503,12 @@ impl RemoteCaps {
                 }
                 let mut info = vendor_header(LHDCV5_VENDOR_ID, LHDCV5_CODEC_ID);
                 info.extend_from_slice(&[freq, bits | self.lhdcv5_bitrate_limits(), LHDCV5_CAPS_P8]);
+                // P9[6] Low Latency, as Android sets it when both sides list
+                // it and the user asks (settings' LHDC V5 low latency)
+                if self.lhdcv5_low_latency() {
+                    info.push(LHDCV5_FEATURE_LL);
+                    tracing::info!("LHDC V5: asking for low latency (P9 0x{LHDCV5_FEATURE_LL:02x})");
+                }
                 info.resize(LHDCV5_INFO_LEN, 0);
                 ConfigRequest::Vendor(info)
             }

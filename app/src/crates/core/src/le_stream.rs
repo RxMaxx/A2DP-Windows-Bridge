@@ -608,6 +608,7 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
             abr: false,
             bitrate_capped: false,
             hi_res_set: false,
+            low_latency: false,
             source: req.source.info(),
             details: None,
         });
@@ -941,6 +942,7 @@ fn run_broadcast(inner: &Arc<Inner>, req: StreamRequest) {
         abr: false,
         bitrate_capped: false,
         hi_res_set: false,
+        low_latency: false,
         source: req.source.info(),
         details: None,
     });

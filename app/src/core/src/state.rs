@@ -360,6 +360,7 @@ fn to_ipc_settings(s: &CoreSettings) -> Settings {
         include_prereleases: s.include_prereleases,
         include_alphas: s.include_alphas,
         media_keys: s.media_keys,
+        lhdcv5_low_latency: s.lhdcv5_low_latency,
         auto_reconnect: s.auto_reconnect,
         vb_cable_note_hidden: s.vb_cable_note_hidden,
         hifi_cable_note_hidden: s.hifi_cable_note_hidden,
@@ -457,6 +458,7 @@ fn merge_settings(base: &CoreSettings, s: &Settings) -> CoreSettings {
     c.include_prereleases = s.include_prereleases;
     c.include_alphas = s.include_alphas;
     c.media_keys = s.media_keys;
+    c.lhdcv5_low_latency = s.lhdcv5_low_latency;
     c.auto_reconnect = s.auto_reconnect;
     c.vb_cable_note_hidden = s.vb_cable_note_hidden;
     c.hifi_cable_note_hidden = s.hifi_cable_note_hidden;
@@ -2262,6 +2264,7 @@ impl CoreState {
                     abr: i.abr,
                     bitrate_capped: i.bitrate_capped,
                     hi_res_set: i.hi_res_set,
+                    low_latency: i.low_latency,
                     source: Some(to_ipc_source(&i.source)),
                     le,
                     details: i.details.map(|d| Box::new(to_ipc_codec_details(*d))),
@@ -4316,6 +4319,7 @@ mod tests {
                 abr,
                 bitrate_capped: false,
                 hi_res_set: false,
+                low_latency: false,
                 source: None,
                 le: None,
                 details: None,
@@ -4389,6 +4393,7 @@ mod tests {
                 abr: false,
                 bitrate_capped: false,
                 hi_res_set: false,
+                low_latency: false,
                 source: bluecaster_core::SourceInfo { kind: "tone", name: String::new(), waiting: false },
                 details: None,
             }))
@@ -4902,6 +4907,7 @@ mod tests {
                 abr: false,
                 bitrate_capped: false,
                 hi_res_set: false,
+                low_latency: false,
                 source: None,
                 le: None,
                 details: None,

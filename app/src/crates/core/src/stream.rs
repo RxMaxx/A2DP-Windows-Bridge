@@ -232,6 +232,9 @@ pub struct StreamInfo {
     /// OPPO earbuds turned Hi-Res on for this connection, after one
     /// reconnect for it (issue #237)
     pub hi_res_set: bool,
+    /// LHDC V5 low latency is in the configuration in use (asked for by the
+    /// settings and accepted with the stream)
+    pub low_latency: bool,
     /// Where the audio comes from (sent again when an application capture
     /// starts or stops waiting for the app)
     pub source: SourceInfo,
@@ -1206,6 +1209,8 @@ fn peer_params(remote: &RemoteCaps, kind: CodecKind, channels: u32, req: &Stream
         opus_max_bitrate,
         aac_max_bitrate,
         aptxad_r2: kind == CodecKind::AptxAdaptive && remote.aptxad_r2(),
+        // As the SET_CONFIGURATION asked for it (configuration_with)
+        lhdcv5_low_latency: kind == CodecKind::LhdcV5 && remote.lhdcv5_low_latency(),
     }
 }
 
@@ -1968,6 +1973,7 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
         abr,
         bitrate_capped,
         hi_res_set,
+        low_latency: encoder_config.peer.lhdcv5_low_latency,
         source: source.info(),
         details: Some(Box::new(codec_details(kind, &config, &remote, &*encoder, mtu, format.sample_rate))),
     };

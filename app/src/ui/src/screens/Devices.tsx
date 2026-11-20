@@ -64,6 +64,12 @@ function AllDevices() {
         onChange={(v) => void saveSettings(app, { media_keys: v })}
       />
       <Toggle
+        label={t("settings.lhdcv5_low_latency")}
+        hint={t("settings.lhdcv5_low_latency_hint")}
+        checked={!!s().lhdcv5_low_latency}
+        onChange={(v) => void saveSettings(app, { lhdcv5_low_latency: v })}
+      />
+      <Toggle
         label={t("settings.auto_reconnect")}
         checked={s().auto_reconnect}
         onChange={(v) => void saveSettings(app, { auto_reconnect: v })}
