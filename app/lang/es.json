@@ -619,7 +619,7 @@
   "ui.devices.show_others": "Mostrar otros dispositivos (%u)",
   "ui.devices.use_address": "Usar",
   "ui.device.forget": "Quitar",
-  "ui.device.forget_confirm": "¿Quitar este dispositivo de los dispositivos guardados? Se conservan sus ajustes de códec.",
+  "ui.device.forget_confirm": "¿Quitar este dispositivo de los dispositivos guardados? Se eliminarán sus ajustes y tendrá que volver a emparejarlo.",
   "ui.device.err_name": "Introduzca un nombre (una línea, sin \"|\")",
   "ui.profile.err_name_empty": "Introduzca un nombre",
   "ui.profile.err_name_taken": "Este nombre ya está en uso",

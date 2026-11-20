@@ -619,7 +619,7 @@
   "ui.devices.show_others": "다른 장치 표시 (%u대)",
   "ui.devices.use_address": "사용",
   "ui.device.forget": "제거",
-  "ui.device.forget_confirm": "저장된 장치에서 이 장치를 제거하시겠습니까? 코덱 설정은 그대로 유지됩니다.",
+  "ui.device.forget_confirm": "저장된 장치에서 이 장치를 제거하시겠습니까? 설정이 삭제되며 다시 페어링해야 합니다.",
   "ui.device.err_name": "이름을 입력하세요(한 줄, \"|\" 제외)",
   "ui.profile.err_name_empty": "이름을 입력하세요",
   "ui.profile.err_name_taken": "이미 사용 중인 이름입니다",
