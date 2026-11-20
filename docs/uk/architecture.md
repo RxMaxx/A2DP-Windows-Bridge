@@ -520,6 +520,7 @@ PipeWire), тож увесь L2CAP MTU лишається для кадрів ap
 | `profiles.json` | Профілі |
 | `devices\devices.txt` | Відомі пристрої |
 | `devices\le_audio_devices.txt` | LE Audio: записи LE Audio у списку пристроїв |
+| `devices\le_audio_sets.txt` | LE Audio: координовані набори збережених пристроїв (лише адреси учасників; обидва навушники з пари — один пристрій) |
 | `devices\device_codecs.json` | Що пропонував кожен класичний пристрій під час останнього підключення (і чи запитували в навушників OPPO Hi-Res) |
 | `pairing\link_keys.txt` | Ключі зв'язку: навушники, сполучені з v1 або 2.0.x, підключаються знову без повторного сполучення |
 | `pairing\le_audio_bonds.tlv`, `pairing\le_audio_csip.txt` | LE Audio: LE-бонди (з постійними значеннями CCC сервера GATT) і координовані набори |

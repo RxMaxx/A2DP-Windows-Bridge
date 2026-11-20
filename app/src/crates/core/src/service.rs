@@ -11,8 +11,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use bt_host::{
-    BtHost, DiscoveredDevice, HciCapture, HeadsetMic, HostConfig, HostEvent, InitFailure, LeConfig, LeScanResult,
-    LinkStats, TransportConfig,
+    BtHost, DiscoveredDevice, HciCapture, HeadsetMic, HostConfig, HostEvent, InitFailure, LeConfig, LeDeviceId,
+    LeScanResult, LinkStats, TransportConfig,
 };
 use hci_transport::UsbSelector;
 
@@ -160,16 +160,34 @@ fn classic_appearance_only(results: &[LeScanResult], classic: &[String]) -> Vec<
         .collect()
 }
 
+/// What [`le_scan_entries`] knows of an entry beyond what it lists
+#[derive(Debug, Clone, Copy)]
+struct EntryFacts {
+    /// A saved LE Audio device (or a member of a saved one's set)
+    saved: bool,
+    /// The coordinated set a known SIRK resolved its RSI to
+    set_id: Option<u32>,
+    /// It advertises an RSI that no known set resolves (a set never bonded)
+    unknown_set: bool,
+    appearance: u16,
+}
+
 /// The LE Audio entries of an LE scan (v1 A2dpService scan thread): LE
 /// Audio advertisers only; a saved LE Audio device is listed (with its new
-/// name); of a coordinated set nobody saved, one member (connecting it
-/// finds the others). Classic entries of the same address are another
-/// list. Returns the entries and the number of LE Audio advertisers seen.
-/// A PC or phone is a source, not something to play to: this PC's own
-/// Windows adapters (`own`, advertising LE Audio) are left out with them.
-fn le_scan_entries(results: &[LeScanResult], saved_le: &[SavedDevice], own: &[String]) -> (Vec<ScannedDevice>, usize) {
-    let mut out: Vec<ScannedDevice> = Vec::new();
-    let mut sets_listed: Vec<u32> = Vec::new();
+/// name), and so is every member of its coordinated set, as that device
+/// (`sets`: the sets learned); of a coordinated set nobody saved, one
+/// member (connecting it finds the others). Classic entries of the same
+/// address are another list. Returns the entries and the number of LE
+/// Audio advertisers seen. A PC or phone is a source, not something to play
+/// to: this PC's own Windows adapters (`own`, advertising LE Audio) are
+/// left out with them.
+fn le_scan_entries(
+    results: &[LeScanResult],
+    saved_le: &[SavedDevice],
+    own: &[String],
+    sets: &crate::le_sets::KnownSets,
+) -> (Vec<ScannedDevice>, usize) {
+    let mut out: Vec<(ScannedDevice, EntryFacts)> = Vec::new();
     let mut found = 0;
     for r in results.iter().filter(|r| r.le_audio) {
         let category = r.appearance >> 6;
@@ -182,34 +200,100 @@ fn le_scan_entries(results: &[LeScanResult], saved_le: &[SavedDevice], own: &[St
         // A bonded device advertising under a random address is listed by
         // its identity: its saved entry and its classic side's name match
         // it, and its next random address is the same entry (issue #86)
-        let address = r.identity.unwrap_or(r.addr).to_string();
+        let own_address = r.identity.unwrap_or(r.addr).to_string();
         let set_member = r.rsi.is_some();
-        if let Some(e) = out.iter_mut().find(|e| e.address == address) {
-            // Seen twice (advertising and scan response)
+        // Another member of a saved device's set is that device
+        let group = sets.group_of(&own_address).or_else(|| r.set_id.and_then(|id| sets.group_of_set(id)));
+        let saved = saved_le.iter().find(|d| d.address.eq_ignore_ascii_case(&own_address)).or_else(|| {
+            group.and_then(|g| saved_le.iter().find(|d| g.iter().any(|a| a.eq_ignore_ascii_case(&d.address))))
+        });
+        let address = saved.map_or(own_address, |d| d.address.clone());
+        if let Some((e, facts)) = out.iter_mut().find(|(e, _)| e.address == address) {
+            // Seen twice (advertising and scan response), or another member
             if !r.name.is_empty() {
                 e.name = r.name.clone();
             }
             e.le_audio_set |= set_member;
+            facts.set_id = facts.set_id.or(r.set_id);
+            facts.unknown_set |= set_member && r.set_id.is_none();
             continue;
         }
-        let saved = saved_le.iter().any(|d| d.address.eq_ignore_ascii_case(&address));
-        if !saved && let Some(set) = r.set_id {
-            if sets_listed.contains(&set) {
-                continue;
-            }
-            sets_listed.push(set);
-        }
-        out.push(ScannedDevice {
-            address,
-            name: r.name.clone(),
-            rssi: r.rssi,
-            class_of_device: 0,
-            audio: true,
-            le_audio: true,
-            le_audio_set: set_member,
-        });
+        let facts = EntryFacts {
+            saved: saved.is_some(),
+            set_id: r.set_id,
+            unknown_set: set_member && r.set_id.is_none(),
+            appearance: r.appearance,
+        };
+        out.push((
+            ScannedDevice {
+                address,
+                name: r.name.clone(),
+                rssi: r.rssi,
+                class_of_device: 0,
+                audio: true,
+                le_audio: true,
+                le_audio_set: set_member,
+            },
+            facts,
+        ));
     }
-    (out, found)
+    // Of a set a known SIRK resolves: its saved entry, else one member
+    let mut keep: Vec<bool> = vec![true; out.len()];
+    for i in 0..out.len() {
+        let Some(set) = out[i].1.set_id else { continue };
+        let same: Vec<usize> = (0..out.len()).filter(|&j| out[j].1.set_id == Some(set)).collect();
+        let any_saved = same.iter().any(|&j| out[j].1.saved);
+        let first = same[0];
+        keep[i] = if any_saved { out[i].1.saved } else { i == first };
+    }
+    // A set never bonded, so nothing resolves it yet
+    for (drop, kept) in unbonded_set_twins(&out) {
+        keep[drop] = false;
+        tracing::debug!("le scan: two advertisers of one name and appearance listed as one set ({kept} kept)");
+    }
+    let entries = out.into_iter().zip(keep).filter(|(_, k)| *k).map(|((e, _), _)| e).collect();
+    (entries, found)
+}
+
+/// Advertisers of a coordinated set that no known SIRK resolves (the first
+/// scan of new earbuds): both earbuds advertise an RSI under their own
+/// address, and nothing tells the two apart from two devices until a
+/// connection reads the set's key. Two such entries are taken as one set
+/// when they are the only ones of their name (not empty, compared in full:
+/// "Buds NC" and "Buds SO" are other products) and appearance; three or
+/// more (two pairs of one model, or a pair and a lone earbud) cannot be
+/// told apart and stay listed. Of the two, a saved one stays, else the one
+/// with the lower address. Returns (index dropped, index kept).
+fn unbonded_set_twins(entries: &[(ScannedDevice, EntryFacts)]) -> Vec<(usize, usize)> {
+    let candidate =
+        |(e, f): &(ScannedDevice, EntryFacts)| f.unknown_set && f.set_id.is_none() && !e.name.trim().is_empty();
+    let mut out = Vec::new();
+    for (i, a) in entries.iter().enumerate() {
+        if !candidate(a) {
+            continue;
+        }
+        let same: Vec<usize> = (0..entries.len())
+            .filter(|&j| {
+                let b = &entries[j];
+                candidate(b) && b.0.name.trim() == a.0.name.trim() && b.1.appearance == a.1.appearance
+            })
+            .collect();
+        // Each pair once, from its first entry
+        if same.len() != 2 || same[0] != i {
+            continue;
+        }
+        let (x, y) = (same[0], same[1]);
+        let (ex, ey) = (&entries[x], &entries[y]);
+        let pair = match (ex.1.saved, ey.1.saved) {
+            (true, true) => continue,
+            (true, false) => (y, x),
+            (false, true) => (x, y),
+            (false, false) if ex.0.address <= ey.0.address => (y, x),
+            (false, false) => (x, y),
+        };
+        out.push(pair);
+    }
+    out
 }
 
 /// LE entries whose advertising carries no name (issue #86: an EarFun's LE
@@ -327,6 +411,9 @@ pub enum ServiceEvent {
     /// Headset mode: the voice link carries audio (Some), or no longer
     /// (None)
     Voice(Option<ipc::VoiceStatus>),
+    /// LE Audio: a connection learned a coordinated set
+    /// (le_audio_sets.txt): saved entries of one set become one
+    LeSetLearned,
 }
 
 /// Headset mode switched for the running classic stream
@@ -1071,6 +1158,54 @@ impl Inner {
             tracing::warn!("cannot save the LE Audio device: {e}");
         }
     }
+
+    /// The coordinated sets known: those learned (le_audio_sets.txt), those
+    /// of the running stack's CSIP and those kept with the bonds
+    pub fn known_le_sets(&self, host: Option<&BtHost>) -> crate::le_sets::KnownSets {
+        let dir = &self.opts.config_dir;
+        let mut sets = crate::le_sets::KnownSets::of(crate::le_sets::load(dir));
+        for members in bt_host::le_stored_sets(&crate::paths::pairing_dir(dir)) {
+            sets.add(members.iter().map(bt_host::addr_str), None);
+        }
+        for (id, members) in host.map(BtHost::le_known_sets).unwrap_or_default() {
+            sets.add(members.iter().map(bt_host::addr_str), Some(id));
+        }
+        sets
+    }
+
+    /// An LE Audio stream started: the coordinated set of its devices (its
+    /// key read on connecting) is kept with the saved device, so the other
+    /// earbud is never saved as a device of its own, and the core merges
+    /// saved entries of one set ([`ServiceEvent::LeSetLearned`]). `device`:
+    /// the address the session was asked for; `alone`: no other device was
+    /// asked for, so every device streamed came with it.
+    pub fn learn_le_set(&self, host: &BtHost, device: &[u8; 6], streamed: &[LeDeviceId], alone: bool) {
+        let addrs: Vec<[u8; 6]> = match alone {
+            true => host.le_devices().into_iter().filter(|d| streamed.contains(&d.id)).map(|d| d.addr.addr).collect(),
+            false => Vec::new(),
+        };
+        let mut members: Vec<String> = Vec::new();
+        for (_, set) in host.le_known_sets() {
+            if set.iter().any(|a| addrs.contains(a) || a == device) {
+                members.extend(set.iter().map(bt_host::addr_str));
+            }
+        }
+        if members.is_empty() {
+            return;
+        }
+        // Asked for under another address (an RPA before the bond): that
+        // one is the set's too
+        let asked = bt_host::addr_str(device);
+        if !members.iter().any(|m| m.eq_ignore_ascii_case(&asked)) {
+            members.push(asked);
+        }
+        match crate::le_sets::remember(&self.opts.config_dir, &members) {
+            Ok(true) => tracing::info!("LE Audio: coordinated set of {} members kept with the device", members.len()),
+            Ok(false) => {}
+            Err(e) => tracing::warn!("LE Audio: cannot keep the coordinated set: {e}"),
+        }
+        self.send_event(ServiceEvent::LeSetLearned);
+    }
 }
 
 pub struct Service {
@@ -1521,6 +1656,17 @@ impl Service {
             if !crate::devices::load(dir).iter().any(|d| d.address.eq_ignore_ascii_case(address)) {
                 self.forget_link_key_only(addr);
             }
+            // Its LE bond too: nothing reconnects it, and adding it again
+            // pairs anew. A running stack with LE holds the bonds and
+            // deletes them itself.
+            if !self.host().is_some_and(|h| h.forget_le_bond(addr)) {
+                let pairing = crate::paths::pairing_dir(dir);
+                match bt_host::le_bond_file::forget(&crate::paths::le_bonds_file(dir), &addr) {
+                    Ok(n) => tracing::debug!("device forgotten: {n} LE bond(s) removed from the file"),
+                    Err(e) => tracing::warn!("device forgotten: the LE bonds file cannot be changed ({})", e.kind()),
+                }
+                bt_host::le_forget_stored_sirk(&pairing, addr);
+            }
             return;
         }
         {
@@ -1647,6 +1793,11 @@ impl Service {
     /// connected
     pub fn device_codecs(&self) -> BTreeMap<String, stream::KnownCodecs> {
         self.inner.codecs.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// The coordinated sets known ([`Inner::known_le_sets`])
+    pub fn known_le_sets(&self) -> crate::le_sets::KnownSets {
+        self.inner.known_le_sets(self.host().as_deref())
     }
 
     /// Forgets what a device offered, and that it was asked for Hi-Res: its
@@ -1856,11 +2007,11 @@ impl Service {
             }
         }
         let le_started = Instant::now();
-        let (saved_le, own) = if le_scan {
+        let (saved_le, own, sets) = if le_scan {
             let own: Vec<String> = win_sys::bt_radios::radios().into_iter().filter_map(|r| r.address).collect();
-            (crate::devices::load_le(&self.inner.opts.config_dir), own)
+            (crate::devices::load_le(&self.inner.opts.config_dir), own, self.inner.known_le_sets(Some(&host)))
         } else {
-            (Vec::new(), Vec::new())
+            (Vec::new(), Vec::new(), Default::default())
         };
         let saved = crate::devices::load(&self.inner.opts.config_dir);
         self.inner.notify(StreamState::Idle, Msg::new("status.scanning_devices"));
@@ -1868,7 +2019,7 @@ impl Service {
             let mut list: Vec<ScannedDevice> = found.iter().map(ScannedDevice::classic).collect();
             if le_scan {
                 let results = host.le_scan_results();
-                let mut le = le_scan_entries(&results, &saved_le, &own).0;
+                let mut le = le_scan_entries(&results, &saved_le, &own, &sets).0;
                 let classic: Vec<String> =
                     list.iter().map(|d| d.address.clone()).chain(saved.iter().map(|d| d.address.clone())).collect();
                 let drop = classic_appearance_only(&results, &classic);
@@ -1921,7 +2072,7 @@ impl Service {
                     r.uuids16
                 );
             }
-            let (mut entries, found) = le_scan_entries(&results, &saved_le, &own);
+            let (mut entries, found) = le_scan_entries(&results, &saved_le, &own, &sets);
             let classic: Vec<String> =
                 list.iter().map(|d| d.address.clone()).chain(saved.iter().map(|d| d.address.clone())).collect();
             let drop = classic_appearance_only(&results, &classic);
@@ -2470,7 +2621,7 @@ mod tests {
             le("00:A2:D0:00:00:20", "Speaker 2", None),
             le("00:A2:D0:00:00:40", "Other L", Some(1)),
         ];
-        let (list, found) = le_scan_entries(&results, &[], &[]);
+        let (list, found) = le_scan_entries(&results, &[], &[], &no_sets());
         let got: Vec<_> = list.iter().map(|d| (d.address.as_str(), d.name.as_str(), d.le_audio_set)).collect();
         assert_eq!(
             got,
@@ -2484,23 +2635,98 @@ mod tests {
         assert!(list.iter().all(|d| d.le_audio && d.audio && d.class_of_device == 0));
     }
 
+    fn no_sets() -> crate::le_sets::KnownSets {
+        crate::le_sets::KnownSets::default()
+    }
+
+    /// An advertiser of a set no known SIRK resolves (never bonded)
+    fn unbonded(addr: &str, name: &str) -> LeScanResult {
+        LeScanResult { rsi: Some([9, 9, 9, 9, 9, 9]), appearance: 0x0941, ..le(addr, name, None) }
+    }
+
     #[test]
-    fn le_scan_keeps_saved_members() {
-        // The right earbud is saved: it is listed, and the left one still
-        // stands for the set
+    fn le_scan_lists_a_saved_set_once() {
+        // The right earbud is saved: the left one is the same device
         let saved = [SavedDevice { address: "00:A2:D0:00:00:13".into(), name: "R".into(), le_audio: true }];
-        let results = [le("00:A2:D0:00:00:13", "Buds R", Some(0)), le("00:A2:D0:00:00:12", "Buds L", Some(0))];
-        let (list, _) = le_scan_entries(&results, &saved, &[]);
-        assert_eq!(list.len(), 2);
-        // A third member is a duplicate of the listed set
+        let results = [le("00:A2:D0:00:00:12", "Buds L", Some(0)), le("00:A2:D0:00:00:13", "Buds R", Some(0))];
+        let (list, _) = le_scan_entries(&results, &saved, &[], &no_sets());
+        let got: Vec<_> = list.iter().map(|d| d.address.as_str()).collect();
+        assert_eq!(got, ["00:A2:D0:00:00:13"]);
+        // A third member too
         let results = [
             le("00:A2:D0:00:00:12", "Buds L", Some(0)),
             le("00:A2:D0:00:00:14", "Buds C", Some(0)),
             le("00:A2:D0:00:00:13", "Buds R", Some(0)),
         ];
-        let (list, _) = le_scan_entries(&results, &saved, &[]);
+        let (list, _) = le_scan_entries(&results, &saved, &[], &no_sets());
         let got: Vec<_> = list.iter().map(|d| d.address.as_str()).collect();
-        assert_eq!(got, ["00:A2:D0:00:00:12", "00:A2:D0:00:00:13"]);
+        assert_eq!(got, ["00:A2:D0:00:00:13"]);
+    }
+
+    #[test]
+    fn le_scan_lists_a_learned_sets_member_as_the_saved_device() {
+        let saved = [SavedDevice { address: "00:A2:D0:00:00:13".into(), name: "Buds".into(), le_audio: true }];
+        let mut sets = no_sets();
+        sets.add(["00:A2:D0:00:00:12".to_string(), "00:A2:D0:00:00:13".into()], None);
+        // Only the other earbud in range, its RSI not resolved: still the
+        // saved device, found nearby
+        let (list, _) = le_scan_entries(&[unbonded("00:A2:D0:00:00:12", "Buds")], &saved, &[], &sets);
+        let got: Vec<_> = list.iter().map(|d| (d.address.as_str(), d.le_audio_set)).collect();
+        assert_eq!(got, [("00:A2:D0:00:00:13", true)]);
+        // A member the stack resolves (set 3) under an address not learned
+        sets.add(["00:A2:D0:00:00:13".to_string()], Some(3));
+        let (list, _) = le_scan_entries(&[le("00:A2:D0:00:00:77", "Buds", Some(3))], &saved, &[], &sets);
+        let got: Vec<_> = list.iter().map(|d| d.address.as_str()).collect();
+        assert_eq!(got, ["00:A2:D0:00:00:13"]);
+        // Nothing of the set saved: listed as found
+        let (list, _) = le_scan_entries(&[unbonded("00:A2:D0:00:00:12", "Buds")], &[], &[], &sets);
+        assert_eq!(list[0].address, "00:A2:D0:00:00:12");
+    }
+
+    #[test]
+    fn a_never_bonded_pair_is_listed_once() {
+        let results = [
+            unbonded("00:A2:D0:00:00:22", "Buds"),
+            le("00:A2:D0:00:00:30", "Speaker", None),
+            unbonded("00:A2:D0:00:00:21", "Buds"),
+        ];
+        let (list, found) = le_scan_entries(&results, &[], &[], &no_sets());
+        let got: Vec<_> = list.iter().map(|d| (d.address.as_str(), d.le_audio_set)).collect();
+        assert_eq!(got, [("00:A2:D0:00:00:30", false), ("00:A2:D0:00:00:21", true)]);
+        assert_eq!(found, 3);
+        // One of them saved (added before connecting): the other is it
+        let saved = [SavedDevice { address: "00:A2:D0:00:00:22".into(), name: "Buds".into(), le_audio: true }];
+        let (list, _) = le_scan_entries(&results, &saved, &[], &no_sets());
+        let got: Vec<_> = list.iter().map(|d| d.address.as_str()).collect();
+        assert_eq!(got, ["00:A2:D0:00:00:22", "00:A2:D0:00:00:30"]);
+    }
+
+    #[test]
+    fn unbonded_advertisers_merge_only_when_nothing_else_fits() {
+        let listed = |results: &[LeScanResult]| le_scan_entries(results, &[], &[], &no_sets()).0.len();
+        // Other products of one series
+        assert_eq!(listed(&[unbonded("00:A2:D0:00:00:21", "Buds NC"), unbonded("00:A2:D0:00:00:22", "Buds SO")]), 2);
+        // Another appearance
+        let speaker = LeScanResult { appearance: 0x0841, ..unbonded("00:A2:D0:00:00:22", "Buds") };
+        assert_eq!(listed(&[unbonded("00:A2:D0:00:00:21", "Buds"), speaker]), 2);
+        // No name: nothing to compare
+        assert_eq!(listed(&[unbonded("00:A2:D0:00:00:21", ""), unbonded("00:A2:D0:00:00:22", "")]), 2);
+        // No RSI: two devices of one model, not a set
+        assert_eq!(listed(&[le("00:A2:D0:00:00:21", "Buds", None), le("00:A2:D0:00:00:22", "Buds", None)]), 2);
+        // Two pairs of one model (or a pair and a lone earbud): which two
+        // belong together is not known, all listed
+        let four: Vec<_> = (1..=4).map(|i| unbonded(&format!("00:A2:D0:00:00:2{i}"), "Buds")).collect();
+        assert_eq!(listed(&four), 4);
+        assert_eq!(listed(&four[..3]), 3);
+        // A pair already known (resolved) beside a new one of the model:
+        // each listed once
+        let results = [
+            le("00:A2:D0:00:00:11", "Buds", Some(0)),
+            le("00:A2:D0:00:00:12", "Buds", Some(0)),
+            unbonded("00:A2:D0:00:00:21", "Buds"),
+            unbonded("00:A2:D0:00:00:22", "Buds"),
+        ];
+        assert_eq!(listed(&results), 2);
     }
 
     #[test]
@@ -2514,7 +2740,7 @@ mod tests {
             appearing("00:A2:D0:00:00:54", "Earbuds", 0x0941),
             le("00:A2:D0:00:00:55", "Speaker", None),
         ];
-        let (list, found) = le_scan_entries(&results, &[], &["00:a2:d0:00:00:50".into()]);
+        let (list, found) = le_scan_entries(&results, &[], &["00:a2:d0:00:00:50".into()], &no_sets());
         let got: Vec<_> = list.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(got, ["Earbuds", "Speaker"]);
         assert_eq!(found, 2);
@@ -2542,15 +2768,19 @@ mod tests {
         };
         let c = ScannedDevice::classic(&classic);
         assert!(!c.le_audio && c.audio);
-        let (le_list, _) = le_scan_entries(&[le("00:A2:D0:00:00:12", "Buds", None)], &[], &[]);
+        let (le_list, _) = le_scan_entries(&[le("00:A2:D0:00:00:12", "Buds", None)], &[], &[], &no_sets());
         assert_eq!(le_list[0].address, c.address);
         assert!(le_list[0].le_audio);
     }
 
     #[test]
     fn an_unnamed_le_entry_takes_its_classic_name() {
-        let (mut list, _) =
-            le_scan_entries(&[le("00:A2:D0:00:00:12", "", None), le("00:A2:D0:00:00:13", "", None)], &[], &[]);
+        let (mut list, _) = le_scan_entries(
+            &[le("00:A2:D0:00:00:12", "", None), le("00:A2:D0:00:00:13", "", None)],
+            &[],
+            &[],
+            &no_sets(),
+        );
         let known = vec![("00:a2:d0:00:00:12".to_string(), "Buds".to_string())];
         fill_le_names(&mut list, &known);
         assert_eq!(list[0].name, "Buds");
@@ -2563,7 +2793,8 @@ mod tests {
         let identity = bt_host::LeAddr { addr: bt_host::parse_addr("00:A2:D0:00:00:12").unwrap(), addr_type: 0 };
         let rpa = |a| LeScanResult { identity: Some(identity), ..le(a, "", None) };
         // Two random addresses of the same earbuds, one entry
-        let (mut list, found) = le_scan_entries(&[rpa("4B:01:02:03:04:05"), rpa("5C:01:02:03:04:05")], &[], &[]);
+        let (mut list, found) =
+            le_scan_entries(&[rpa("4B:01:02:03:04:05"), rpa("5C:01:02:03:04:05")], &[], &[], &no_sets());
         assert_eq!(found, 2);
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].address, "00:A2:D0:00:00:12");
@@ -2572,7 +2803,7 @@ mod tests {
         assert_eq!(list[0].name, "Buds");
         // Saved as LE Audio: it is the saved entry, not a new set member
         let saved = [SavedDevice { address: "00:A2:D0:00:00:12".into(), name: "Buds".into(), le_audio: true }];
-        let (list, _) = le_scan_entries(&[rpa("4B:01:02:03:04:05")], &saved, &[]);
+        let (list, _) = le_scan_entries(&[rpa("4B:01:02:03:04:05")], &saved, &[], &no_sets());
         assert_eq!(list[0].address, saved[0].address);
     }
 

@@ -521,6 +521,7 @@ cambia el nombre de esa carpeta y ordena los archivos en estas carpetas:
 | `profiles.json` | Perfiles |
 | `devices\devices.txt` | Dispositivos conocidos |
 | `devices\le_audio_devices.txt` | LE Audio: las entradas LE Audio de la lista de dispositivos |
+| `devices\le_audio_sets.txt` | LE Audio: los conjuntos coordinados de los dispositivos guardados (solo las direcciones de sus miembros; los dos auriculares de un par son un solo dispositivo) |
 | `devices\device_codecs.json` | Lo que ofreció cada dispositivo clásico en su última conexión (y si se pidió Hi-Res a unos auriculares OPPO) |
 | `pairing\link_keys.txt` | Claves de enlace: los auriculares emparejados con la v1 o la 2.0.x se reconectan sin volver a emparejar |
 | `pairing\le_audio_bonds.tlv`, `pairing\le_audio_csip.txt` | LE Audio: los vínculos LE (con los valores CCC persistentes del servidor GATT) y los conjuntos coordinados |

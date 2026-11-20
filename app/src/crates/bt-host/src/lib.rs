@@ -60,6 +60,7 @@ pub use le::iso_recv::{
     ISO_STATUS_LOST, ISO_STATUS_POSSIBLY_INVALID, ISO_STATUS_VALID, LeRxHandle, LeRxStats, LeRxStream, MAX_RX_SDU,
     RxSdu,
 };
+pub use le::modules::csip::{forget_stored_file as le_forget_stored_sirk, stored_sets as le_stored_sets};
 pub use le::{
     LeAddr, LeBroadcast, LeConfig, LeDeviceId, LeDeviceInfo, LeRequest, LeScanResult, LeSduSink, LeStreamRequest,
     LeStreamStarted, LeStreamStats, LeStreamStatus,
@@ -1743,6 +1744,30 @@ impl BtHost {
             }
         })
         .is_some()
+    }
+
+    /// Drops the LE bond of the identity `addr` (and the SIRK kept with it)
+    /// from the running stack, which writes its bonds file. False when no
+    /// stack with LE holds the bonds: the caller edits the files
+    /// ([`le_bond_file::forget`], [`le_forget_stored_sirk`]).
+    pub fn forget_le_bond(&self, addr: [u8; 6]) -> bool {
+        self.call(Duration::from_secs(2), move |app, s| {
+            if !s.le_initialized() {
+                return false;
+            }
+            let entries: Vec<_> = (0..s.le_device_db_max_count())
+                .filter_map(|i| s.le_device_db_info(i))
+                .filter(|e| e.addr == addr)
+                .collect();
+            for e in &entries {
+                s.le_delete_bonding(e.addr_type, &e.addr);
+            }
+            if let Some(le) = app.le.as_mut().filter(|le| le.initialized()) {
+                le.run(s, |ctx| le::modules::csip::forget_stored(ctx, addr));
+            }
+            true
+        })
+        .unwrap_or(false)
     }
 
     /// Drops `addr`'s link key alone from the running stack and its file

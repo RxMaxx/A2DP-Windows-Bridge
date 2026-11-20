@@ -520,6 +520,7 @@ PipeWire), поэтому весь L2CAP MTU доступен для кадро�
 | `profiles.json` | Профили |
 | `devices\devices.txt` | Известные устройства |
 | `devices\le_audio_devices.txt` | LE Audio: записи LE Audio из списка устройств |
+| `devices\le_audio_sets.txt` | LE Audio: координированные наборы сохранённых устройств (только адреса участников; оба наушника из пары — одно устройство) |
 | `devices\device_codecs.json` | Что предлагало каждое классическое устройство при последнем подключении (и запрашивался ли у наушников OPPO Hi-Res) |
 | `pairing\link_keys.txt` | Ключи связи: наушники, сопряжённые в v1 или 2.0.x, подключаются без повторного сопряжения |
 | `pairing\le_audio_bonds.tlv`, `pairing\le_audio_csip.txt` | LE Audio: привязки LE (с постоянными значениями CCC сервера GATT) и координированные наборы |

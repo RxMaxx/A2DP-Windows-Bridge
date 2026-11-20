@@ -338,6 +338,7 @@ AAC 和 SBC 使用 A2DP 规范中定义的标准 A2DP 编解码器 ID。
 | `profiles.json` | 配置文件 |
 | `devices\devices.txt` | 已知设备 |
 | `devices\le_audio_devices.txt` | LE Audio：设备列表中的 LE Audio 条目 |
+| `devices\le_audio_sets.txt` | LE Audio：已保存设备的协调集（仅成员地址；一对耳机算作一个设备） |
 | `devices\device_codecs.json` | 每台经典设备上次连接时提供的内容（以及是否已向 OPPO 耳塞请求过 Hi-Res） |
 | `pairing\link_keys.txt` | 链接密钥：与 v1 或 2.0.x 配对过的耳机无需重新配对即可再次连接 |
 | `pairing\le_audio_bonds.tlv`、`pairing\le_audio_csip.txt` | LE Audio：LE 绑定信息（含 GATT 服务器持久保存的 CCC 值）以及协调集 |

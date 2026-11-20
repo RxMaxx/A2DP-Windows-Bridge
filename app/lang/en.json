@@ -619,7 +619,7 @@
   "ui.devices.show_others": "Show other devices (%u)",
   "ui.devices.use_address": "Use",
   "ui.device.forget": "Remove",
-  "ui.device.forget_confirm": "Remove this device from the saved devices? Its codec settings are kept.",
+  "ui.device.forget_confirm": "Remove this device from the saved devices? Its settings will be deleted, and you'll need to pair it again.",
   "ui.device.err_name": "Enter a name (one line, without \"|\")",
   "ui.profile.err_name_empty": "Enter a name",
   "ui.profile.err_name_taken": "This name is already in use",
