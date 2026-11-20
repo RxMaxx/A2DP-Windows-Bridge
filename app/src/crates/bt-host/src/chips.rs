@@ -77,6 +77,8 @@ pub struct OemChipMapping {
 /// VID:PIDs so it opens them.
 pub static OEM_TABLE: &[OemChipMapping] = &[
     OemChipMapping { vid: 0x2357, pid: 0x0604, realtek_pid: 0x8771 }, // TP-Link UB500 (RTL8761BU)
+    // TP-Link UB600 under TP-Link's newer VID (issue #521: RTL8761B ROM in the probe)
+    OemChipMapping { vid: 0x37AD, pid: 0x0600, realtek_pid: 0x8771 },
     // Generic RTL8761B dongles (issues #66, #86: rtl8761bu firmware)
     OemChipMapping { vid: 0x0BDA, pid: 0xA729, realtek_pid: 0x8771 },
 ];
