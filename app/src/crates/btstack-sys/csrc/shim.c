@@ -806,6 +806,13 @@ static uint8_t other_config_info[BLUECASTER_CODEC_INFO_MAX];
 uint8_t bluecaster_set_config_other(uint16_t a2dp_cid, uint8_t local_seid, uint8_t remote_seid, const uint8_t *info,
                                 uint8_t info_len) {
     if (info_len > sizeof(other_config_info)) return ERROR_CODE_INVALID_HCI_COMMAND_PARAMETERS;
+    /* BTstack asserts that the accepted configuration is as long as the
+     * local SEP's configuration buffer. Some codecs have more than one
+     * length (aptX LL: 8 bytes, 17 with a sink's extended capabilities;
+     * issue #520): the buffer (endpoint_config, 40 bytes) takes this one's. */
+    avdtp_stream_endpoint_t *ep = avdtp_get_stream_endpoint_for_seid(local_seid);
+    if (ep == NULL || ep->media_codec_configuration_info == NULL) return ERROR_CODE_INVALID_HCI_COMMAND_PARAMETERS;
+    ep->media_codec_configuration_len = info_len;
     memcpy(other_config_info, info, info_len);
     return a2dp_source_set_config_other(a2dp_cid, local_seid, remote_seid, other_config_info, info_len);
 }
