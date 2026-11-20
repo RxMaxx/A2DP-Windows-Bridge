@@ -1817,6 +1817,18 @@ export class MockCore implements Transport {
   setOtherRadio(radio: Snapshot["adapter"]["other_radio"]) {
     this.snap.adapter.other_radio = radio;
   }
+  /** The saved devices' names, in the list's order (their profiles follow) */
+  nameSaved(names: readonly string[]) {
+    let i = 0;
+    this.snap.devices = this.snap.devices.map((d) => {
+      if (!d.saved || i >= names.length) return d;
+      const name = names[i++];
+      for (const p of this.snap.profiles) {
+        if (p.device_address.toUpperCase() === d.address.toUpperCase() && p.le_audio === d.le_audio) p.device_name = name;
+      }
+      return { ...d, name };
+    });
+  }
   /** The adapter hung after a crash (issue #86): gone from the list, an
    *  unknown USB device in its place, the stack's start failed */
   setHung() {
@@ -3283,6 +3295,9 @@ export function mockFromUrl(): MockCore {
   mock.noVirtual = q.has("novirtual");
   mock.hifiCable = q.has("hificable");
   mock.captureDrops = q.has("capturedrops");
+  // ?names=A|B|C: the saved devices' names (long names on Home)
+  const names = q.get("names");
+  if (names) mock.nameSaved(names.split("|"));
   // ?hung: the adapter hung after a crash (issue #86)
   if (q.has("hung")) mock.setHung();
   // ?winpaired: headphones Windows paired through the adapter (the setup's import)

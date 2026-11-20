@@ -10,7 +10,7 @@
 import { createEffect, createSignal, For, on, onCleanup, Show } from "solid-js";
 import { useApp, type AppContext } from "../app/context";
 import { saveSettings } from "../app/settings";
-import { Banner, Button } from "../components/controls";
+import { Banner, Button, titleWhenCut } from "../components/controls";
 import { Icon } from "../components/Icon";
 import {
   BatteryLevel,
@@ -326,7 +326,7 @@ function DeviceCard(props: { entry: AudioEntry; onError: (e: unknown) => void })
         </Ring>
         <div class="device-info">
           {/* The device, battery and state, the codec; the sidebar shows the same */}
-          <div class="device-name ellipsis" title={name()}>
+          <div class="device-name clamp-2" ref={titleWhenCut(name)}>
             {name()}
           </div>
           <div class="device-state">
