@@ -302,8 +302,6 @@ export function CodecBadge(props: { compact?: boolean; aside?: JSX.Element; pick
   const info = () => core.state.snap?.stream.info ?? null;
   // The bit rate lowered while the link is slow after the microphone (#86)
   const slow = () => core.state.snap?.stream.slow_link ?? null;
-  // Settings' LHDC V5 low latency (the Devices screen's switch)
-  const llWanted = () => !!core.state.snap?.settings.lhdcv5_low_latency;
   const name = () => {
     const i = info();
     return i ? codecName(i) : "";
@@ -379,17 +377,9 @@ export function CodecBadge(props: { compact?: boolean; aside?: JSX.Element; pick
                   {abrLabel(i())}
                 </span>
               </Show>
-              {/* LHDC V5 low latency: in use, or asked for and not accepted */}
+              {/* LHDC V5 low latency in use (issue #543) */}
               <Show when={i().low_latency}>
-                <span class="ll-on" title={t("tooltip.lhdcv5_ll_on")}>
-                  {t("ui.codec.ll_on")}
-                </span>
-              </Show>
-              <Show when={!i().low_latency && i().codec === "LHDC V5" && llWanted()}>
-                <span class="ll-off" title={t("tooltip.lhdcv5_ll_off")}>
-                  <Icon name="warning" class="st-warn" />
-                  {t("ui.codec.ll_off")}
-                </span>
+                <span class="muted">{t("ui.codec.ll_on")}</span>
               </Show>
               {/* A line of its own: the others read the same for every codec (issue #86) */}
               <Show when={liveBitpool(i())}>

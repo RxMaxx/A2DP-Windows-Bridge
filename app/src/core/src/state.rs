@@ -184,6 +184,7 @@ fn to_ipc_profile(p: &CoreProfile, legacy: u16) -> Profile {
         codec: p.codec.clone(),
         quality: p.quality.clone(),
         abr: p.abr,
+        lhdcv5_low_latency: p.lhdcv5_low_latency,
         codec_fallback: p.codec_fallback,
         codec_forced: p.codec_forced,
         unlisted_options: p.unlisted_options,
@@ -229,6 +230,7 @@ fn to_ipc_codec_values(v: &profiles::CodecValues) -> ipc::CodecValues {
         sample_rate: v.sample_rate,
         bit_depth: v.bit_depth,
         abr: v.abr,
+        lhdcv5_low_latency: v.lhdcv5_low_latency,
         sbc_bitpool: v.sbc_bitpool,
         sbcxq_bitpool: v.sbcxq_bitpool,
         sbc_min_bitpool: v.sbc_min_bitpool,
@@ -247,6 +249,7 @@ fn from_ipc_codec_values(v: &ipc::CodecValues) -> profiles::CodecValues {
         sample_rate: v.sample_rate,
         bit_depth: v.bit_depth,
         abr: v.abr,
+        lhdcv5_low_latency: v.lhdcv5_low_latency,
         sbc_bitpool: v.sbc_bitpool,
         sbcxq_bitpool: v.sbcxq_bitpool,
         sbc_min_bitpool: v.sbc_min_bitpool,
@@ -279,6 +282,7 @@ fn merge_profile(base: Option<&CoreProfile>, p: &Profile) -> CoreProfile {
     c.codec = p.codec.clone();
     c.quality = p.quality.clone();
     c.abr = p.abr;
+    c.lhdcv5_low_latency = p.lhdcv5_low_latency;
     c.codec_fallback = p.codec_fallback;
     c.codec_forced = p.codec_forced;
     c.unlisted_options = p.unlisted_options;
@@ -360,7 +364,6 @@ fn to_ipc_settings(s: &CoreSettings) -> Settings {
         include_prereleases: s.include_prereleases,
         include_alphas: s.include_alphas,
         media_keys: s.media_keys,
-        lhdcv5_low_latency: s.lhdcv5_low_latency,
         auto_reconnect: s.auto_reconnect,
         vb_cable_note_hidden: s.vb_cable_note_hidden,
         hifi_cable_note_hidden: s.hifi_cable_note_hidden,
@@ -458,7 +461,6 @@ fn merge_settings(base: &CoreSettings, s: &Settings) -> CoreSettings {
     c.include_prereleases = s.include_prereleases;
     c.include_alphas = s.include_alphas;
     c.media_keys = s.media_keys;
-    c.lhdcv5_low_latency = s.lhdcv5_low_latency;
     c.auto_reconnect = s.auto_reconnect;
     c.vb_cable_note_hidden = s.vb_cable_note_hidden;
     c.hifi_cable_note_hidden = s.hifi_cable_note_hidden;
@@ -831,6 +833,7 @@ fn saved_devices(
                     sample_rates: k.sample_rates.clone(),
                     bit_depths: k.bit_depths.clone(),
                     max_bitrate: k.max_bitrate,
+                    lhdcv5_low_latency: k.lhdcv5_low_latency,
                 })
                 .collect();
         }
@@ -950,6 +953,7 @@ fn to_ipc_codec_details(d: bluecaster_core::CodecDetails) -> ipc::CodecDetails {
             sample_rates: c.sample_rates,
             bit_depths: c.bit_depths,
             max_bitrate: c.max_bitrate,
+            lhdcv5_low_latency: c.lhdcv5_low_latency,
         }),
     }
 }
@@ -1096,6 +1100,7 @@ pub struct CustomStream {
     pub source_name: Option<String>,
     pub max_media_payload: Option<u16>,
     pub abr: Option<bool>,
+    pub lhdcv5_low_latency: Option<bool>,
     pub codec_fallback: Option<bool>,
 }
 
@@ -1173,6 +1178,7 @@ pub fn custom_request(c: &CustomStream, legacy_max_media_payload: u16) -> Result
         codec,
         quality: if c.quality.trim().is_empty() { "hq".into() } else { c.quality.trim().to_ascii_lowercase() },
         abr: c.abr.unwrap_or(false),
+        lhdcv5_low_latency: c.lhdcv5_low_latency.unwrap_or(false),
         codec_fallback: c.codec_fallback.unwrap_or(false),
         sample_rate: c.sample_rate.unwrap_or(0),
         bit_depth: c.bit_depth.unwrap_or(0),
@@ -3183,6 +3189,7 @@ impl CoreState {
                 source_name,
                 max_media_payload,
                 abr,
+                lhdcv5_low_latency,
                 codec_fallback,
             } => {
                 let c = CustomStream {
@@ -3197,6 +3204,7 @@ impl CoreState {
                     source_name,
                     max_media_payload,
                     abr,
+                    lhdcv5_low_latency,
                     codec_fallback,
                 };
                 self.start_custom(&c).map(|()| Value::Null)

@@ -4343,14 +4343,3 @@ html.win-flyout body {
     fill: CanvasText;
   }
 }
-
-/* LHDC V5 low latency in the codec badge: in use, or asked for and not in use */
-.codec-badge .ll-on {
-  color: var(--good-text);
-  font-weight: 600;
-}
-.codec-badge .ll-off {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s1);
-}

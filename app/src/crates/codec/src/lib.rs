@@ -35,22 +35,6 @@ pub mod lhdcv5;
 pub mod opus;
 
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
-
-/// Settings' LHDC V5 low latency (Android's P9[6] LL flag plus its 10 ms
-/// encode interval), read when a stream is set up
-static LHDCV5_LOW_LATENCY: AtomicBool = AtomicBool::new(false);
-
-/// Sets LHDC V5 low latency for the streams started from now on (the core,
-/// from its settings)
-pub fn set_lhdcv5_low_latency(on: bool) {
-    LHDCV5_LOW_LATENCY.store(on, Ordering::Relaxed);
-}
-
-/// LHDC V5 low latency is on in the settings (the sink must list it too)
-pub fn lhdcv5_low_latency_wanted() -> bool {
-    LHDCV5_LOW_LATENCY.load(Ordering::Relaxed)
-}
 
 /// The A2DP codecs BlueCaster can stream
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -137,10 +137,6 @@ pub struct Settings {
     /// The headphones' buttons act as Windows media keys (every device)
     #[serde(default = "default_true")]
     pub media_keys: bool,
-    /// LHDC V5 asks for low latency where the device lists it (Android's
-    /// P9 LL flag and 10 ms encode interval); from the next connection
-    #[serde(default)]
-    pub lhdcv5_low_latency: bool,
     /// A session whose device went away connects it again by itself, and
     /// takes it when it comes back. Off: the session ends and the adapter is
     /// released, so headphones turned off can go to a phone instead.
@@ -391,7 +387,6 @@ impl Default for Settings {
             include_prereleases: default_prereleases(),
             include_alphas: default_alphas(),
             media_keys: true,
-            lhdcv5_low_latency: false,
             auto_reconnect: true,
             awaiting_vb_cable: false,
             awaiting_hifi_cable: false,

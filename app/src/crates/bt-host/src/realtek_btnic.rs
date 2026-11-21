@@ -815,11 +815,12 @@ fn own_package_patch(windows: &Path, name: &str, project: u8, vid: u16, pid: u16
     let mut found: Vec<PathBuf> = Vec::new();
     for entry in std::fs::read_dir(store).ok()?.flatten() {
         let dir = entry.path();
-        if !dir.is_dir() || !inf_lists(&dir, &id) {
+        // The package's INF is read only when it holds one of the names
+        let held: Vec<PathBuf> = names.iter().map(|n| dir.join(n)).filter(|p| p.is_file()).collect();
+        if held.is_empty() || !inf_lists(&dir, &id) {
             continue;
         }
-        for n in &names {
-            let path = dir.join(n);
+        for path in held {
             let Ok(data) = std::fs::read(&path) else { continue };
             if download_patch_project(&data) == Some(project) {
                 found.push(path);

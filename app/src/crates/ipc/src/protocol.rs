@@ -311,8 +311,8 @@ pub struct StreamInfo {
     /// reconnect for it
     #[serde(default)]
     pub hi_res_set: bool,
-    /// LHDC V5 low latency is in the configuration in use (Settings'
-    /// lhdcv5_low_latency, accepted by the device)
+    /// LHDC V5 low latency is in the configuration in use (asked for by
+    /// the profile, listed by the device; issue #543)
     #[serde(default)]
     pub low_latency: bool,
     /// Where the audio comes from
@@ -407,6 +407,9 @@ pub struct CodecDeviceCaps {
     pub bit_depths: Vec<u32>,
     /// Its largest bit rate in bps (0 = not said)
     pub max_bitrate: u32,
+    /// LHDC V5: it lists low latency (issue #543)
+    #[serde(default)]
+    pub lhdcv5_low_latency: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -615,6 +618,9 @@ pub struct Profile {
     /// hq, sq, mq; mhq for LHDC V5; ll for aptX Adaptive
     pub quality: String,
     pub abr: bool,
+    /// LHDC V5: low latency asked for (issue #543)
+    #[serde(default)]
+    pub lhdcv5_low_latency: bool,
     pub codec_fallback: bool,
     /// The codec was chosen on its card while the device did not offer it:
     /// asked for anyway, no fallback (issue #86)
@@ -818,6 +824,9 @@ pub struct CodecValues {
     pub sample_rate: u32,
     pub bit_depth: u32,
     pub abr: bool,
+    /// LHDC V5: low latency asked for (issue #543)
+    #[serde(default)]
+    pub lhdcv5_low_latency: bool,
     pub sbc_bitpool: u8,
     pub sbcxq_bitpool: u8,
     pub sbc_min_bitpool: u8,
@@ -836,6 +845,7 @@ impl Default for CodecValues {
             sample_rate: 0,
             bit_depth: 0,
             abr: false,
+            lhdcv5_low_latency: false,
             sbc_bitpool: 0,
             sbcxq_bitpool: 0,
             sbc_min_bitpool: 0,
@@ -1025,11 +1035,6 @@ pub struct Settings {
     pub include_alphas: bool,
     /// The headphones' buttons act as Windows media keys (every device)
     pub media_keys: bool,
-    /// LHDC V5 asks for low latency (P9 LL, 10 ms encode interval) where
-    /// the device lists it; from the next connection (an older core has
-    /// none: off)
-    #[serde(default)]
-    pub lhdcv5_low_latency: bool,
     /// Connect a device that went away again by itself (on by default).
     /// Off: the session ends and the adapter is released.
     #[serde(default = "yes")]
@@ -1774,6 +1779,10 @@ pub enum Method {
         #[ts(optional = nullable)]
         #[serde(default)]
         abr: Option<bool>,
+        /// LHDC V5 low latency, as a profile's (issue #543)
+        #[ts(optional = nullable)]
+        #[serde(default)]
+        lhdcv5_low_latency: Option<bool>,
         #[ts(optional = nullable)]
         #[serde(default)]
         codec_fallback: Option<bool>,

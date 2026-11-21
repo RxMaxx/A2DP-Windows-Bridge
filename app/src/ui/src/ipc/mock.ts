@@ -144,6 +144,7 @@ export function sampleProfile(over: Partial<Profile> = {}): Profile {
     codec: "ldac",
     quality: "hq",
     abr: false,
+    lhdcv5_low_latency: false,
     codec_fallback: true,
     codec_forced: false,
     unlisted_options: false,
@@ -299,18 +300,21 @@ export const XM5_CODEC_CAPS = [
     sample_rates: [44100, 48000],
     bit_depths: [],
     max_bitrate: 0,
+    lhdcv5_low_latency: false,
   },
   {
     codec: "aac",
     sample_rates: [44100, 48000],
     bit_depths: [],
     max_bitrate: 320000,
+    lhdcv5_low_latency: false,
   },
   {
     codec: "ldac",
     sample_rates: [44100, 48000, 88200, 96000],
     bit_depths: [],
     max_bitrate: 0,
+    lhdcv5_low_latency: false,
   },
 ];
 
@@ -327,18 +331,21 @@ export const MOTO_BUDS = sampleDevice({
       sample_rates: [44100, 48000],
       bit_depths: [],
       max_bitrate: 0,
+      lhdcv5_low_latency: false,
     },
     {
       codec: "aac",
       sample_rates: [44100, 48000],
       bit_depths: [],
       max_bitrate: 0x020000,
+      lhdcv5_low_latency: false,
     },
     {
       codec: "lhdcv5",
       sample_rates: [44100, 48000],
       bit_depths: [16, 24],
       max_bitrate: 0,
+      lhdcv5_low_latency: false,
     },
   ],
 });
@@ -351,7 +358,7 @@ export const APTXAD_48K = sampleDevice({
   saved: true,
   codecs: ["sbc", "aac", "aptxad"],
   codec_caps: [
-    { codec: "aptxad", sample_rates: [48000], bit_depths: [], max_bitrate: 0 },
+    { codec: "aptxad", sample_rates: [48000], bit_depths: [], max_bitrate: 0, lhdcv5_low_latency: false },
   ],
 });
 export const APTXAD_96K = sampleDevice({
@@ -365,6 +372,7 @@ export const APTXAD_96K = sampleDevice({
       sample_rates: [48000, 96000],
       bit_depths: [],
       max_bitrate: 0,
+      lhdcv5_low_latency: false,
     },
   ],
 });
@@ -860,6 +868,7 @@ const LDAC_DETAILS: CodecDetails = {
     sample_rates: [44100, 48000, 88200, 96000],
     bit_depths: [],
     max_bitrate: 0,
+    lhdcv5_low_latency: false,
   },
 };
 
@@ -878,6 +887,7 @@ const CODEC_INFO: Record<string, StreamInfo> = {
     abr: false,
     bitrate_capped: false,
     hi_res_set: false,
+    low_latency: false,
     source: null,
     le: null,
     details: LDAC_DETAILS,
@@ -896,6 +906,7 @@ const CODEC_INFO: Record<string, StreamInfo> = {
     abr: false,
     bitrate_capped: false,
     hi_res_set: false,
+    low_latency: false,
     source: null,
     le: null,
     details: AAC_DETAILS,
@@ -914,6 +925,7 @@ const CODEC_INFO: Record<string, StreamInfo> = {
     abr: false,
     bitrate_capped: false,
     hi_res_set: false,
+    low_latency: false,
     source: null,
     le: null,
     details: SBC_DETAILS,
@@ -932,6 +944,7 @@ const CODEC_INFO: Record<string, StreamInfo> = {
     abr: false,
     bitrate_capped: false,
     hi_res_set: false,
+    low_latency: false,
     source: null,
     le: null,
     details: { ...LDAC_DETAILS, frame_samples: 128 },
@@ -967,6 +980,7 @@ function lc3Info(lowLatency: boolean, set: boolean): StreamInfo {
     abr: false,
     bitrate_capped: false,
     hi_res_set: false,
+    low_latency: false,
     source: null,
     le: {
       preset,

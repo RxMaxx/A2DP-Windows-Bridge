@@ -1237,8 +1237,6 @@ fn afh_policy(settings: &Settings) -> &str {
 fn apply_dev_overrides(settings: &Settings) {
     bt_host::set_ctkd(true);
     codec::dev::set_overrides(if settings.debug_mode { settings.dev_overrides } else { Default::default() });
-    // Not a developer override: the Devices screen's switch
-    codec::set_lhdcv5_low_latency(settings.lhdcv5_low_latency);
     crate::vendor::set_overrides(if settings.debug_mode { settings.dev_vendors.clone() } else { Default::default() });
     crate::health::set_every_interval(settings.log().health_every_interval);
     // Developer > Debug, read when the adapter opens next

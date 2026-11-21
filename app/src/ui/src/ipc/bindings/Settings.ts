@@ -45,11 +45,6 @@ include_alphas: boolean,
  */
 media_keys: boolean, 
 /**
- * LHDC V5 asks for low latency (P9 LL, 10 ms encode interval) where
- * the device lists it; from the next connection
- */
-lhdcv5_low_latency?: boolean, 
-/**
  * Connect a device that went away again by itself (on by default).
  * Off: the session ends and the adapter is released.
  */

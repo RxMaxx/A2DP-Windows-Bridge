@@ -171,6 +171,7 @@ fn core_codec_details(d: ipc::CodecDetails) -> bluecaster_core::CodecDetails {
             sample_rates: c.sample_rates,
             bit_depths: c.bit_depths,
             max_bitrate: c.max_bitrate,
+            lhdcv5_low_latency: c.lhdcv5_low_latency,
         }),
     }
 }
