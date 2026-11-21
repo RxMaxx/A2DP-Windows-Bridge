@@ -528,7 +528,8 @@ pub trait UnicastEnv {
     /// Total_Num_ISO_Data_Packets of the controller
     fn iso_packet_count(&self) -> u8;
     /// `queue_share`: the most SDUs a CIS may queue in the controller
-    fn start_sending(&mut self, cis_handles: &[u16], queue_share: u8, frame_us: u32);
+    /// `max_latency_ms`: the CIG's max transport latency C->P
+    fn start_sending(&mut self, cis_handles: &[u16], queue_share: u8, frame_us: u32, max_latency_ms: u16);
     fn stop_sending(&mut self);
     /// The microphone: ISO data of these CIS (source CIS in plan order) to
     /// the receiver
@@ -917,7 +918,7 @@ impl Unicast {
                     self.fail(env, "the adapter has fewer ISO data buffers than the stream has CIS");
                     return;
                 }
-                env.start_sending(&handles, depth, u32::from(plan.preset.frame_us));
+                env.start_sending(&handles, depth, u32::from(plan.preset.frame_us), self.latency_ms);
                 self.starting = false;
                 env.stream_state(&plan, true);
                 if let Some(d) = self.start_done.take() {
@@ -1859,7 +1860,7 @@ mod tests {
         fn iso_packet_count(&self) -> u8 {
             self.iso_count
         }
-        fn start_sending(&mut self, cis: &[u16], depth: u8, frame_us: u32) {
+        fn start_sending(&mut self, cis: &[u16], depth: u8, frame_us: u32, _max_latency_ms: u16) {
             self.log.push(format!("send {cis:x?} queue {depth} {frame_us} us"));
         }
         fn stop_sending(&mut self) {

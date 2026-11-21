@@ -370,8 +370,15 @@ reach `IsoSender::on_hci_event` through `LeCore::on_hci`).
   peer did not acknowledge until its flush point, so with FT 10 an SDU can
   stay ~100 ms. MediaTek controllers keep 12 or Developer > Debug "ISO
   packets queued per CIS".
-- A CIS without room keeps up to 3 SDUs waiting; beyond that the oldest is
-  dropped ("late"). BTstack's single HCI packet buffer is often taken (the
+- A CIS without room keeps its SDUs waiting and sends them once completions
+  make room. An SDU is dropped ("late") only when its interval plus a wait
+  budget has passed: the CIG's max transport latency C->P, 40 to 200 ms
+  (100 ms if unknown). Completions held up for a few intervals, as a
+  controller does with a PDU the peer did not acknowledge or the emulator
+  during a 50-100 ms pause, cost no audio; a CIS that never completes keeps
+  at most budget / interval + 3 SDUs waiting. A late run loop timer makes
+  the missed intervals at once, skipping only those already past the
+  budget. BTstack's single HCI packet buffer is often taken (the
   previous ISO packet, a GATT write): the send is refused with 0x57
   (`BTSTACK_ACL_BUFFERS_FULL`) and the same SDU, same sequence number, goes
   again on `HCI_EVENT_TRANSPORT_PACKET_SENT`.

@@ -17,10 +17,13 @@
 //! a CIG in lockstep and stops at the first CIS whose queue is full, so a
 //! CIS whose completions came late (a flush timeout of 10 ISO intervals) or
 //! never held up every other CIS too. A CIS whose controller queue is full
-//! keeps its SDUs waiting; beyond [`PENDING_MAX`] the oldest is dropped
-//! ("late"). Sequence numbers count SDU intervals, so a dropped SDU leaves a
-//! gap in the numbers (Core Vol 6 Part G 2: the controller uses them to
-//! place SDUs in their intervals).
+//! keeps its SDUs waiting and sends them as soon as completions make room.
+//! An SDU is dropped ("late") only once it can no longer be played in time:
+//! its interval plus the wait budget, the CIG's max transport latency (at
+//! least [`MIN_WAIT_BUDGET_MS`]), has passed. That also bounds the backlog
+//! of a CIS that never completes. Sequence numbers count SDU intervals, so a
+//! dropped SDU leaves a gap in the numbers (Core Vol 6 Part G 2: the
+//! controller uses them to place SDUs in their intervals).
 //!
 //! BTstack has one outgoing HCI packet buffer for ACL and ISO. While it is
 //! taken (an ISO packet or a GATT write still on its way to the controller)
@@ -92,13 +95,32 @@ const MIN_CIS_QUEUE_DEPTH: u8 = 4;
 /// SDU sets the CIS sender runs ahead of real time
 pub const LEAD_SETS: u64 = 2;
 
-/// SDUs a CIS keeps waiting for room in the controller (the lead and the
-/// interval going on); beyond, the oldest is dropped as late
-pub const PENDING_MAX: usize = LEAD_SETS as usize + 1;
+/// The least time an SDU may wait for room in the controller past its
+/// interval: a few intervals of completions held up (a busy controller, a
+/// GATT exchange) must not cost audio
+pub const MIN_WAIT_BUDGET_MS: u32 = 40;
 
-/// SDU sets made at once after the run loop was held up; older intervals
-/// are skipped
-const CATCH_UP_MAX: u64 = 50;
+/// The wait budget when the CIG's max transport latency is not known
+const DEFAULT_WAIT_BUDGET_MS: u32 = 100;
+
+/// The most time an SDU may wait past its interval
+const MAX_WAIT_BUDGET_MS: u32 = 200;
+
+/// How long an SDU may wait for room in the controller past its interval:
+/// the CIG's max transport latency (the time the stream allows for an SDU
+/// to get through), within [`MIN_WAIT_BUDGET_MS`]..[`MAX_WAIT_BUDGET_MS`]
+pub(crate) fn wait_budget_ms(max_transport_latency_ms: u16) -> u32 {
+    if max_transport_latency_ms == 0 {
+        return DEFAULT_WAIT_BUDGET_MS;
+    }
+    u32::from(max_transport_latency_ms).clamp(MIN_WAIT_BUDGET_MS, MAX_WAIT_BUDGET_MS)
+}
+
+/// SDUs a CIS may keep waiting: those of the lead and the wait budget, and
+/// the one of the interval going on
+fn pending_max(budget_ms: u32, frame_us: u32) -> usize {
+    (budget_ms * 1000).div_ceil(frame_us.max(1)) as usize + LEAD_SETS as usize + 1
+}
 
 /// No SDU completed on a CIS for this long while SDUs wait in the
 /// controller: the CIS is stalled
@@ -261,6 +283,13 @@ impl IsoOut for Stack {
 struct Pending {
     seq: u16,
     sdu: Vec<u8>,
+    /// Run loop time after which it can no longer be played in time
+    deadline_ms: u32,
+}
+
+/// Whether run loop time `t` is past `deadline` (wrapping)
+fn past(t: u32, deadline: u32) -> bool {
+    (t.wrapping_sub(deadline) as i32) > 0
 }
 
 /// One CIS of the running stream
@@ -292,8 +321,8 @@ impl CisOut {
         CisOut {
             handle,
             alive: true,
-            pending: VecDeque::with_capacity(PENDING_MAX + 1),
-            free: Vec::with_capacity(PENDING_MAX + 1),
+            pending: VecDeque::with_capacity(16),
+            free: Vec::with_capacity(16),
             in_flight: VecDeque::with_capacity(usize::from(MAX_CIS_QUEUE_DEPTH)),
             progress_ms: now,
             stalled: false,
@@ -307,20 +336,32 @@ impl CisOut {
         }
     }
 
-    /// The SDU of the next interval: waits for room in the controller, the
-    /// oldest waiting one dropped beyond [`PENDING_MAX`]
-    fn give(&mut self, seq: u16, sdu: &[u8]) {
-        if self.pending.len() >= PENDING_MAX
-            && let Some(old) = self.pending.pop_front()
-        {
-            self.late += 1;
-            self.window_late += 1;
-            self.free.push(old.sdu);
+    /// The SDU of the next interval: waits for room in the controller
+    /// until `deadline_ms`; at most `max` wait (the oldest dropped beyond)
+    fn give(&mut self, seq: u16, sdu: &[u8], deadline_ms: u32, now: u32, max: usize) {
+        self.drop_expired(now);
+        if self.pending.len() >= max.max(1) {
+            self.drop_oldest();
         }
         let mut buf = self.free.pop().unwrap_or_default();
         buf.clear();
         buf.extend_from_slice(sdu);
-        self.pending.push_back(Pending { seq, sdu: buf });
+        self.pending.push_back(Pending { seq, sdu: buf, deadline_ms });
+    }
+
+    /// Drops the waiting SDUs that can no longer be played in time
+    fn drop_expired(&mut self, now: u32) {
+        while self.pending.front().is_some_and(|p| past(now, p.deadline_ms)) {
+            self.drop_oldest();
+        }
+    }
+
+    fn drop_oldest(&mut self) {
+        if let Some(old) = self.pending.pop_front() {
+            self.late += 1;
+            self.window_late += 1;
+            self.free.push(old.sdu);
+        }
     }
 
     /// Number Of Completed Packets: `n` of its SDUs left the controller
@@ -410,6 +451,10 @@ pub struct IsoSender {
     cis: Vec<CisOut>,
     /// SDUs queued per CIS in the controller at most
     depth: u8,
+    /// How long an SDU may wait for room past its interval
+    budget_ms: u32,
+    /// SDUs a CIS may keep waiting at most
+    pending_max: usize,
     /// The CIG is active: pacing runs
     active: bool,
     /// SDU sets taken so far (the next one's sequence number)
@@ -453,7 +498,8 @@ impl IsoSender {
     }
 
     /// Starts sending on these CIS (plan order) from `queue`, one set per
-    /// `frame_us`; `share`: [`cis_queue_share`]
+    /// `frame_us`; `share`: [`cis_queue_share`]; `max_latency_ms`: the
+    /// CIG's max transport latency C->P ([`wait_budget_ms`])
     pub(crate) fn start(
         &mut self,
         out: &dyn IsoOut,
@@ -461,9 +507,12 @@ impl IsoSender {
         queue: SharedSduQueue,
         frame_us: u32,
         share: u8,
+        max_latency_ms: u16,
     ) {
         self.bigs.clear();
         self.reset(queue, frame_us);
+        self.budget_ms = wait_budget_ms(max_latency_ms);
+        self.pending_max = pending_max(self.budget_ms, self.frame_us);
         let need = self.flush_need(cis_handles, frame_us);
         let mediatek = MEDIATEK.load(Ordering::Relaxed);
         self.depth = cis_depth(share, mediatek, need).max(1);
@@ -477,10 +526,12 @@ impl IsoSender {
         tracing::info!("LE Audio: sending ISO SDUs on {} CIS (queue {})", cis_handles.len(), self.depth);
         tracing::debug!(
             "LE Audio: ISO sender: CIS {cis_handles:04X?}, frame {} us, prefill {} set(s), {share} buffer(s) per \
-             CIS, flush timeout needs {}, lead {LEAD_SETS} set(s)",
+             CIS, flush timeout needs {}, lead {LEAD_SETS} set(s), SDUs wait up to {} ms past their interval              ({} at most)",
             self.frame_us,
             self.prefill,
-            need.map_or("?".to_string(), |n| n.to_string())
+            need.map_or("?".to_string(), |n| n.to_string()),
+            self.budget_ms,
+            self.pending_max
         );
         self.activate(out);
     }
@@ -918,14 +969,17 @@ impl IsoSender {
         let elapsed_ms = u64::from(now.wrapping_sub(t0));
         let frame = u64::from(self.frame_us);
         let due = elapsed_ms * 1000 / frame + LEAD_SETS;
-        if due > self.produced + CATCH_UP_MAX {
-            let skip = due - CATCH_UP_MAX - self.produced;
+        // After the run loop was held up: the intervals whose SDUs could no
+        // longer be played in time are skipped, the others made at once
+        let catch_up = self.pending_max.max(1) as u64;
+        if due > self.produced + catch_up {
+            let skip = due - catch_up - self.produced;
             tracing::debug!("LE Audio: ISO sender held up {elapsed_ms} ms in: {skip} interval(s) skipped");
             self.skipped += skip;
             self.produced += skip;
         }
         while self.produced < due {
-            self.produce();
+            self.produce(now);
         }
         self.flush(out);
         self.check(now);
@@ -936,14 +990,19 @@ impl IsoSender {
 
     /// The next SDU set to every CIS that is up, with its interval's
     /// sequence number
-    fn produce(&mut self) {
+    fn produce(&mut self, now: u32) {
         let seq = self.produced as u16;
+        // Its interval (the lead ahead of when it is made), plus the budget
+        let t0 = self.t0_ms.unwrap_or(now);
+        let interval_end_ms = ((self.produced + 1) * u64::from(self.frame_us) / 1000) as u32;
+        let deadline = t0.wrapping_add(interval_end_ms).wrapping_add(self.budget_ms);
         self.produced += 1;
         let set = self.take_set();
         if set.len() == self.cis.len() {
+            let max = self.pending_max;
             for (c, sdu) in self.cis.iter_mut().zip(&set) {
                 if c.alive {
-                    c.give(seq, sdu);
+                    c.give(seq, sdu, deadline, now, max);
                 }
             }
         } else {
@@ -970,6 +1029,7 @@ impl IsoSender {
                 if !c.alive || c.in_flight.len() >= depth {
                     continue;
                 }
+                c.drop_expired(now);
                 let Some(p) = c.pending.front() else { continue };
                 let status = out.send(c.handle, p.seq, &p.sdu);
                 tracing::trace!(
@@ -1343,7 +1403,7 @@ mod tests {
         let stats = Arc::new(Mutex::new(LeStreamStats::default()));
         let mut s = IsoSender::new(stats.clone());
         let q = queue(2);
-        s.start(&out, &[0x60, 0x61], q.clone(), 10_000, 8);
+        s.start(&out, &[0x60, 0x61], q.clone(), 10_000, 8, 100);
         // Two sets at once (the lead); BTstack's buffer is taken after
         // every packet in real life, not in this fake
         assert_eq!(
@@ -1374,7 +1434,7 @@ mod tests {
         let out = Fake::default();
         let stats = Arc::new(Mutex::new(LeStreamStats::default()));
         let mut s = IsoSender::new(stats.clone());
-        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 4);
+        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 4, 100);
         out.take();
         let mut right = Vec::new();
         for i in 1..=100u32 {
@@ -1391,22 +1451,94 @@ mod tests {
         assert_eq!(right.len(), 2, "{right:?}");
         let left = s.cis[0].sent;
         assert!(left >= 100, "{left}");
-        // Its SDUs past the queue are dropped as late, the numbers of the
-        // right one keep counting intervals
-        assert!(s.cis[1].late >= 95, "{}", s.cis[1].late);
+        // Its SDUs wait as long as they could still be played (100 ms past
+        // their interval), older ones are dropped as late; the numbers of
+        // the right one keep counting intervals
+        assert!(s.cis[1].late >= 80, "{}", s.cis[1].late);
         let seqs: Vec<u16> = s.cis[1].pending.iter().map(|p| p.seq).collect();
-        assert_eq!(seqs, [99, 100, 101]);
+        assert_eq!(seqs, (89..=101).collect::<Vec<u16>>());
         // 2 s without a completion: stalled, the other plays on (no failure)
         at(&mut s, &out, 2010);
         assert!(s.take_stall().is_none());
         assert_eq!(stats.lock().unwrap().cis_stalled, 1);
-        // Completions again: it sends the SDUs of now, not those of before
+        // Completions again: it sends the oldest SDUs still in time, not
+        // those of before
         s.on_hci_event(&out, &completed(0x61, 4));
         assert_eq!(
             out.sends().iter().filter(|l| l.starts_with("send 61")).cloned().collect::<Vec<_>>(),
-            ["send 61 #200 ee", "send 61 #201 ee", "send 61 #202 ee"]
+            ["send 61 #190 ee", "send 61 #191 ee", "send 61 #192 ee", "send 61 #193 ee"]
         );
         assert_eq!(s.stats().cis_stalled, 0);
+    }
+
+    /// One CIS completing each SDU 15 ms after it was sent, except that
+    /// nothing completes from `stall_from` for `stall` ms (all at once
+    /// then; None: never again). The sequence numbers sent and the sender.
+    fn run_with_stall(depth: u8, stall_from: u32, stall: Option<u32>, until: u32) -> (Vec<u16>, IsoSender, Fake) {
+        let out = Fake::default();
+        let mut s = IsoSender::new(Arc::default());
+        s.start(&out, &[0x60], queue(1), 10_000, depth, 100);
+        let mut seqs = Vec::new();
+        for t in 0..=until {
+            out.now.set(t);
+            let held = t >= stall_from && stall.is_none_or(|d| t < stall_from + d);
+            if !held {
+                let n = s.cis[0].in_flight.iter().filter(|&&at| t.wrapping_sub(at) >= 15).count();
+                if n > 0 {
+                    s.on_hci_event(&out, &completed(0x60, n as u16));
+                }
+            }
+            s.on_timer(&out);
+            for l in out.take() {
+                if let Some(rest) = l.strip_prefix("send 60 #") {
+                    seqs.push(rest.split(' ').next().unwrap().parse().unwrap());
+                }
+            }
+        }
+        (seqs, s, out)
+    }
+
+    #[test]
+    fn a_completion_stall_within_the_budget_costs_no_sdu() {
+        // FT 2 and FT 10 at a 10 ms ISO interval: the depth they get
+        for depth in [depth_for_flush(2, 10_000, 10_000), depth_for_flush(10, 10_000, 10_000)] {
+            for stall in [30, 60, 100] {
+                let (seqs, s, _) = run_with_stall(depth, 1000, Some(stall), 2000);
+                assert_eq!(s.cis[0].late, 0, "depth {depth}, {stall} ms");
+                // Every interval's SDU, in order, none skipped
+                assert!(seqs.windows(2).all(|w| w[1] == w[0] + 1), "depth {depth}, {stall} ms");
+                assert!(seqs.len() >= 200, "depth {depth}, {stall} ms: {}", seqs.len());
+            }
+        }
+    }
+
+    #[test]
+    fn a_stall_past_the_budget_drops_the_oldest_and_stays_bounded() {
+        let depth = depth_for_flush(2, 10_000, 10_000);
+        // 200 ms without a completion: the SDUs past 100 ms + their interval
+        // are dropped, the rest go out once completions are back
+        let (seqs, s, _) = run_with_stall(depth, 1000, Some(200), 2000);
+        let late = s.cis[0].late;
+        assert!((1..=10).contains(&late), "{late}");
+        let gaps: Vec<_> = seqs.windows(2).filter(|w| w[1] != w[0] + 1).collect();
+        assert_eq!(gaps.len(), 1, "{gaps:?}");
+        // Never again: bounded backlog, dropped as late, reported stalled
+        let (_, mut s, out) = run_with_stall(depth, 1000, None, 3500);
+        assert!(s.cis[0].pending.len() <= s.pending_max, "{}", s.cis[0].pending.len());
+        assert!(s.cis[0].late > 200, "{}", s.cis[0].late);
+        assert_eq!(s.take_stall().as_deref(), Some("no SDU completed on any CIS for 2 s"));
+        s.stop(&out);
+    }
+
+    #[test]
+    fn the_wait_budget_follows_the_max_transport_latency() {
+        assert_eq!(wait_budget_ms(100), 100);
+        assert_eq!(wait_budget_ms(15), MIN_WAIT_BUDGET_MS);
+        assert_eq!(wait_budget_ms(0), DEFAULT_WAIT_BUDGET_MS);
+        assert_eq!(wait_budget_ms(4000), MAX_WAIT_BUDGET_MS);
+        // 100 ms of 10 ms intervals, the lead and the interval going on
+        assert_eq!(pending_max(100, 10_000), 13);
+        assert_eq!(pending_max(40, 7_500), 9);
     }
 
     #[test]
@@ -1414,7 +1546,7 @@ mod tests {
         let out = Fake::default();
         let stats = Arc::new(Mutex::new(LeStreamStats::default()));
         let mut s = IsoSender::new(stats.clone());
-        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 4);
+        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 4, 100);
         let mut bytes = Vec::new();
         for i in 1..=250u32 {
             at(&mut s, &out, i * 10);
@@ -1438,7 +1570,7 @@ mod tests {
         let out = Fake::default();
         let mut s = IsoSender::new(Arc::default());
         out.busy.set(1);
-        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 4);
+        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 4, 100);
         // The first send found BTstack's packet buffer taken (a GATT write)
         assert_eq!(out.take(), ["queue 4", "request 60", "busy 60 #0", "timer 10"]);
         s.on_hci_event(&out, &PACKET_SENT);
@@ -1471,7 +1603,7 @@ mod tests {
         }
         let out = Failing(Fake::default());
         let mut s = IsoSender::new(Arc::default());
-        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 4);
+        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 4, 100);
         assert_eq!(out.0.sends(), ["send 60 #0 ee", "send 61 #0 ee", "send 60 #1 ee", "send 61 #1 ee"]);
         assert_eq!((s.counters.send_errors, s.cis[1].late, s.cis[1].sent), (2, 2, 0));
     }
@@ -1481,7 +1613,7 @@ mod tests {
         let out = Fake::default();
         out.refuse.set(2);
         let mut s = IsoSender::new(Arc::new(Mutex::new(LeStreamStats::default())));
-        s.start(&out, &[0x60], queue(1), 10_000, 2);
+        s.start(&out, &[0x60], queue(1), 10_000, 2, 100);
         assert_eq!(out.take(), ["queue 2", "request 60", "timer 1"]);
         at(&mut s, &out, 1);
         assert_eq!(out.take(), ["request 60", "timer 1"]);
@@ -1495,7 +1627,7 @@ mod tests {
     fn a_cis_going_down_leaves_the_others_sending() {
         let out = Fake::default();
         let mut s = IsoSender::new(Arc::default());
-        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 4);
+        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 4, 100);
         out.take();
         s.on_cis_down(&out, 0x61);
         at(&mut s, &out, 10);
@@ -1581,12 +1713,12 @@ mod tests {
         assert_eq!((e.cis_handle, e.nse, e.ft_c_to_p, e.max_pdu_c_to_p, e.iso_interval), (0x60, 2, 10, 155, 8));
         assert_eq!(e.transport_latency_c_to_p, 95_040);
         s.on_hci_event(&out, &ev);
-        s.start(&out, &[0x60], queue(1), 10_000, 16);
+        s.start(&out, &[0x60], queue(1), 10_000, 16, 100);
         assert_eq!(s.depth, 14);
         s.stop(&out);
         // Without parameters: the share
         let mut s = IsoSender::new(Arc::default());
-        s.start(&out, &[0x61], queue(1), 10_000, 16);
+        s.start(&out, &[0x61], queue(1), 10_000, 16, 100);
         assert_eq!(s.depth, 16);
     }
 
@@ -1595,7 +1727,7 @@ mod tests {
         let out = Fake::default();
         let mut s = IsoSender::new(Arc::default());
         let q = queue(1);
-        s.start(&out, &[0x60], q.clone(), 10_000, 8);
+        s.start(&out, &[0x60], q.clone(), 10_000, 8, 100);
         out.take();
         for tag in 1..=5 {
             q.lock().unwrap().push(vec![vec![tag; 4]]);
