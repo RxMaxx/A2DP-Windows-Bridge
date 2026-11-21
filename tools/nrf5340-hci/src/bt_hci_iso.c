@@ -9,9 +9,8 @@
  * BlueCaster: a copy of Zephyr's USB HCI class (nRF Connect SDK v3.4.1,
  * zephyr/subsys/usb/device_next/class/bt_hci.c) with one change. The
  * stock class takes everything on the bulk OUT endpoint for ACL data; a
- * host that sends HCI ISO data on the same pipe (as BlueCaster and Linux
- * do for Realtek and Intel controllers) has its BIS SDUs dropped as ACL
- * of an unknown connection. Here the class learns the BIS handles from
+ * host that sends HCI ISO data on the same pipe (as BlueCaster does) has
+ * its BIS SDUs dropped as ACL of an unknown connection. Here the class learns the BIS handles from
  * the LE Create BIG Complete events it passes to the host, and a packet
  * on one of them is taken for ISO data (controllers number BIS their own
  * way: the Zephyr LL after its ACL handles, the SoftDevice Controller
@@ -107,7 +106,7 @@ static struct k_thread tx_thread_data;
  * We do not support voice channels and we do not implement
  * isochronous endpoints handling, these are only available to match
  * the recomendet configuration in the Bluetooth specification and
- * avoid issues with Linux kernel btusb driver.
+ * avoid issues with host Bluetooth USB drivers.
  */
 struct usbd_bt_hci_desc {
 	struct usb_association_descriptor iad;

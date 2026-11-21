@@ -23,10 +23,12 @@ refuses a third BIG: see `docs/le-audio-dev.md`, "Broadcast").
 
 ## Build
 
-nRF Connect SDK v3.4.1 and its toolchain (here in `C:\ncs`). In PowerShell:
+Requires nRF Connect SDK v3.4.1 and its toolchain. The commands assume the
+default install folder `C:\ncs`. `<toolchain id>` is the folder that the
+toolchain manager created under `C:\ncs\toolchains`. In PowerShell:
 
 ```powershell
-$T='C:\ncs\toolchains\4f5b6ad6dd'
+$T = 'C:\ncs\toolchains\<toolchain id>'
 $env:PATH = "$T;$T\mingw64\bin;$T\bin;$T\opt\bin;$T\opt\bin\Scripts;$T\nrfutil\bin;$T\opt\zephyr-sdk\gnu\arm-zephyr-eabi\bin;" + $env:PATH
 $env:PYTHONPATH = "$T\opt\bin;$T\opt\bin\Lib;$T\opt\bin\Lib\site-packages"
 $env:ZEPHYR_TOOLCHAIN_VARIANT = 'zephyr/gnu'; $env:ZEPHYR_SDK_INSTALL_DIR = "$T\opt\zephyr-sdk"
@@ -63,5 +65,11 @@ port (marked "nRF5340 USB"): it appears as 2FE3:000B and needs WinUSB
 ## Settings
 
 The ISO console trace (`CONFIG_BLUECASTER_TRACE`, counters every 2 s on
-the J-Link VCOM, COM55 here) and the network core's error log are on in
+the J-Link VCOM port) and the network core's error log are enabled in
 `prj.conf` and `sysbuild/hci_ipc_sdc.conf`; turn them off for daily use.
+
+## License
+
+`src/bt_hci_iso.c`, `src/main.c` and the build files are modified copies of
+Zephyr sources and stay under Apache-2.0 (see `THIRD_PARTY_LICENSES.md`,
+§22).
