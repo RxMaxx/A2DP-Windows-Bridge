@@ -387,6 +387,13 @@ impl CisOut {
         }
     }
 
+    /// Time since the last progress; 0 when that is later than `now` (a
+    /// clock read before it), not a wrapped 49 days
+    fn idle_ms(&self, now: u32) -> u32 {
+        let idle = now.wrapping_sub(self.progress_ms);
+        if idle > i32::MAX as u32 { 0 } else { idle }
+    }
+
     fn down(&mut self) {
         self.alive = false;
         self.stalled = false;
@@ -1062,7 +1069,9 @@ impl IsoSender {
             self.produce(now);
         }
         self.flush(out);
-        self.check(now);
+        // flush() reads the clock again and may set a CIS's progress later
+        // than `now`
+        self.check(out.time_ms());
         let next_ms = ((self.produced + 1 - LEAD_SETS) * frame).div_ceil(1000);
         let wait = next_ms.saturating_sub(elapsed_ms).clamp(1, 1000) as u32;
         out.timer_start(wait);
@@ -1162,12 +1171,13 @@ impl IsoSender {
         let mut stalled = 0;
         for c in self.cis.iter_mut().filter(|c| c.alive) {
             up += 1;
-            if !c.stalled && !c.in_flight.is_empty() && now.wrapping_sub(c.progress_ms) >= STALL_MS {
+            let idle = c.idle_ms(now);
+            if !c.stalled && !c.in_flight.is_empty() && idle >= STALL_MS {
                 c.stalled = true;
                 tracing::warn!(
                     "LE Audio: CIS 0x{:04X}: no SDU completed for {} s ({} SDU(s) in the controller)",
                     c.handle,
-                    now.wrapping_sub(c.progress_ms) / 1000,
+                    idle / 1000,
                     c.in_flight.len()
                 );
             }
@@ -1299,6 +1309,9 @@ mod tests {
         refuse: Cell<u32>,
         /// Sends still refused with BTSTACK_ACL_BUFFERS_FULL
         busy: Cell<u32>,
+        /// Added to the clock after each read (a clock that moves on while
+        /// the sender works)
+        step: Cell<u32>,
     }
 
     impl Fake {
@@ -1314,7 +1327,9 @@ mod tests {
 
     impl IsoOut for Fake {
         fn time_ms(&self) -> u32 {
-            self.now.get()
+            let now = self.now.get();
+            self.now.set(now.wrapping_add(self.step.get()));
+            now
         }
         fn set_queue(&self, packets: u8) {
             self.log.borrow_mut().push(format!("queue {packets}"));
@@ -1786,6 +1801,26 @@ mod tests {
         assert_eq!(s.take_stall().as_deref(), Some("no SDU completed on any CIS for 2 s"));
         at(&mut s, &out, 2600);
         assert!(s.take_stall().is_none());
+    }
+
+    #[test]
+    fn a_send_a_millisecond_after_the_tick_is_no_stall() {
+        let out = Fake::default();
+        let stats = Arc::new(Mutex::new(LeStreamStats::default()));
+        let mut s = IsoSender::new(stats.clone());
+        s.start(&out, &[0x60], queue(1), 10_000, 4, 100);
+        for i in 1..=300u32 {
+            // Everything in the controller completed, then the clock moves
+            // on between the tick's read and the send's
+            let n = s.cis[0].in_flight.len() as u16;
+            s.on_hci_event(&out, &completed(0x60, n));
+            out.now.set(i * 10);
+            out.step.set(1);
+            s.on_timer(&out);
+            assert!(!s.cis[0].stalled, "at {i}");
+            assert!(s.take_stall().is_none(), "at {i}");
+        }
+        s.stop(&out);
     }
 
     #[test]
