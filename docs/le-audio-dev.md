@@ -366,7 +366,7 @@ reach `IsoSender::on_hci_event` through `LeCore::on_hci`).
   does not check controller space for ISO.
 - Depth per CIS: its share of the controller's ISO buffers (at most 16),
   narrowed to what the flush timeout of LE CIS Established needs (FT x ISO
-  interval in SDU intervals + 4, at least 4). A controller holds a PDU the
+  interval in SDU intervals + 5, at least 4). A controller holds a PDU the
   peer did not acknowledge until its flush point, so with FT 10 an SDU can
   stay ~100 ms. MediaTek controllers keep 12 or Developer > Debug "ISO
   packets queued per CIS".

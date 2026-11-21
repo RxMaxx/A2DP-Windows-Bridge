@@ -209,12 +209,12 @@ fn queue_depth_within(iso_packets: u8, cis: usize, limit: u8) -> u8 {
 
 /// SDUs a CIS needs queued with this flush timeout: the controller may
 /// hold an SDU until FT ISO intervals after its first event (a PDU the
-/// peer does not acknowledge completes only then), plus the lead and the
-/// one on air and one for timer jitter; within
+/// peer does not acknowledge completes only then), plus the lead, the one
+/// on air and two for timer and completion jitter; within
 /// [`MIN_CIS_QUEUE_DEPTH`]..[`MAX_CIS_QUEUE_DEPTH`]
 pub(crate) fn depth_for_flush(ft: u8, iso_interval_us: u32, sdu_interval_us: u32) -> u8 {
     let held = (u32::from(ft) * iso_interval_us).div_ceil(sdu_interval_us.max(1));
-    (held + LEAD_SETS as u32 + 2).clamp(u32::from(MIN_CIS_QUEUE_DEPTH), u32::from(MAX_CIS_QUEUE_DEPTH)) as u8
+    (held + LEAD_SETS as u32 + 3).clamp(u32::from(MIN_CIS_QUEUE_DEPTH), u32::from(MAX_CIS_QUEUE_DEPTH)) as u8
 }
 
 /// The depth a CIS stream uses: the share of the buffers, within the need
@@ -1681,15 +1681,16 @@ mod tests {
     #[test]
     fn cis_depth_from_buffers_and_flush_timeout() {
         // FT 10 at a 10 ms ISO interval holds an SDU up to 100 ms: 10 + lead
-        // 2 + 2, cut to the 10 buffers each of 2 CIS has of 20
-        assert_eq!(depth_for_flush(10, 10_000, 10_000), 14);
-        assert_eq!(cis_depth(queue_depth_within(20, 2, MAX_CIS_QUEUE_DEPTH), false, Some(14)), 10);
-        // FT 2: 6 are enough
-        assert_eq!(depth_for_flush(2, 10_000, 10_000), 6);
-        assert_eq!(cis_depth(10, false, Some(6)), 6);
+        // 2 + 3, cut to the 10 buffers each of 2 CIS has of 20
+        assert_eq!(depth_for_flush(10, 10_000, 10_000), 15);
+        assert_eq!(cis_depth(queue_depth_within(20, 2, MAX_CIS_QUEUE_DEPTH), false, Some(15)), 10);
+        // FT 2: 7 are enough
+        assert_eq!(depth_for_flush(2, 10_000, 10_000), 7);
+        assert_eq!(cis_depth(10, false, Some(7)), 7);
         // FT 1 at 7.5 ms
-        assert_eq!(depth_for_flush(1, 7_500, 7_500), 5);
-        assert_eq!(depth_for_flush(0, 7_500, 7_500), MIN_CIS_QUEUE_DEPTH);
+        assert_eq!(depth_for_flush(1, 7_500, 7_500), 6);
+        assert_eq!(depth_for_flush(0, 7_500, 7_500), 5);
+        assert_eq!(cis_depth(MIN_CIS_QUEUE_DEPTH, false, Some(5)), MIN_CIS_QUEUE_DEPTH);
         // A long flush timeout is capped
         assert_eq!(depth_for_flush(30, 20_000, 10_000), MAX_CIS_QUEUE_DEPTH);
         // Unknown flush timeout: the share; MediaTek's: the share as it is
@@ -1714,7 +1715,7 @@ mod tests {
         assert_eq!(e.transport_latency_c_to_p, 95_040);
         s.on_hci_event(&out, &ev);
         s.start(&out, &[0x60], queue(1), 10_000, 16, 100);
-        assert_eq!(s.depth, 14);
+        assert_eq!(s.depth, 15);
         s.stop(&out);
         // Without parameters: the share
         let mut s = IsoSender::new(Arc::default());
