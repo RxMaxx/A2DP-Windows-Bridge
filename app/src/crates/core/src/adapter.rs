@@ -143,6 +143,12 @@ pub fn realtek_driver_firmware(fw_stem: &str) -> Option<std::path::PathBuf> {
     bt_host::realtek_btnic::driver_firmware(fw_stem.strip_suffix(".bin").unwrap_or(fw_stem))
 }
 
+/// The same, from the driver package whose INF names the
+/// adapter's USB VID:PID ([`bt_host::realtek_btnic::own_driver_firmware`])
+pub fn realtek_own_driver_firmware(fw_stem: &str, vid: u16, pid: u16) -> Option<std::path::PathBuf> {
+    bt_host::realtek_btnic::own_driver_firmware(fw_stem.strip_suffix(".bin").unwrap_or(fw_stem), vid, pid)
+}
+
 /// Fills the chipset part of `config` from the settings and the present
 /// adapters
 pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path) {
@@ -237,7 +243,14 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path
         if settings.realtek_custom_firmware {
             tracing::info!("custom firmware: the firmware folder's {fw}");
         } else {
-            config.realtek_firmware_file = realtek_driver_firmware(fw);
+            // The adapter's own driver package first (its
+            // vendor's board-tuned firmware), else the newest generic one.
+            // The adapter is the one the transport opens first (see above).
+            let own = winusb
+                .iter()
+                .find(|a| a.realtek_pid == Some(pid) && !a.device.in_use())
+                .and_then(|a| realtek_own_driver_firmware(fw, a.device.vid, a.device.pid));
+            config.realtek_firmware_file = own.or_else(|| realtek_driver_firmware(fw));
             if config.realtek_firmware_file.is_none() {
                 tracing::info!("no firmware for this chip in Realtek's Windows driver on this PC: the folder's {fw}");
             }
