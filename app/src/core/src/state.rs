@@ -1121,6 +1121,10 @@ pub fn broadcast_request(b: &BroadcastStream, legacy_max_media_payload: u16) -> 
         "sq" => bluecaster_core::BROADCAST_PRESET_SQ,
         other => return Err(bad_request("stream.bad_quality", METHOD, format!("unknown quality \"{other}\""))),
     };
+    // One mono channel, or left and right as broadcasts of their own: not both
+    if b.mono == Some(true) && b.split == Some(true) {
+        return Err(bad_request("stream.bad_channels", METHOD, "mono and split cannot be used together".into()));
+    }
     let c = CustomStream {
         device: "00:00:00:00:00:00".into(),
         device_name: Some(b.name.clone()),
@@ -4195,6 +4199,27 @@ mod tests {
             address: None,
             bt_version: None,
             windows_name: None,
+        }
+    }
+
+    #[test]
+    fn a_broadcast_is_mono_or_split_not_both() {
+        let b = |mono, split| BroadcastStream {
+            name: "Speakers".into(),
+            quality: "hq".into(),
+            mono,
+            split,
+            source: "tone".into(),
+            ..BroadcastStream::default()
+        };
+        let e = broadcast_request(&b(Some(true), Some(true)), 0).expect_err("refused");
+        assert_eq!(e.code, "stream.bad_channels");
+        assert_eq!(e.message.key, "ipc.error.bad_request");
+        assert_eq!(e.message.args, ["stream.start_broadcast", "mono and split cannot be used together"]);
+        for (mono, split) in [(Some(true), Some(false)), (Some(false), Some(true)), (None, None), (Some(true), None)] {
+            let req = broadcast_request(&b(mono, split), 0).expect("accepted");
+            let le = req.le.and_then(|l| l.broadcast).expect("a broadcast");
+            assert_eq!((le.mono, le.split), (mono.unwrap_or(false), split.unwrap_or(false)));
         }
     }
 

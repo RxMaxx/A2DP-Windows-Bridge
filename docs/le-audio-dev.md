@@ -391,7 +391,10 @@ While sending, the system timer resolution is 1 ms
 (`btstack_sys::HighTimerResolution`, like v1's `timeBeginPeriod(1)`);
 otherwise BTstack's Windows run loop and its clock move in 15.6 ms steps.
 A broadcast (BIG) is still sent in rounds on `HCI_EVENT_BIS_CAN_SEND_NOW`,
-with a send guard keeping the rounds at most queue + 2 intervals ahead.
+with a send guard keeping the rounds at most queue + 2 intervals ahead. A
+BIS send refused with 0x57 (the packet buffer taken, typically for the
+second BIS of the first round) waits in the round and goes again with the
+same SDU and sequence number on `HCI_EVENT_TRANSPORT_PACKET_SENT`.
 
 The UI's ISO counters (`LinkSample.iso`) come from `BtHost::le_stream_stats()`
 (sets, silence, underruns, dropped, prefill).
@@ -560,7 +563,8 @@ pick it up. It is started from the Developer screen's Auracast tab (name,
 password, high / standard quality, stereo / mono, test tone or system
 audio; `stream.start_broadcast`, refused with `developer.off` unless
 developer mode is on) or with `--cli --auracast <name> [--auracast-code
-<code>] [--auracast-mono] [--le-preset 24_2_2]`, which goes through the
+<code>] [--auracast-mono | --auracast-split] [--le-preset 24_2_2]`, which
+goes through the
 same service path (`state::broadcast_request`, `le_stream::run_broadcast`).
 It needs LE Audio on (`le_audio_experimental`, else error.le_audio_disabled)
 and an adapter with ISO buffers and the Isochronous Broadcaster feature.
@@ -609,6 +613,10 @@ it.
   whole it works fairly well. Open: the cause of the stutters, and how far
   apart in time the BIGs' anchors are on other controllers (each receiver
   renders relative to its own BIG).
+  Split and mono exclude each other: `--auracast-mono` with
+  `--auracast-split` is an argument error, and `stream.start_broadcast` with
+  both `mono` and `split` true is refused as a bad request
+  (`stream.bad_channels`).
 
 BTstack 1.8.1 pitfalls found along the way:
 - `HCI_EVENT_BIS_CAN_SEND_NOW` is emitted only 4 bytes long, so the BIS handle
