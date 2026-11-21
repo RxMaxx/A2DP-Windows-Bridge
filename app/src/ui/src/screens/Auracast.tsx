@@ -19,6 +19,9 @@ export type PairMode = "stereo" | "separate" | "subgroups" | "off";
 
 /** The BIGs (broadcasts) a pair takes */
 export const pairBigs = (m: PairMode) => (m === "separate" ? 2 : m === "off" ? 0 : 1);
+/** How long after a change of source the stream info names the one that
+ *  plays (the core switches at its next 200 ms tick, then opens the capture) */
+const SOURCE_SETTLE_MS = 1500;
 /** BIGs the ASUS BT600 runs at most (a third: LE Create BIG 0x0D) */
 export const MAX_BIGS = 2;
 
@@ -146,10 +149,29 @@ export function Auracast() {
 
   const locked = () => live() || s.asking();
   /** The source: the running broadcast switches to it in place */
-  const changeSource = (source: Source) => {
+  const changeSource = async (source: Source) => {
+    const before = choices().source;
     set({ source });
-    if (live()) void app.run(() => core.request("auracast.set_source", { source }));
+    if (!live()) return;
+    let taken = false;
+    await app.run(async () => {
+      taken = await core.request("auracast.set_source", { source });
+    });
+    if (!taken) {
+      // Not taken (a start or stop under way): the broadcast keeps its source
+      if (choices().source === source) set({ source: before });
+      return;
+    }
+    // A source that cannot be captured: the broadcast goes on with the one
+    // before, which its stream info then still names
+    setTimeout(() => {
+      const playing = stream().info?.source?.kind;
+      if (live() && choices().source === source && playing !== source && (playing === "tone" || playing === "loopback"))
+        set({ source: playing });
+    }, SOURCE_SETTLE_MS);
   };
+  /** While its broadcasts come up the source cannot change yet */
+  const sourceLocked = () => s.asking() || (live() && stream().state !== "streaming");
   const rateOptions = (): [Quality, string][] => [
     ["hq", t("ui.dev.auracast_48")],
     ["sq", t("ui.dev.auracast_24")],
@@ -236,7 +258,7 @@ export function Auracast() {
         <Choice<Source>
           label={t("receiver.source")}
           value={choices().source}
-          disabled={s.asking()}
+          disabled={sourceLocked()}
           options={[
             ["tone", t("receiver.source_tone")],
             ["loopback", t("receiver.source_system")],

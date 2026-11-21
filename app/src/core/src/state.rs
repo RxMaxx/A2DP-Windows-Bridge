@@ -2834,12 +2834,15 @@ impl CoreState {
         Ok(())
     }
 
+    /// Error developer.off while developer mode is off
+    fn developer_only(&self) -> Result<(), ErrorInfo> {
+        if self.service.settings().debug_mode { Ok(()) } else { Err(err("developer.off", "ipc.error.developer_only")) }
+    }
+
     /// stream.start_broadcast (developer mode)
     pub fn start_broadcast(&self, b: &BroadcastStream) -> Result<(), ErrorInfo> {
+        self.developer_only()?;
         let settings = self.service.settings();
-        if !settings.debug_mode {
-            return Err(err("developer.off", "ipc.error.developer_only"));
-        }
         let mut req = broadcast_request(b, settings.legacy_max_media_payload())?;
         req.mute_output = settings.mutes_output();
         tracing::info!("broadcast \"{}\": quality {}, source {}", b.name, b.quality, req.source);
@@ -3594,6 +3597,7 @@ impl CoreState {
                 Ok(Value::Null)
             }
             Method::AuracastSetSource { source } => {
+                self.developer_only()?;
                 let source = match source.trim().to_ascii_lowercase().as_str() {
                     "tone" => bluecaster_core::stream::SourceRequest::TestTone,
                     "" | "loopback" => bluecaster_core::stream::SourceRequest::SystemLoopback,
@@ -3608,9 +3612,11 @@ impl CoreState {
                 Ok(Value::Bool(self.service.change_source(source)))
             }
             Method::AuracastMixGet { channels, rear } => {
+                self.developer_only()?;
                 Ok(json(&bluecaster_core::auracast_mix::state(&self.config_dir(), channels, rear)))
             }
             Method::AuracastMixSet { mix, channels, rear } => {
+                self.developer_only()?;
                 let dir = self.config_dir();
                 bluecaster_core::auracast_mix::set(&dir, &mix).map_err(|e| {
                     tracing::warn!("Auracast mixer: not saved: {e}");
@@ -3619,6 +3625,7 @@ impl CoreState {
                 Ok(json(&bluecaster_core::auracast_mix::state(&dir, channels, rear)))
             }
             Method::AuracastMixPresetSave { name, mix } => {
+                self.developer_only()?;
                 let dir = self.config_dir();
                 bluecaster_core::auracast_mix::save_preset(&dir, &name, &mix).map_err(|e| {
                     tracing::warn!("Auracast mixer: preset not saved: {e}");
@@ -3627,6 +3634,7 @@ impl CoreState {
                 Ok(json(&bluecaster_core::auracast_mix::state(&dir, None, None)))
             }
             Method::AuracastMixPresetDelete { name } => {
+                self.developer_only()?;
                 let dir = self.config_dir();
                 bluecaster_core::auracast_mix::delete_preset(&dir, &name).map_err(|e| {
                     tracing::warn!("Auracast mixer: preset not deleted: {e}");

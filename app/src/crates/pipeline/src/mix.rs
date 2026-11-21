@@ -116,11 +116,33 @@ pub fn input_columns(channels: usize, mask: u32) -> [Option<usize>; MAX_INPUT] {
     std::array::from_fn(|i| if i < channels { speaker_column(sp[i]) } else { None })
 }
 
-/// The columns the source has
+/// The interleaved input channels that are the back centre speaker (6.1):
+/// it has no column of its own and plays as the back left and right, at
+/// -3 dB in each (as [`crate::le::speaker_matrix`] sends it to both rears)
+pub fn back_center_inputs(channels: usize, mask: u32) -> [bool; MAX_INPUT] {
+    let sp = speakers(channels, mask);
+    std::array::from_fn(|i| i < channels && sp[i] == BACK_CENTER)
+}
+
+/// The speakers of the source that no column takes (they are not heard):
+/// their mask bits
+pub fn unused_speakers(channels: usize, mask: u32) -> u32 {
+    let sp = speakers(channels, mask);
+    sp.iter()
+        .take(channels)
+        .filter(|&&bit| bit != 0 && bit != BACK_CENTER && speaker_column(bit).is_none())
+        .fold(0, |all, bit| all | bit)
+}
+
+/// The columns the source has (a back centre speaker counts as the back
+/// left and right)
 pub fn present_columns(channels: usize, mask: u32) -> [bool; INPUTS] {
     let mut present = [false; INPUTS];
     for c in input_columns(channels, mask).into_iter().flatten() {
         present[c] = true;
+    }
+    if back_center_inputs(channels, mask).contains(&true) {
+        (present[4], present[5]) = (true, true);
     }
     present
 }
@@ -257,6 +279,8 @@ pub struct Mixer {
     mask: u32,
     rear_out: bool,
     columns: [Option<usize>; MAX_INPUT],
+    /// The input channels that are the back centre speaker
+    back_center: [bool; MAX_INPUT],
     rate: f32,
     /// Per lane, the gain of each interleaved input channel
     gains: [[f32; MAX_INPUT]; LANES],
@@ -274,6 +298,10 @@ impl Mixer {
     /// (Hz), a stream with or without rear outputs. Allocates.
     pub fn new(handle: MixHandle, channels: usize, mask: u32, rear_out: bool, rate: u32) -> Mixer {
         let cap = (f64::from(MAX_DELAY_MS) / 1000.0 * f64::from(rate.max(1))).ceil() as usize + 2;
+        let unused = unused_speakers(channels, mask);
+        if unused != 0 {
+            tracing::warn!("Auracast mixer: no column for the source's speakers 0x{unused:x}, they are not heard");
+        }
         let mut m = Mixer {
             handle,
             seen: u64::MAX,
@@ -281,6 +309,7 @@ impl Mixer {
             mask,
             rear_out,
             columns: input_columns(channels, mask),
+            back_center: back_center_inputs(channels, mask),
             rate: rate.max(1) as f32,
             gains: [[0.0; MAX_INPUT]; LANES],
             delay: [0.0; LANES],
@@ -303,8 +332,8 @@ impl Mixer {
         self.seen = version;
         let m = effective_matrix(self.channels, self.mask, self.rear_out, &s);
         for (lane, row) in self.gains.iter_mut().zip(&m) {
-            for (g, col) in lane.iter_mut().zip(&self.columns) {
-                *g = col.map_or(0.0, |c| row[c]);
+            for ((g, col), back_center) in lane.iter_mut().zip(&self.columns).zip(self.back_center) {
+                *g = if back_center { MINUS_3DB * (row[4] + row[5]) } else { col.map_or(0.0, |c| row[c]) };
             }
         }
         for l in 0..LANES {
@@ -412,6 +441,30 @@ mod tests {
         assert_eq!(m[0][1], 1.0);
         assert_eq!(m[3][7], 0.0);
         assert_eq!(present_columns(6, 0x60F), [true, true, true, true, false, false, true, true]);
+    }
+
+    #[test]
+    fn a_back_center_speaker_plays_as_the_back_left_and_right() {
+        // 6.1: FL FR FC LFE BC SL SR
+        let mask = 0x70F;
+        assert_eq!(present_columns(7, mask), [true, true, true, true, true, true, true, true]);
+        assert_eq!(back_center_inputs(7, mask)[..7], [false, false, false, false, true, false, false]);
+        assert_eq!(unused_speakers(7, mask), 0);
+        let mx = Mixer::new(MixHandle::default(), 7, mask, true, 48000);
+        // The back centre alone: on both rears, -3 dB for being split and
+        // -3 dB more beside the sides
+        let out = mx.apply(&[0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        assert_eq!((out[0], out[1]), (0.0, 0.0));
+        assert!(close(out[2], 0.5) && close(out[3], 0.5), "{out:?}");
+        // The side left: the rear left only
+        let out = mx.apply(&[0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+        assert!(close(out[2], MINUS_3DB) && out[3] == 0.0, "{out:?}");
+        // Without rear outputs: folded into both fronts
+        let mx = Mixer::new(MixHandle::default(), 7, mask, false, 48000);
+        let out = mx.apply(&[0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        assert!(close(out[0], 0.5) && close(out[1], 0.5) && out[2] == 0.0, "{out:?}");
+        // A top speaker has no column
+        assert_eq!(unused_speakers(3, 0x1003), 0x1000);
     }
 
     #[test]

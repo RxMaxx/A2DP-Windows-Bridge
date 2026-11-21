@@ -1017,7 +1017,11 @@ fn run_broadcast(inner: &Arc<Inner>, req: StreamRequest) {
                 Err(e) => {
                     tracing::error!("Auracast: audio capture of the new source: {e}");
                     match LeAudioPath::start(&source, &started, host.stats().clone(), mix.clone()) {
-                        Ok(a) => audio = a,
+                        Ok(a) => {
+                            audio = a;
+                            // The request says the new source: back to this one
+                            inner.keep_source(source.clone());
+                        }
                         Err(e) => {
                             tracing::error!("Auracast: audio capture of the old source again: {e}");
                             capture_failed = true;

@@ -2028,6 +2028,8 @@ pub enum Method {
     MediaEqPreview { name: String, eq: MediaEq },
     #[serde(rename = "profile.set_active")]
     ProfileSetActive { name: String },
+    /// The auracast.* methods: error developer.off while developer mode is
+    /// off.
     /// -> AuracastMixState: for the broadcast running, else a source of
     /// `channels` (default 8) and rear outputs `rear` (default true)
     #[serde(rename = "auracast.mix")]
@@ -2050,7 +2052,8 @@ pub enum Method {
         #[serde(default)]
         rear: Option<bool>,
     },
-    /// -> AuracastMixState
+    /// -> AuracastMixState; a built-in preset's name is refused
+    /// (auracast.mix_save_failed)
     #[serde(rename = "auracast.mix_preset_save")]
     AuracastMixPresetSave { name: String, mix: AuracastMix },
     /// -> AuracastMixState

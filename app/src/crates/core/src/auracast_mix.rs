@@ -31,6 +31,10 @@ pub struct Live {
 
 static HANDLE: LazyLock<MixHandle> = LazyLock::new(|| {
     let h = MixHandle::default();
+    // Tests keep to their own folders: the defaults
+    if cfg!(test) {
+        return h;
+    }
     let file = load(&crate::paths::config_dir());
     if let Some(m) = &file.current {
         h.set(settings(m));
@@ -57,10 +61,17 @@ fn file_path(dir: &Path) -> std::path::PathBuf {
     crate::paths::auracast_mix_file(dir)
 }
 
+/// A file that cannot be read is put aside as auracast_mix.json.bad, so the
+/// next save does not write over the presets in it
 fn load(dir: &Path) -> MixFile {
-    match std::fs::read_to_string(file_path(dir)) {
+    let path = file_path(dir);
+    match std::fs::read_to_string(&path) {
         Ok(t) => serde_json::from_str(&t).unwrap_or_else(|e| {
-            tracing::warn!("Auracast mixer: {} not read ({e})", file_path(dir).display());
+            let aside = path.with_extension("json.bad");
+            match std::fs::rename(&path, &aside) {
+                Ok(()) => tracing::warn!("Auracast mixer: settings not read ({e}), kept as auracast_mix.json.bad"),
+                Err(io) => tracing::warn!("Auracast mixer: settings not read ({e}) and not put aside ({io})"),
+            }
             MixFile::default()
         }),
         Err(_) => MixFile::default(),
@@ -180,6 +191,11 @@ pub fn save_preset(dir: &Path, name: &str, m: &AuracastMix) -> std::io::Result<(
     if name.is_empty() {
         return Err(std::io::Error::other("no name"));
     }
+    // The built-in ones go by these names: one saved under such a name
+    // could not be chosen or deleted
+    if builtin_presets().iter().any(|p| p.name == name) {
+        return Err(std::io::Error::other("the name of a built-in preset"));
+    }
     let mut file = load(dir);
     let mix = to_ipc(&settings(m));
     match file.presets.iter_mut().find(|p| p.name == name) {
@@ -234,6 +250,20 @@ mod tests {
         assert!(!st.rear);
         delete_preset(&dir, "Room").unwrap();
         assert!(state(&dir, None, None).presets.iter().all(|p| p.builtin));
+        // Not under a built-in preset's name
+        assert!(save_preset(&dir, "standard", &m).is_err());
+        assert!(state(&dir, None, None).presets.iter().all(|p| p.builtin));
+        // A file that cannot be read is kept aside, not written over
+        save_preset(&dir, "Room", &m).unwrap();
+        let path = crate::paths::auracast_mix_file(&dir);
+        let saved = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, &saved[..saved.len() / 2]).unwrap();
+        save_preset(&dir, "Other", &m).unwrap();
+        let aside = std::fs::read_to_string(path.with_extension("json.bad")).unwrap();
+        assert_eq!(aside, saved[..saved.len() / 2]);
+        let names: Vec<_> =
+            state(&dir, None, None).presets.into_iter().filter(|p| !p.builtin).map(|p| p.name).collect();
+        assert_eq!(names, ["Other"]);
         std::fs::remove_dir_all(&dir).ok();
     }
 

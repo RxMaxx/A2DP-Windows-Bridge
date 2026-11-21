@@ -106,6 +106,11 @@ export function AuracastMixer(props: { rear: boolean; live: boolean; children?: 
     });
   };
   const selected = () => state()?.presets.find((p) => p.name === preset());
+  /** A name, and not a built-in preset's (the core refuses those) */
+  const canSave = () => {
+    const name = presetName().trim();
+    return name !== "" && !state()?.presets.some((p) => p.builtin && p.name === name);
+  };
   const deletePreset = async () => {
     const name = preset();
     await app.run(async () => {
@@ -148,7 +153,7 @@ export function AuracastMixer(props: { rear: boolean; live: boolean; children?: 
               aria-label={t("ui.dev.auracast_mix_preset_name")}
               onInput={(e) => setPresetName(e.currentTarget.value)}
             />
-            <Button icon="checkmark" disabled={presetName().trim() === ""} onClick={savePreset}>
+            <Button icon="checkmark" disabled={!canSave()} onClick={savePreset}>
               {t("ui.dev.auracast_mix_save")}
             </Button>
             <Show when={selected() && !selected()!.builtin}>

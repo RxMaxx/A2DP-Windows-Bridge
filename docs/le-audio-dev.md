@@ -605,8 +605,9 @@ it.
 - core `le_stream::run_broadcast`: no device; capture as for unicast.
 - Layouts (`le_audio::broadcast::BroadcastLayout`; `--auracast-layout`,
   the Auracast tab's channel choice, `stream.start_broadcast`'s `layout`):
-  stereo, mono, split, quad, front_rear. Below: split first, then the
-  speaker layouts built on it.
+  stereo, mono, split and `matrix_<front>_<rear>` (older names for some of
+  those: quad, front_rear, pairs, rear_subgroups, subgroups). Below: split
+  first, then the matrix layouts built on it.
 - Split (`--auracast-split`, the Auracast tab's "Left / right separately",
   layout `split`): left and right as two broadcasts of
   their own, "<name> L" and "<name> R" (Broadcast_ID + 1 for R), each an
@@ -633,26 +634,26 @@ it.
   `--auracast-split` is an argument error, and `stream.start_broadcast` with
   both `mono` and `split` true is refused as a bad request
   (`stream.bad_channels`).
-- Quad (layout `quad`, the tab's "4 speakers"): the four speakers of a
+- Quad (layout `quad`, `matrix_separate_separate`): the four speakers of a
   multichannel source, each a mono broadcast of its own, "<name> FL" /
   "FR" / "RL" / "RR" (BIG 0-3, SID 1-4, all four shim slots). Front +
   rear (`front_rear`): the front as one stereo broadcast "<name> Front"
   (two BIS, Front Left / Right) and the rear as two mono ones. The plan
-  marks the rear BIS `ChannelSource::RearLeft` / `RearRight`; a plan with
-  those makes the LE encoder take the speakers instead of the stereo
-  downmix: `audio_capture::Capture::channel_mask` (the mix format's
-  dwChannelMask) goes through `LePipelineConfig::channel_mask` to
-  `pipeline::le::speaker_matrix`, which maps the interleaved channels by
-  their mask bits to four lanes: front left / right (FL / FR, the centre at
-  -3 dB and the LFE at -6 dB in both, as the downmix) and rear left / right
-  (back and side, -3 dB each when a source has both, as 7.1). No mask, or
-  one that does not fit the channel count: the usual mask of the count. A
-  source without rear speakers (stereo) plays its front on the rear too.
-  The EQ runs on all four lanes. More than two BIS: RTN 2 instead of the
-  presets' 4 (`RTN_MANY_BIS`; four BIS at RTN 4 and their advertising
-  hardly fit a 10 ms interval). All broadcasts share one preset (one LC3
-  configuration in the encoder): mixed rates, e.g. 48 kHz front and 24 kHz
-  rear, need a preset per broadcast and are not done. Source: an output
+  marks the rear BIS `ChannelSource::RearLeft` / `RearRight`. The encoder
+  then takes the source's speakers instead of the stereo downmix:
+  `audio_capture::Capture::channel_mask` (the mix format's dwChannelMask)
+  goes through `LePipelineConfig::channel_mask`, and the interleaved
+  channels are mapped by their mask bits to four lanes, front left / right
+  and rear left / right. A matrix layout gets the lanes from the matrix
+  mixer (below); `pipeline::le::speaker_matrix` is the fixed mapping of a
+  plan with rear channels and no mixer (the centre at -3 dB and the LFE at
+  -6 dB in both fronts, back and side in the rear, -3 dB each when a source
+  has both). No mask, or one that does not fit the channel count: the usual
+  mask of the count. A source without rear speakers (stereo) plays its
+  front on the rear too. The EQ runs on all four lanes. More than two BIS:
+  RTN 2 instead of the presets' 4 (`RTN_MANY_BIS`; four BIS at RTN 4 and
+  their advertising hardly fit a 10 ms interval). The rear may run at
+  another preset than the front (see "Matrix mixer"). Source: an output
   device set to 5.1 / 7.1 (e.g. VB-Audio Hi-Fi Cable, its speaker setup in
   the Windows sound settings) as the default output, captured as the
   system audio (the tab's source), or chosen as the virtual / output device.
@@ -662,7 +663,7 @@ it.
   (layout `pairs`, "<name> Front" / "<name> Rear", two stereo broadcasts:
   four BIS in two BIGs) tells whether the limit is two BIGs or two BIS.
   It started at 24 and 48 kHz: the limit is two BIGs.
-- Rear subgroups (layout `rear_subgroups`, branch feat/auracast-subgroups):
+- Rear subgroups (layout `rear_subgroups`):
   the front in stereo, the rear as one broadcast "<name> Rear" whose BASE
   has two subgroups of one mono BIS each, labelled by Program_Info (0x03)
   "Rear left" / "Rear right", as multi-language broadcasts offer their
@@ -689,9 +690,15 @@ emulated controllers; `le_audio/broadcast_sink.py`: a Bumble host as the
 broadcast sink, parsing the announcements and the BASE with Bumble's own
 code). Checked by hand on 2026-11-05: open (all SDUs on both BIS, no late
 SDU), encrypted with the right code (synced) and a wrong one (MIC failure,
-no audio), mono 24_2_2. Not done yet: `run_test.py` cases and
-`bluecaster_decode` support for BIS (the decoder change in `tools/a2dp_decode`
-is unfinished).
+no audio), mono 24_2_2. `run_test.py --auracast` runs the cases in
+`le_audio_tests/auracast.py`: stereo, mono, encrypted, split, the matrix
+layouts, and a rear at its own rate (`--auracast-rear-preset`). Each
+broadcast gets its own sink (`--layout auracast --follow <suffix> ...`).
+The cases check BlueCaster's log and the sinks' log: names, Broadcast_IDs,
+BASE, the requested BIGs, and the SDUs of every BIS (count, length,
+sequence, left differs from right). Not done yet: `bluecaster_decode`
+support for BIS (the decoder change in `tools/a2dp_decode` is unfinished),
+so the cases do not decode the audio.
 `--layout auracast-split` starts two sinks, one following "<name> L" and
 one "<name> R" (for `--auracast-split`). Checked by hand on 2026-11-21: both
 BIGs up, each sink got every SDU of its BIS; a refused LE Create BIG for

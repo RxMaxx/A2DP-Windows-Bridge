@@ -535,6 +535,10 @@ pub(crate) struct Inner {
     turned_off: AtomicBool,
     /// The source the running A2DP session changes to at its next tick
     source_change: Mutex<Option<SourceRequest>>,
+    /// The source a broadcast went on with after the one it was changed to
+    /// could not be captured: the request is put back to it
+    /// ([`Service::change_source`], [`Service::restart_adapter`])
+    source_kept: Mutex<Option<SourceRequest>>,
     /// Other bitpools for the session to take in place
     /// ([`Service::change_bitpools`])
     bitpool_change: Mutex<Option<stream::Bitpools>>,
@@ -571,6 +575,12 @@ impl Inner {
 
     pub fn take_source_change(&self) -> Option<SourceRequest> {
         self.source_change.lock().unwrap_or_else(|e| e.into_inner()).take()
+    }
+
+    /// The session could not capture the source it was changed to and plays
+    /// `source` again
+    pub fn keep_source(&self, source: SourceRequest) {
+        *self.source_kept.lock().unwrap_or_else(|e| e.into_inner()) = Some(source);
     }
 
     pub fn take_bitpool_change(&self) -> Option<stream::Bitpools> {
@@ -1365,6 +1375,7 @@ impl Service {
             waiting: AtomicBool::new(false),
             turned_off: AtomicBool::new(false),
             source_change: Mutex::new(None),
+            source_kept: Mutex::new(None),
             bitpool_change: Mutex::new(None),
             unlisted_keeps: Mutex::new(None),
         });
@@ -1542,6 +1553,7 @@ impl Service {
         if !self.is_running() || self.state() != StreamState::Streaming {
             return false;
         }
+        self.follow_kept_source();
         match self.last_request.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
             Some(req) if req.le.is_none() => req.source = source.clone(),
             Some(req)
@@ -1555,6 +1567,16 @@ impl Service {
         *self.inner.source_change.lock().unwrap_or_else(|e| e.into_inner()) = Some(source);
         self.inner.tick.1.notify_all();
         true
+    }
+
+    /// A change of source the session could not make
+    /// ([`Inner::keep_source`]): the request names the source that plays
+    fn follow_kept_source(&self) {
+        let kept = self.inner.source_kept.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let (Some(source), Some(req)) = (kept, self.last_request.lock().unwrap_or_else(|e| e.into_inner()).as_mut())
+        {
+            req.source = source;
+        }
     }
 
     /// Headset mode off, on or auto, its output and the best call codec
@@ -1799,6 +1821,7 @@ impl Service {
     /// Disconnect, and not when the headphones were turned off: a session
     /// that waits for them just ends (issue #86).
     pub fn restart_adapter(&self) -> Option<StreamRequest> {
+        self.follow_kept_source();
         let last = self.last_request.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let again = reconnect_after_restart(
             self.is_running() && self.inner.stop_requested(),
@@ -2535,6 +2558,12 @@ mod tests {
         assert!(!s.change_source(SourceRequest::Application { exe: "a.exe".into() }));
         assert!(s.change_source(tone()));
         assert_eq!(s.inner.take_source_change(), Some(tone()));
+        // The broadcast could not capture it and kept the old source: so
+        // does the request
+        s.inner.keep_source(SourceRequest::SystemLoopback);
+        s.follow_kept_source();
+        let kept = s.last_request.lock().unwrap().as_ref().map(|r| r.source.clone());
+        assert_eq!(kept, Some(SourceRequest::SystemLoopback));
         // A start or stop under way
         *s.last_request.lock().unwrap() = Some(request());
         let control = s.control.lock().unwrap();

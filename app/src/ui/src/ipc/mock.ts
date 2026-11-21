@@ -1798,8 +1798,13 @@ export class MockCore implements Transport {
           console.info("[mock] tray balloon: tray.minimized_hint");
         }
         return null;
-      case "auracast.set_source":
-        return this.snap.stream.state === "streaming";
+      case "auracast.set_source": {
+        const st = this.snap.stream;
+        if (st.state !== "streaming" || !st.info) return false;
+        st.info = { ...st.info, source: sourceOf(String(p.source), "", "") };
+        this.emit({ kind: "stream", value: st });
+        return true;
+      }
       // The mixer: kept here, its matrix as set (no automatic one)
       case "auracast.mix":
         return this.mixState();
