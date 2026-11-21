@@ -1913,12 +1913,12 @@ impl UnicastEnv for LeCtx<'_> {
         self.core.shared.iso_buffers().1
     }
 
-    fn start_sending(&mut self, cis_handles: &[u16], queue_share: u8, frame_us: u32) {
+    fn start_sending(&mut self, cis_handles: &[u16], queue_share: u8, frame_us: u32, max_latency_ms: u16) {
         let queue = self.core.queue.get_or_insert_with(|| Arc::new(Mutex::new(SduQueue::new()))).clone();
         tracing::debug!(
             "LE Audio: start sending on CIS {cis_handles:04X?}, up to {queue_share} queued per CIS, frame {frame_us} us"
         );
-        self.core.iso.start(self.stack, cis_handles, queue, frame_us, queue_share);
+        self.core.iso.start(self.stack, cis_handles, queue, frame_us, queue_share, max_latency_ms);
     }
 
     fn stop_sending(&mut self) {
