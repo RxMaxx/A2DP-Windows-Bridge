@@ -586,6 +586,42 @@ fn le_audio_now(running: Option<bool>, adapters: &[AdapterInfo]) -> Option<bool>
     running.or_else(|| adapters.iter().find(|a| a.driver == DriverKind::Winusb).and_then(|a| a.le_audio))
 }
 
+/// The adapter in use (AdapterState::active) from its entry in the list:
+/// the one on WinUSB if two have this VID:PID. One not listed (yet) gets
+/// what its VID:PID tells.
+fn active_adapter(vid: u16, pid: u16, adapters: &[AdapterInfo]) -> ipc::ActiveAdapter {
+    let same = |a: &&AdapterInfo| a.vid == vid && a.pid == pid;
+    let listed =
+        adapters.iter().filter(same).find(|a| a.driver == DriverKind::Winusb).or_else(|| adapters.iter().find(same));
+    let realtek_driver_chip = || bt_host::realtek_btnic::chip(vid, pid).map(|(chip, _)| chip.to_owned());
+    match listed {
+        Some(a) => ipc::ActiveAdapter {
+            display_name: a.display_name.clone(),
+            windows_name: a.windows_name.clone(),
+            vid,
+            pid,
+            vendor: a.vendor.clone(),
+            chip: a
+                .realtek_chip
+                .clone()
+                .or_else(|| (a.vendor == ChipVendor::Realtek.name()).then(realtek_driver_chip).flatten()),
+            bt_version: a.bt_version.clone(),
+        },
+        None => {
+            let vendor = chips::vendor_for_usb(vid, pid, None);
+            ipc::ActiveAdapter {
+                display_name: chips::display_name(vid, pid, None, vendor),
+                windows_name: None,
+                vid,
+                pid,
+                vendor: vendor.name().to_owned(),
+                chip: (vendor == ChipVendor::Realtek).then(realtek_driver_chip).flatten(),
+                bt_version: None,
+            }
+        }
+    }
+}
+
 /// The Realtek chip (PID, firmware stem) whose files an adapter's card
 /// reports on. The chip setting is one for all adapters, so an adapter of
 /// another known vendor (MediaTek, Intel, ...) gets none, else it showed the
@@ -1895,6 +1931,7 @@ impl CoreState {
                 rom_firmware: false,
                 hung,
                 loader: None,
+                active: None,
             },
             devices: saved_devices(&dir, &[], &service.device_codecs()),
             scanning: false,
@@ -2011,6 +2048,7 @@ impl CoreState {
                 | Event::Receiver(_)
                 | Event::RfcommData(_)
                 | Event::RfcommClosed(_)
+                | Event::MediaButton(_)
                 | Event::Bye => {
                     let _ = self.events.send((g.0, Arc::new(event)));
                     return;
@@ -2306,6 +2344,18 @@ impl CoreState {
             }
             ServiceEvent::LeSetLearned => {
                 self.merge_le_sets();
+                return;
+            }
+            // The adapter a stack opened, or none any more
+            ServiceEvent::Adapter(ids) => {
+                let active = ids.map(|(vid, pid)| active_adapter(vid, pid, &s.adapter.adapters));
+                if active != s.adapter.active {
+                    self.publish(Event::Adapter(AdapterState { active, ..s.adapter }));
+                }
+                return;
+            }
+            ServiceEvent::Button(b) => {
+                self.publish(Event::MediaButton(b));
                 return;
             }
             // Another saved device connected while the one streamed was off
@@ -2642,7 +2692,16 @@ impl CoreState {
         warn_invalid_firmware(&paths::firmware_dir(&self.config_dir()), &change.invalid);
         let le_audio = le_audio_now(self.service.le_audio_supported(), &list);
         let other_radio = other_radio(&list);
-        self.publish(Event::Adapter(AdapterState { adapters: list.clone(), le_audio, other_radio, hung, ..s.adapter }));
+        // What the new list tells about the adapter in use
+        let active = s.adapter.active.as_ref().map(|a| active_adapter(a.vid, a.pid, &list));
+        self.publish(Event::Adapter(AdapterState {
+            adapters: list.clone(),
+            le_audio,
+            other_radio,
+            hung,
+            active,
+            ..s.adapter
+        }));
         (list, change.fixed)
     }
 
@@ -6302,5 +6361,71 @@ mod tests {
         assert_eq!(s.len(), 15);
         assert_eq!(&s[8..9], "_");
         assert!(s.bytes().enumerate().all(|(i, b)| i == 8 || b.is_ascii_digit()));
+    }
+
+    #[test]
+    fn the_adapter_in_use_comes_from_its_list_entry() {
+        let mut windows = rtl(r"USB\VID_0BDA&PID_8771\1", Some(true), None);
+        windows.driver = DriverKind::Bluetooth;
+        windows.display_name = "the one Windows has".into();
+        let mut ours = rtl(r"USB\VID_0BDA&PID_8771\2", Some(true), None);
+        ours.windows_name = Some("TP-Link UB500 Adapter".into());
+        ours.bt_version = Some("5.1".into());
+        ours.address = Some("00:11:22:33:44:55".into());
+        let a = active_adapter(0x0BDA, 0x8771, &[windows, ours]);
+        assert_eq!(
+            a,
+            ipc::ActiveAdapter {
+                display_name: "RTL8761BU".into(),
+                windows_name: Some("TP-Link UB500 Adapter".into()),
+                vid: 0x0BDA,
+                pid: 0x8771,
+                vendor: "Realtek".into(),
+                chip: Some("RTL8761BU".into()),
+                bt_version: Some("5.1".into()),
+            }
+        );
+        // Neither the address nor the instance ID reaches it
+        let json = serde_json::to_string(&a).unwrap();
+        assert!(!json.contains("00:11:22") && !json.contains("VID_0BDA"), "{json}");
+        // Not listed: what its VID:PID tells
+        let intel = active_adapter(0x8087, 0x0033, &[]);
+        assert_eq!((intel.vendor.as_str(), intel.chip, intel.windows_name), ("Intel", None, None));
+        assert!(intel.display_name.contains("0x8087:0x0033"), "{}", intel.display_name);
+    }
+
+    #[test]
+    fn adapter_and_button_events_reach_the_clients() {
+        let dir = std::env::temp_dir().join(format!("bluecaster-state-adapter-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let state = state_in(&dir);
+        let mut events = state.subscribe();
+        let rev = state.rev();
+        state.on_service_event(ServiceEvent::Adapter(Some((0x0BDA, 0x8771))));
+        let active = state.snapshot().1.adapter.active.expect("an adapter in use");
+        assert_eq!((active.vid, active.pid, active.vendor.as_str()), (0x0BDA, 0x8771, "Realtek"));
+        assert_eq!(state.rev(), rev + 1);
+        // The same again: nothing new
+        state.on_service_event(ServiceEvent::Adapter(Some((0x0BDA, 0x8771))));
+        assert_eq!(state.rev(), rev + 1);
+        // A button: an event without a revision of its own
+        let press = ipc::ButtonPress { button: ipc::MediaButton::Next, pressed: true, le_audio: false };
+        state.on_service_event(ServiceEvent::Button(press));
+        assert_eq!(state.rev(), rev + 1);
+        state.on_service_event(ServiceEvent::Adapter(None));
+        assert_eq!(state.snapshot().1.adapter.active, None);
+        let got: Vec<(u64, Event)> =
+            std::iter::from_fn(|| events.try_recv().ok()).map(|(r, e)| (r, (*e).clone())).collect();
+        assert!(matches!(&got[0], (r, Event::Adapter(a)) if *r == rev + 1 && a.active.is_some()));
+        assert_eq!(got[1], (rev + 1, Event::MediaButton(press)));
+        assert!(matches!(&got[2], (r, Event::Adapter(a)) if *r == rev + 2 && a.active.is_none()));
+        assert_eq!(got.len(), 3);
+        let json = serde_json::to_value(&got[1].1).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"kind": "media_button", "value": {"button": "next", "pressed": true, "le_audio": false}})
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

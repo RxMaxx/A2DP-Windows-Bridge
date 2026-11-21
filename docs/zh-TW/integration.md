@@ -95,9 +95,17 @@ sequenceDiagram
 
 `stream.state` 為 `idle`、`connecting`、`streaming`、`reconnecting`、`error` 之一；`stream.message` 以 [訊息鍵](#errors-and-messages) 說明原因。
 
+`adapter.active` 是 BlueCaster 正在使用的 USB 介面卡。沒有開啟任何介面卡時（第一次掃描或連線之前，以及藍牙重新啟動期間），其值為 `null`。
+
+```json
+"active": {"display_name": "RTL8761BU (0x2357:0x0604)", "windows_name": "TP-Link UB500 Adapter", "vid": 9047, "pid": 1540, "vendor": "Realtek", "chip": "RTL8761BU", "bt_version": "5.1"}
+```
+
+`vid` 和 `pid` 是數字。`windows_name`、`chip` 和 `bt_version` 可能為 `null`。只有 Realtek 介面卡才能得知 `chip`。
+
 每個用戶端不需訂閱就會收到狀態事件。只有在狀態改變時才會送出事件，因此連線可能很長一段時間都收不到任何訊息。
 
-**修訂編號。** 每個狀態事件都帶有下一個修訂編號（`rev` + 1）。編號出現缺漏，表示遺失了事件：請傳送 `state.snapshot` 取得新的快照。用戶端讀取太慢時，核心也會主動傳送新的 `snapshot`。非狀態事件（`link`、`log`、`receiver`、`rfcomm_data`、`rfcomm_closed`）帶有目前的修訂編號，但不會讓編號遞增。
+**修訂編號。** 每個狀態事件都帶有下一個修訂編號（`rev` + 1）。編號出現缺漏，表示遺失了事件：請傳送 `state.snapshot` 取得新的快照。用戶端讀取太慢時，核心也會主動傳送新的 `snapshot`。非狀態事件（`link`、`log`、`receiver`、`rfcomm_data`、`rfcomm_closed`、`media_button`）帶有目前的修訂編號，但不會讓編號遞增。
 
 核心關閉時，會傳送 `bye` 事件並關閉管道。
 
@@ -155,11 +163,25 @@ sequenceDiagram
 - `rfcomm.close {channel_id}` → `null`，會等到先前傳送的資料都送出後才回應；之後不會再收到 `rfcomm_closed`。
 - 管道連線結束時，通道也會關閉；通道也可能以 `rfcomm_closed` 事件 `{channel_id, reason}` 關閉：`remote`（裝置關閉了通道，或連結中斷）、`disconnected`（A2DP 連線結束）、`stopped`（藍牙堆疊停止）、`overflow`（用戶端有超過 1 MiB 的已接收資料未讀取）。
 
+## 耳機按鈕 {#headphone-buttons}
+
+`welcome.features` 包含 `"media_button"` 時可用。耳機上的按鈕按下或放開時，每個用戶端都會收到 `media_button` 事件。不需要訂閱。
+
+```json
+{"type": "event", "rev": 42, "event": {"kind": "media_button", "value": {"button": "play", "pressed": true, "le_audio": false}}}
+```
+
+- `button` 為 `play`、`pause`、`stop`、`next`、`previous`、`fast_forward`、`rewind`、`volume_up`、`volume_down`、`mute` 之一。其他按鈕不會回報。
+- 按下按鈕時 `pressed` 為 `true`，放開時為 `false`。LE Audio 耳機只會回報按下。
+- 事件來自 LE Audio 耳機時，`le_audio` 為 `true`。
+- 耳機會依照自己判斷的播放狀態傳送 `play` 或 `pause`，而這個判斷可能已經過時。如果只需要切換播放和暫停，請以相同方式處理兩者。
+- BlueCaster 仍會把播放/暫停、下一首、上一首和停止當成媒體鍵傳給 Windows。如果您的工具會自行處理按鈕，請引導使用者關閉 **音訊裝置 > 用音訊裝置的按鈕控制播放**。關閉這項設定後，事件仍會送達。
+
 ## 相容性 {#compatibility}
 
 - **功能。** 使用新增功能前，請先檢查 `welcome.features`。2.0.2-beta.10 之前的核心沒有這個欄位。
 - **未知的請求。** 核心無法解讀的請求（未知的方法、錯誤的參數）會以錯誤 `ipc.bad_request` 回應，連線會保持開啟。2.0.2-beta.10 之前的核心則會直接關閉連線。其他無法解讀的訊框都會關閉連線。
-- **新欄位。** 核心會陸續在狀態與事件中加入新欄位。請忽略不認得的欄位，不要因此拒絕訊息。
+- **新欄位。** 核心會陸續在狀態與事件中加入新欄位。請忽略不認得的欄位，不要因此拒絕訊息。事件種類也會以同樣的方式增加：遇到不認得的 `kind` 時，請略過該事件。
 - **3.0.0 的更名**（[#193](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/193)）：管道改為 `\\.\pipe\bluecaster-<SID>`。在 3.0.0 推出後至少 6 個月內，核心也會繼續以相同的通訊協定在 `\\.\pipe\a2dpwb-<SID>` 上接聽；移除前會先在發行說明中公告。請先嘗試 `bluecaster-<SID>`，失敗時再改用 `a2dpwb-<SID>`。核心的 mutex 改為 `Local\BlueCaster_Core`，同一期間內也會繼續持有 `Local\A2DPWB_v2_Core`，兩者的移除會一併公告。
 
 ## 範例 {#example}

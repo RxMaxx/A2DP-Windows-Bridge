@@ -94,9 +94,17 @@ A client needs no state of its own: it keeps the last snapshot and applies each 
 
 `stream.state` is one of `idle`, `connecting`, `streaming`, `reconnecting`, `error`; `stream.message` says why, as a [message key](#errors-and-messages).
 
+`adapter.active` is the USB adapter BlueCaster is using. The field is `null` while no adapter is open: before the first scan or connection, and while Bluetooth restarts.
+
+```json
+"active": {"display_name": "RTL8761BU (0x2357:0x0604)", "windows_name": "TP-Link UB500 Adapter", "vid": 9047, "pid": 1540, "vendor": "Realtek", "chip": "RTL8761BU", "bt_version": "5.1"}
+```
+
+`vid` and `pid` are numbers. `windows_name`, `chip` and `bt_version` can be `null`. `chip` is known only for Realtek adapters.
+
 Every client receives the state events without subscribing to them. An event is sent only when something changes, so a connection can stay quiet for a long time.
 
-**Revisions.** Every state event carries the next revision (`rev` + 1). A gap means an event was lost: send `state.snapshot` for a new one. If a client reads too slowly, the core also sends it a new `snapshot` unprompted. Non-state events (`link`, `log`, `receiver`, `rfcomm_data`, `rfcomm_closed`) carry the current revision and do not advance it.
+**Revisions.** Every state event carries the next revision (`rev` + 1). A gap means an event was lost: send `state.snapshot` for a new one. If a client reads too slowly, the core also sends it a new `snapshot` unprompted. Non-state events (`link`, `log`, `receiver`, `rfcomm_data`, `rfcomm_closed`, `media_button`) carry the current revision and do not advance it.
 
 When the core shuts down it sends the event `bye` and closes the pipe.
 
@@ -154,11 +162,25 @@ Available when `welcome.features` contains `"rfcomm"` (2.0.2-beta.10 and later).
 - `rfcomm.close {channel_id}` → `null`, once the data sent before it has gone out; no `rfcomm_closed` follows.
 - A channel also closes when the pipe connection ends, or with an `rfcomm_closed` event `{channel_id, reason}`: `remote` (the device closed it or the link went down), `disconnected` (the A2DP connection ended), `stopped` (the Bluetooth stack stopped), `overflow` (the client left more than 1 MiB of received data unread).
 
+## Headphone buttons
+
+Available when `welcome.features` contains `"media_button"`. Every client receives a `media_button` event when a button on the headphones is pressed or released. No subscription is needed.
+
+```json
+{"type": "event", "rev": 42, "event": {"kind": "media_button", "value": {"button": "play", "pressed": true, "le_audio": false}}}
+```
+
+- `button` is one of `play`, `pause`, `stop`, `next`, `previous`, `fast_forward`, `rewind`, `volume_up`, `volume_down`, `mute`. Other buttons are not reported.
+- `pressed` is `true` when the button is pressed and `false` when it is released. LE Audio headphones report only the press.
+- `le_audio` is `true` when the event came from LE Audio headphones.
+- Headphones send `play` or `pause` depending on whether they think audio is playing. That guess can be out of date. To toggle playback, treat both the same.
+- BlueCaster still passes play/pause, next, previous and stop to Windows as media keys. If your tool handles the buttons itself, ask the user to turn off **Audio Devices > Control playback with the audio device's buttons**. The events still arrive when that setting is off.
+
 ## Compatibility
 
 - **Features.** Check `welcome.features` before using an addition. Cores before 2.0.2-beta.10 leave the field out.
 - **Unknown requests.** A request the core cannot read (an unknown method, bad parameters) is answered with the error `ipc.bad_request`; the connection stays open. Cores before 2.0.2-beta.10 close the connection instead. Any other unreadable frame closes it.
-- **New fields.** The core adds fields to the state and to events over time. Ignore unknown fields; do not reject a message because of them.
+- **New fields.** The core adds fields to the state and to events over time. Ignore unknown fields; do not reject a message because of them. New event kinds are added the same way: skip an event whose `kind` you do not know.
 - **Rename in 3.0.0** ([#193](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/193)): the pipe becomes `\\.\pipe\bluecaster-<SID>`. The core keeps listening on `\\.\pipe\a2dpwb-<SID>` as well, with the same protocol, for at least 6 months after 3.0.0; its removal is announced in the release notes first. Try `bluecaster-<SID>` first and fall back to `a2dpwb-<SID>`. The core's mutex becomes `Local\BlueCaster_Core`; it keeps holding `Local\A2DPWB_v2_Core` as well for the same period, and both removals are announced together.
 
 ## Example

@@ -986,6 +986,15 @@ fn stream_session(
             Ok(ServiceEvent::Loader(_)) => {}
             // The set is kept with the saved device; merging is the UI core's
             Ok(ServiceEvent::LeSetLearned) => {}
+            // Over TCP there is no USB adapter to tell
+            Ok(ServiceEvent::Adapter(_)) => {}
+            // --ipc: the clients get the button
+            Ok(ServiceEvent::Button(b)) => {
+                outln!("Headphone button: {:?} {}", b.button, if b.pressed { "pressed" } else { "released" });
+                if let Some(state) = IPC_STATE.get() {
+                    state.on_service_event(ServiceEvent::Button(b));
+                }
+            }
             Ok(ServiceEvent::Voice(Some(v))) => outln!(
                 "Voice: {} at {} Hz, microphone to {}",
                 v.codec,
@@ -999,9 +1008,13 @@ fn stream_session(
     }
 }
 
+/// The state --ipc serves ([`serve_ipc`])
+static IPC_STATE: std::sync::OnceLock<Arc<crate::state::CoreState>> = std::sync::OnceLock::new();
+
 /// --ipc: the IPC pipe of this test instance, for the run (the emulator's
-/// RFCOMM passthrough case). The state the clients see is not kept up to
-/// date: the service's events stay with the command line.
+/// RFCOMM passthrough and button cases). The state the clients see is not
+/// kept up to date: the service's events stay with the command line, which
+/// passes on only the headphone buttons.
 fn serve_ipc(service: Arc<Service>) {
     let spawned = std::thread::Builder::new().name("ipc".into()).spawn(move || {
         let rt = match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
@@ -1013,6 +1026,7 @@ fn serve_ipc(service: Arc<Service>) {
             Err(e) => return eoutln!("cannot read the user SID: {e}"),
         };
         let state = crate::state::CoreState::new(service, Box::new(|_| {}), Box::new(|| {}), Box::new(|_| {}));
+        let _ = IPC_STATE.set(state.clone());
         let (name, old_name) = (ipc::pipe_name(&sid), ipc::old_pipe_name(&sid));
         outln!("IPC: serving the pipe of instance {}", ipc::instance_suffix().trim_start_matches('-'));
         if let Err(e) = rt.block_on(crate::server::serve(state, name, old_name)) {

@@ -95,9 +95,17 @@ Un client n'a pas besoin de gérer son propre état : il garde le dernier snapsh
 
 `stream.state` vaut `idle`, `connecting`, `streaming`, `reconnecting` ou `error` ; `stream.message` en donne la raison, sous forme de [clé de message](#errors-and-messages).
 
+`adapter.active` est l'adaptateur USB qu'utilise BlueCaster. Ce champ vaut `null` tant qu'aucun adaptateur n'est ouvert : avant la première recherche ou connexion, et pendant le redémarrage du Bluetooth.
+
+```json
+"active": {"display_name": "RTL8761BU (0x2357:0x0604)", "windows_name": "TP-Link UB500 Adapter", "vid": 9047, "pid": 1540, "vendor": "Realtek", "chip": "RTL8761BU", "bt_version": "5.1"}
+```
+
+`vid` et `pid` sont des nombres. `windows_name`, `chip` et `bt_version` peuvent valoir `null`. `chip` n'est connu que pour les adaptateurs Realtek.
+
 Chaque client reçoit les événements d'état sans s'y abonner. Un événement n'arrive que lorsque quelque chose change : une connexion peut donc rester longtemps sans rien recevoir.
 
-**Révisions.** Chaque événement d'état porte la révision suivante (`rev` + 1). Un écart signifie qu'un événement a été perdu : envoyez `state.snapshot` pour en obtenir un nouveau. Si un client lit trop lentement, le cœur lui envoie aussi de lui-même un nouveau `snapshot`. Les événements qui ne sont pas des états (`link`, `log`, `receiver`, `rfcomm_data`, `rfcomm_closed`) portent la révision actuelle et ne la font pas avancer.
+**Révisions.** Chaque événement d'état porte la révision suivante (`rev` + 1). Un écart signifie qu'un événement a été perdu : envoyez `state.snapshot` pour en obtenir un nouveau. Si un client lit trop lentement, le cœur lui envoie aussi de lui-même un nouveau `snapshot`. Les événements qui ne sont pas des états (`link`, `log`, `receiver`, `rfcomm_data`, `rfcomm_closed`, `media_button`) portent la révision actuelle et ne la font pas avancer.
 
 Quand le cœur s'arrête, il envoie l'événement `bye` et ferme le canal.
 
@@ -155,11 +163,25 @@ Disponible quand `welcome.features` contient `"rfcomm"` (2.0.2-beta.10 et ultér
 - `rfcomm.close {channel_id}` → `null`, une fois parties les données envoyées avant cette requête ; aucun `rfcomm_closed` ne suit.
 - Un canal se ferme aussi quand la connexion au canal nommé prend fin, ou avec un événement `rfcomm_closed` `{channel_id, reason}` : `remote` (l'appareil l'a fermé ou la liaison est tombée), `disconnected` (la connexion A2DP a pris fin), `stopped` (la pile Bluetooth s'est arrêtée), `overflow` (le client a laissé plus de 1 Mio de données reçues non lues).
 
+## Boutons du casque {#headphone-buttons}
+
+Disponible quand `welcome.features` contient `"media_button"`. Chaque fois qu'un bouton du casque est enfoncé ou relâché, tous les clients reçoivent un événement `media_button`. Aucun abonnement n'est nécessaire.
+
+```json
+{"type": "event", "rev": 42, "event": {"kind": "media_button", "value": {"button": "play", "pressed": true, "le_audio": false}}}
+```
+
+- `button` vaut `play`, `pause`, `stop`, `next`, `previous`, `fast_forward`, `rewind`, `volume_up`, `volume_down` ou `mute`. Les autres boutons ne sont pas signalés.
+- `pressed` vaut `true` quand le bouton est enfoncé et `false` quand il est relâché. Les casques LE Audio ne signalent que l'appui.
+- `le_audio` vaut `true` quand l'événement vient d'un casque LE Audio.
+- Les casques envoient `play` ou `pause` selon qu'ils pensent ou non qu'une lecture est en cours. Cette information peut être périmée. Pour basculer la lecture, traitez les deux de la même façon.
+- BlueCaster continue de transmettre lecture/pause, suivant, précédent et arrêt à Windows sous forme de touches multimédias. Si votre outil gère lui-même les boutons, demandez à l'utilisateur de désactiver **Périphériques audio > Contrôler la lecture avec les boutons de l'appareil audio**. Les événements arrivent aussi quand ce réglage est désactivé.
+
 ## Compatibilité {#compatibility}
 
 - **Fonctionnalités.** Vérifiez `welcome.features` avant d'utiliser un ajout. Les cœurs antérieurs à 2.0.2-beta.10 omettent ce champ.
 - **Requêtes inconnues.** Une requête que le cœur ne peut pas lire (méthode inconnue, paramètres incorrects) reçoit l'erreur `ipc.bad_request` ; la connexion reste ouverte. Les cœurs antérieurs à 2.0.2-beta.10 ferment plutôt la connexion. Toute autre trame illisible la ferme.
-- **Nouveaux champs.** Le cœur ajoute au fil du temps des champs à l'état et aux événements. Ignorez les champs que vous ne connaissez pas ; ne rejetez pas un message à cause d'eux.
+- **Nouveaux champs.** Le cœur ajoute au fil du temps des champs à l'état et aux événements. Ignorez les champs que vous ne connaissez pas ; ne rejetez pas un message à cause d'eux. De nouveaux types d'événement s'ajoutent aussi : ignorez un événement dont vous ne connaissez pas le `kind`.
 - **Changement de nom en 3.0.0** ([#193](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/193)) : le canal devient `\\.\pipe\bluecaster-<SID>`. Le cœur continue d'écouter aussi sur `\\.\pipe\a2dpwb-<SID>`, avec le même protocole, pendant au moins 6 mois après la 3.0.0 ; sa suppression sera annoncée au préalable dans les notes de version. Essayez d'abord `bluecaster-<SID>`, puis revenez à `a2dpwb-<SID>`. Le mutex du cœur devient `Local\BlueCaster_Core` ; le cœur détient aussi `Local\A2DPWB_v2_Core` pendant la même période, et les deux suppressions seront annoncées ensemble.
 
 ## Exemple {#example}
