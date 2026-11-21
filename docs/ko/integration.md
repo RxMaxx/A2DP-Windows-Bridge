@@ -95,9 +95,17 @@ sequenceDiagram
 
 `stream.state`는 `idle`, `connecting`, `streaming`, `reconnecting`, `error` 중 하나입니다. 그 이유는 `stream.message`에 [메시지 키](#errors-and-messages)로 들어 있습니다.
 
+`adapter.active`는 BlueCaster가 사용 중인 USB 어댑터입니다. 열린 어댑터가 없을 때(첫 검색이나 연결 전, Bluetooth를 다시 시작하는 중)는 `null`입니다.
+
+```json
+"active": {"display_name": "RTL8761BU (0x2357:0x0604)", "windows_name": "TP-Link UB500 Adapter", "vid": 9047, "pid": 1540, "vendor": "Realtek", "chip": "RTL8761BU", "bt_version": "5.1"}
+```
+
+`vid`와 `pid`는 숫자입니다. `windows_name`, `chip`, `bt_version`은 `null`일 수 있습니다. `chip`은 Realtek 어댑터에서만 알 수 있습니다.
+
 상태 이벤트는 구독하지 않아도 모든 클라이언트에 전달됩니다. 이벤트는 무언가 바뀔 때만 오므로, 오랫동안 아무것도 오지 않을 수 있습니다.
 
-**리비전.** 상태 이벤트에는 항상 다음 리비전(`rev` + 1)이 붙습니다. 번호가 건너뛰었다면 이벤트를 놓친 것이므로 `state.snapshot`을 보내 새 스냅샷을 받으세요. 클라이언트가 너무 느리게 읽으면 코어가 요청 없이도 새 `snapshot`을 보냅니다. 상태 이벤트가 아닌 이벤트(`link`, `log`, `receiver`, `rfcomm_data`, `rfcomm_closed`)에는 현재 리비전이 붙으며, 리비전을 올리지 않습니다.
+**리비전.** 상태 이벤트에는 항상 다음 리비전(`rev` + 1)이 붙습니다. 번호가 건너뛰었다면 이벤트를 놓친 것이므로 `state.snapshot`을 보내 새 스냅샷을 받으세요. 클라이언트가 너무 느리게 읽으면 코어가 요청 없이도 새 `snapshot`을 보냅니다. 상태 이벤트가 아닌 이벤트(`link`, `log`, `receiver`, `rfcomm_data`, `rfcomm_closed`, `media_button`)에는 현재 리비전이 붙으며, 리비전을 올리지 않습니다.
 
 코어는 종료할 때 `bye` 이벤트를 보내고 파이프를 닫습니다.
 
@@ -155,11 +163,25 @@ BlueCaster 창이 쓰는 메서드 중 도구에서는 주의해서 써야 하�
 - `rfcomm.close {channel_id}` → `null`. 앞서 보낸 데이터가 모두 전송된 뒤에 응답하며, `rfcomm_closed`는 따로 오지 않습니다.
 - 파이프 연결이 끝나도 채널이 닫힙니다. 다음 경우에는 `rfcomm_closed` 이벤트 `{channel_id, reason}`과 함께 닫힙니다: `remote`(장치가 닫았거나 링크가 끊김), `disconnected`(A2DP 연결이 끝남), `stopped`(Bluetooth 스택이 중지됨), `overflow`(클라이언트가 읽지 않은 수신 데이터가 1 MiB를 넘음).
 
+## 헤드폰 버튼 {#headphone-buttons}
+
+`welcome.features`에 `"media_button"`이 있을 때 사용할 수 있습니다. 헤드폰의 버튼을 누르거나 떼면 모든 클라이언트에 `media_button` 이벤트가 전달됩니다. 구독할 필요는 없습니다.
+
+```json
+{"type": "event", "rev": 42, "event": {"kind": "media_button", "value": {"button": "play", "pressed": true, "le_audio": false}}}
+```
+
+- `button`은 `play`, `pause`, `stop`, `next`, `previous`, `fast_forward`, `rewind`, `volume_up`, `volume_down`, `mute` 중 하나입니다. 그 밖의 버튼은 알리지 않습니다.
+- `pressed`는 버튼을 누르면 `true`, 떼면 `false`입니다. LE Audio 헤드폰은 누를 때만 알립니다.
+- `le_audio`는 LE Audio 헤드폰에서 온 이벤트일 때 `true`입니다.
+- 헤드폰은 지금 재생 중인지 스스로 판단해 `play` 또는 `pause`를 보냅니다. 이 판단은 최신이 아닐 수 있습니다. 재생과 일시 정지를 전환하기만 한다면 둘을 똑같이 처리하세요.
+- BlueCaster는 재생/일시 정지, 다음, 이전, 정지를 계속 미디어 키로 Windows에 전달합니다. 도구가 버튼을 직접 처리한다면 사용자에게 **오디오 장치 > 오디오 장치 버튼으로 재생 제어**를 끄도록 안내하세요. 이 설정을 꺼도 이벤트는 계속 전달됩니다.
+
 ## 호환성 {#compatibility}
 
 - **기능.** 추가 기능을 쓰기 전에 `welcome.features`를 확인하세요. 2.0.2-beta.10 이전의 코어에는 이 필드가 없습니다.
 - **알 수 없는 요청.** 코어가 해석할 수 없는 요청(알 수 없는 메서드, 잘못된 매개변수)에는 `ipc.bad_request` 오류로 응답하고, 연결은 유지합니다. 2.0.2-beta.10 이전의 코어는 이 경우 연결을 닫습니다. 그 밖에 해석할 수 없는 프레임을 받으면 연결을 닫습니다.
-- **새 필드.** 코어는 앞으로도 상태와 이벤트에 필드를 추가합니다. 모르는 필드는 무시하고, 그 때문에 메시지를 거부하지 마세요.
+- **새 필드.** 코어는 앞으로도 상태와 이벤트에 필드를 추가합니다. 모르는 필드는 무시하고, 그 때문에 메시지를 거부하지 마세요. 이벤트 종류도 앞으로 추가됩니다. 모르는 `kind`의 이벤트는 건너뛰세요.
 - **3.0.0의 이름 변경**([#193](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/193)): 파이프 이름이 `\\.\pipe\bluecaster-<SID>`로 바뀝니다. 코어는 3.0.0 이후 최소 6개월 동안 같은 프로토콜로 `\\.\pipe\a2dpwb-<SID>`에서도 계속 대기합니다. 이 이름을 없앨 때는 먼저 릴리스 노트로 알립니다. 먼저 `bluecaster-<SID>`에 연결해 보고, 실패하면 `a2dpwb-<SID>`로 연결하세요. 코어의 뮤텍스 이름은 `Local\BlueCaster_Core`로 바뀌지만, 같은 기간 동안 `Local\A2DPWB_v2_Core`도 계속 유지합니다. 두 이전 이름의 제거는 함께 공지합니다.
 
 ## 예제 {#example}

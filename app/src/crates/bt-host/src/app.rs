@@ -31,7 +31,7 @@ use crate::rfcomm::{Rfcomm, TIMER_RFCOMM};
 use crate::sdp_services::SdpServices;
 use crate::shared::Shared;
 use crate::stats::LinkStats;
-use crate::{AfhClassification, ConnectFailure, Controls, DiscoveredDevice, HostEvent, InitFailure, MediaKey};
+use crate::{AfhClassification, Button, ConnectFailure, Controls, DiscoveredDevice, HostEvent, InitFailure, MediaKey};
 use crate::{atheros, broadcom, intel, mediatek, qualcomm, realtek_btnic};
 
 pub(crate) type Job = Box<dyn FnOnce(&mut HostApp, &Stack) + Send>;
@@ -2483,6 +2483,11 @@ impl HostApp {
     }
 
     fn on_button(&mut self, stack: &Stack, op: u8, pressed: bool) {
+        // The IPC clients get every known button, press and release, also
+        // with the media keys off
+        if let Some(button) = avrcp_button(op) {
+            let _ = self.events.send(HostEvent::Button { button, pressed, le_audio: false });
+        }
         // A button sends a press and then a release; act on the press
         if !pressed {
             return;
@@ -2980,6 +2985,24 @@ fn completed_counts(p: &[u8]) -> Vec<(u16, u16)> {
         .collect()
 }
 
+/// The button of an AVRCP pass-through operation; None for one that has
+/// no name in the IPC (numbers, channels, menus)
+fn avrcp_button(op: u8) -> Option<Button> {
+    Some(match op {
+        AVRCP_OPERATION_ID_PLAY => Button::Play,
+        AVRCP_OPERATION_ID_PAUSE => Button::Pause,
+        AVRCP_OPERATION_ID_STOP => Button::Stop,
+        AVRCP_OPERATION_ID_FORWARD => Button::Next,
+        AVRCP_OPERATION_ID_BACKWARD => Button::Previous,
+        AVRCP_OPERATION_ID_FAST_FORWARD => Button::FastForward,
+        AVRCP_OPERATION_ID_REWIND => Button::Rewind,
+        AVRCP_OPERATION_ID_VOLUME_UP => Button::VolumeUp,
+        AVRCP_OPERATION_ID_VOLUME_DOWN => Button::VolumeDown,
+        AVRCP_OPERATION_ID_MUTE => Button::Mute,
+        _ => return None,
+    })
+}
+
 /// A debug command's return parameters as hex bytes for the log, the
 /// controller's own address (little-endian, as HCI carries it) replaced:
 /// the diagnostics mask only addresses written as addresses
@@ -3002,8 +3025,23 @@ fn return_bytes(bytes: &[u8], local_address: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ConnectFailure, completed_counts, missing_loader_warning, remove_alias, return_bytes, signaling_failure,
+        ConnectFailure, avrcp_button, completed_counts, missing_loader_warning, remove_alias, return_bytes,
+        signaling_failure,
     };
+    use crate::Button;
+    use btstack_sys::consts::*;
+
+    #[test]
+    fn avrcp_operations_name_their_buttons() {
+        assert_eq!(avrcp_button(AVRCP_OPERATION_ID_PLAY), Some(Button::Play));
+        assert_eq!(avrcp_button(AVRCP_OPERATION_ID_PAUSE), Some(Button::Pause));
+        assert_eq!(avrcp_button(AVRCP_OPERATION_ID_FORWARD), Some(Button::Next));
+        assert_eq!(avrcp_button(AVRCP_OPERATION_ID_BACKWARD), Some(Button::Previous));
+        assert_eq!(avrcp_button(AVRCP_OPERATION_ID_FAST_FORWARD), Some(Button::FastForward));
+        assert_eq!(avrcp_button(AVRCP_OPERATION_ID_VOLUME_DOWN), Some(Button::VolumeDown));
+        // A number key
+        assert_eq!(avrcp_button(0x20), None);
+    }
 
     #[test]
     fn counts_completed_packets_by_handle() {

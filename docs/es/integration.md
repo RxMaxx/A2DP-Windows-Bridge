@@ -95,9 +95,17 @@ El cliente no necesita un estado propio: conserva la última instantánea y le a
 
 `stream.state` es uno de `idle`, `connecting`, `streaming`, `reconnecting`, `error`; `stream.message` indica el motivo, como una [clave de mensaje](#errors-and-messages).
 
+`adapter.active` es el adaptador USB que BlueCaster está usando. Vale `null` mientras no hay ningún adaptador abierto: antes de la primera búsqueda o conexión, y mientras Bluetooth se reinicia.
+
+```json
+"active": {"display_name": "RTL8761BU (0x2357:0x0604)", "windows_name": "TP-Link UB500 Adapter", "vid": 9047, "pid": 1540, "vendor": "Realtek", "chip": "RTL8761BU", "bt_version": "5.1"}
+```
+
+`vid` y `pid` son números. `windows_name`, `chip` y `bt_version` pueden ser `null`. `chip` solo se conoce en los adaptadores Realtek.
+
 Todos los clientes reciben los eventos de estado sin suscribirse a ellos. Un evento solo llega cuando algo cambia, así que una conexión puede pasar mucho tiempo sin recibir nada.
 
-**Revisiones.** Cada evento de estado lleva la revisión siguiente (`rev` + 1). Un salto significa que se perdió un evento: envíe `state.snapshot` para obtener una instantánea nueva. Si un cliente lee demasiado despacio, el núcleo también le envía un `snapshot` nuevo sin que lo pida. Los eventos que no son de estado (`link`, `log`, `receiver`, `rfcomm_data`, `rfcomm_closed`) llevan la revisión actual y no la hacen avanzar.
+**Revisiones.** Cada evento de estado lleva la revisión siguiente (`rev` + 1). Un salto significa que se perdió un evento: envíe `state.snapshot` para obtener una instantánea nueva. Si un cliente lee demasiado despacio, el núcleo también le envía un `snapshot` nuevo sin que lo pida. Los eventos que no son de estado (`link`, `log`, `receiver`, `rfcomm_data`, `rfcomm_closed`, `media_button`) llevan la revisión actual y no la hacen avanzar.
 
 Cuando el núcleo se cierra, envía el evento `bye` y cierra la canalización.
 
@@ -155,11 +163,25 @@ Disponible cuando `welcome.features` contiene `"rfcomm"` (2.0.2-beta.10 y poster
 - `rfcomm.close {channel_id}` → `null`, una vez enviados los datos anteriores; no le sigue ningún `rfcomm_closed`.
 - Un canal también se cierra cuando termina la conexión con la canalización, o con un evento `rfcomm_closed` `{channel_id, reason}`: `remote` (el dispositivo lo cerró o el enlace se cayó), `disconnected` (terminó la conexión A2DP), `stopped` (se detuvo la pila Bluetooth), `overflow` (el cliente dejó sin leer más de 1 MiB de datos recibidos).
 
+## Botones de los auriculares {#headphone-buttons}
+
+Disponible cuando `welcome.features` contiene `"media_button"`. Cada vez que se pulsa o se suelta un botón de los auriculares, todos los clientes reciben un evento `media_button`. No hace falta suscribirse.
+
+```json
+{"type": "event", "rev": 42, "event": {"kind": "media_button", "value": {"button": "play", "pressed": true, "le_audio": false}}}
+```
+
+- `button` es uno de `play`, `pause`, `stop`, `next`, `previous`, `fast_forward`, `rewind`, `volume_up`, `volume_down`, `mute`. Los demás botones no se notifican.
+- `pressed` es `true` al pulsar el botón y `false` al soltarlo. Los auriculares LE Audio solo notifican la pulsación.
+- `le_audio` es `true` si el evento llegó de unos auriculares LE Audio.
+- Los auriculares envían `play` o `pause` según crean que hay algo en reproducción. Esa suposición puede estar desactualizada. Para alternar la reproducción, trate ambos igual.
+- BlueCaster sigue pasando a Windows reproducir/pausa, siguiente, anterior y detener como teclas multimedia. Si su herramienta gestiona los botones por su cuenta, pida al usuario que desactive **Dispositivos de audio > Controlar la reproducción con los botones del dispositivo de audio**. Los eventos siguen llegando con esa opción desactivada.
+
 ## Compatibilidad {#compatibility}
 
 - **Funciones.** Compruebe `welcome.features` antes de usar una ampliación. Los núcleos anteriores a 2.0.2-beta.10 omiten el campo.
 - **Solicitudes desconocidas.** Una solicitud que el núcleo no puede leer (un método desconocido, parámetros incorrectos) recibe como respuesta el error `ipc.bad_request`; la conexión sigue abierta. Los núcleos anteriores a 2.0.2-beta.10 cierran la conexión en ese caso. Cualquier otra trama ilegible la cierra.
-- **Campos nuevos.** El núcleo añade campos al estado y a los eventos con el tiempo. Ignore los campos que no conozca; no rechace un mensaje por ellos.
+- **Campos nuevos.** El núcleo añade campos al estado y a los eventos con el tiempo. Ignore los campos que no conozca; no rechace un mensaje por ellos. También se añaden tipos de evento nuevos: omita los eventos cuyo `kind` no conozca.
 - **Cambio de nombre en 3.0.0** ([#193](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/193)): la canalización pasa a ser `\\.\pipe\bluecaster-<SID>`. El núcleo sigue escuchando también en `\\.\pipe\a2dpwb-<SID>`, con el mismo protocolo, durante al menos 6 meses después de la 3.0.0; su retirada se anunciará antes en las notas de la versión. Pruebe primero `bluecaster-<SID>` y, si no existe, `a2dpwb-<SID>`. El mutex del núcleo pasa a ser `Local\BlueCaster_Core`; durante el mismo periodo, el núcleo mantiene también `Local\A2DPWB_v2_Core`, y ambas retiradas se anunciarán juntas.
 
 ## Ejemplo {#example}

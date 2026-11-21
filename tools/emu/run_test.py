@@ -1122,10 +1122,12 @@ LINK_CASES = {
         ('sink.log', r'delay report sent \(187\.5 ms\)', True),
     ]),
     # Headphone buttons: each pass-through answer carries the command's state
-    # flag, so a release is not answered as a press (issue #420)
-    'avrcp-keys': (['--avrcp-keys', '3'], ['--duration', '8'], [
+    # flag, so a release is not answered as a press (issue #420); each press
+    # and release reaches the IPC clients (--ipc, buttons_client)
+    'avrcp-keys': (['--avrcp-keys', '3'], ['--duration', '8', '--ipc'], [
         ('sink.log', r'avrcp keys: 6 of 6 answers carry the state flag sent', True),
         ('bluecaster.log', r'AVRCP operation 0x49 released', True),
+        ('bluecaster.log', r'Headphone button: FastForward released', True),
     ]),
     # A headset that answers OPEN with a stray REJECT of DISCOVER under the
     # OPEN's label first: BTstack waits on for the OPEN accept
@@ -1563,9 +1565,38 @@ def rfcomm_client(instance, log):
     return failures
 
 
+def buttons_client(instance, log):
+    """The 'avrcp-keys' link case's client: every press and release of the
+    sink's FAST FORWARD arrives as a media_button event, in order; over the
+    emulator's TCP transport no adapter is in use"""
+    c = IpcClient(instance, 'emu-buttons/1', log)
+    try:
+        failures = []
+        if 'media_button' not in c.welcome.get('features', []):
+            failures.append(f'IPC: no "media_button" in the features: {c.welcome}')
+        adapter = c.snapshot['state']['adapter']
+        if 'active' not in adapter or adapter['active'] is not None:
+            failures.append(f'IPC: adapter.active should be null over TCP: {adapter.get("active", "missing")}')
+        got = []
+        while len(got) < 6:
+            value = c.event('media_button', 30)
+            if value is None:
+                break
+            log.write(f'{time.strftime("%H:%M:%S")} media_button {json.dumps(value)}\n')
+            got.append((value['button'], value['pressed'], value['le_audio']))
+        wanted = [('fast_forward', pressed, False) for _ in range(3) for pressed in (True, False)]
+        if got != wanted:
+            failures.append(f'media_button events {got}, expected {wanted}')
+        return failures
+    except EOFError as e:
+        return [f'IPC: {e}']
+    finally:
+        c.close()
+
+
 # Link cases with an IPC client beside the run: case -> function(instance,
 # log) -> failures, on a thread of its own from the start of bluecaster-core
-LINK_CLIENTS = {'rfcomm': rfcomm_client}
+LINK_CLIENTS = {'rfcomm': rfcomm_client, 'avrcp-keys': buttons_client}
 
 
 def run_link_case(args, case, port):

@@ -414,6 +414,12 @@ pub enum ServiceEvent {
     /// LE Audio: a connection learned a coordinated set
     /// (le_audio_sets.txt): saved entries of one set become one
     LeSetLearned,
+    /// The USB adapter (VID, PID) a stack started on, or None: the stack
+    /// stopped (also a stack over TCP, which has no adapter)
+    Adapter(Option<(u16, u16)>),
+    /// A headphone button arrived (for the IPC clients; the media key, if
+    /// any, went to Windows already)
+    Button(ipc::ButtonPress),
 }
 
 /// Headset mode switched for the running classic stream
@@ -437,6 +443,24 @@ pub struct ServiceOptions {
     /// The USB adapter to open (the command line's -u); default: the
     /// first one that works. Not used with hci_tcp.
     pub usb: UsbSelector,
+}
+
+/// A host's button as the IPC names it
+fn ipc_button(b: bt_host::Button) -> ipc::MediaButton {
+    use bt_host::Button as B;
+    use ipc::MediaButton as M;
+    match b {
+        B::Play => M::Play,
+        B::Pause => M::Pause,
+        B::Stop => M::Stop,
+        B::Next => M::Next,
+        B::Previous => M::Previous,
+        B::FastForward => M::FastForward,
+        B::Rewind => M::Rewind,
+        B::VolumeUp => M::VolumeUp,
+        B::VolumeDown => M::VolumeDown,
+        B::Mute => M::Mute,
+    }
 }
 
 /// The LE Audio configuration of the next stack, None: LE off
@@ -749,6 +773,7 @@ impl Inner {
                     self.streamed.store(false, Ordering::Release);
                     self.note_le_capable(&h);
                     self.pump_events(&h);
+                    self.adapter_changed(true);
                     return Ok(h);
                 }
                 Err(f) => {
@@ -764,6 +789,13 @@ impl Inner {
         // advice as for one that does not answer (unplug it, or shut down)
         let needs_replug = matches!(last, InitFailure::NoAnswer | InitFailure::NeedsReplug);
         Err(Msg::new(if needs_replug { "error.btstack_no_answer" } else { "error.btstack_init" }))
+    }
+
+    /// The state's adapter in use: the one the stack opened (`running`), or
+    /// none
+    fn adapter_changed(&self, running: bool) {
+        let ids = if running && self.opts.hci_tcp.is_none() { hci_transport::usb::last_opened() } else { None };
+        self.send_event(ServiceEvent::Adapter(ids));
     }
 
     /// Remembers whether the adapter the stack opened has LE Audio's
@@ -817,6 +849,19 @@ impl Inner {
                         };
                         if let Err(e) = win_sys::media_keys::send(key) {
                             tracing::warn!("media key {k:?}: {e}");
+                        }
+                    }
+                    HostEvent::Button { button, pressed, le_audio } => {
+                        tracing::debug!(
+                            "host event: button {button:?} {}",
+                            if pressed { "pressed" } else { "released" }
+                        );
+                        if let Some(inner) = weak.upgrade() {
+                            inner.send_event(ServiceEvent::Button(ipc::ButtonPress {
+                                button: ipc_button(button),
+                                pressed,
+                                le_audio,
+                            }));
                         }
                     }
                     HostEvent::Volume(v) => {
@@ -902,6 +947,7 @@ impl Inner {
                     tracing::warn!("restarting BTstack: {why}");
                     h.shutdown();
                     *slot = None;
+                    self.adapter_changed(false);
                 }
             }
         }
@@ -978,6 +1024,7 @@ impl Inner {
         if let Some(h) = old {
             tracing::info!("stopping BTstack until the PC resumes");
             h.shutdown_lost();
+            self.adapter_changed(false);
         }
     }
 
@@ -1027,6 +1074,7 @@ impl Inner {
         let mut slot = self.host.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(h) = slot.take() {
             h.shutdown();
+            self.adapter_changed(false);
         }
         let mut c = self.host_config(false);
         if let (TransportConfig::Usb(sel), Some(id)) = (&mut c.transport, instance_id) {
@@ -1049,6 +1097,7 @@ impl Inner {
             // free for the next stack
             h.shutdown();
             tracing::debug!("host shutdown: took {} ms", t.elapsed().as_millis());
+            self.adapter_changed(false);
         }
     }
 

@@ -340,6 +340,22 @@ pub enum MediaKey {
     Previous,
 }
 
+/// A headphone button as it arrived ([`HostEvent::Button`]), also one with
+/// no Windows media key
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Button {
+    Play,
+    Pause,
+    Stop,
+    Next,
+    Previous,
+    FastForward,
+    Rewind,
+    VolumeUp,
+    VolumeDown,
+    Mute,
+}
+
 /// Things that happen without a call
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostEvent {
@@ -354,6 +370,10 @@ pub enum HostEvent {
     BatteryRefused,
     /// A headphone button to pass to Windows as a media key
     MediaKey(MediaKey),
+    /// A headphone button was pressed or released (AVRCP), or pressed (LE
+    /// Audio's media control, which has no release), whatever the "media
+    /// keys" setting: for the IPC clients
+    Button { button: Button, pressed: bool, le_audio: bool },
     /// The HCI transport stopped working for good
     TransportFailed,
     /// The HFP audio connection ([`BtHost::voice_start`])

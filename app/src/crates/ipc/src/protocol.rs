@@ -7,8 +7,8 @@
 //! 3. Then [`ServerMessage::Event`]s, each replacing one part of the state,
 //!    with the next revision. A gap in the revisions means a lost event: the
 //!    client asks for a new snapshot ([`Method::StateSnapshot`]). Events
-//!    that are not state (link, log, receiver, rfcomm_data, rfcomm_closed)
-//!    carry the current revision: they are not compared with it.
+//!    that are not state (link, log, receiver, rfcomm_data, rfcomm_closed,
+//!    media_button) carry the current revision: they are not compared with it.
 //! 4. Requests ([`ClientMessage::Request`]) are answered by a
 //!    [`ServerMessage::Response`] with the same id. A request this core
 //!    cannot read (a method it does not know, or bad parameters) is
@@ -27,8 +27,9 @@ use ts_rs::TS;
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// The Welcome's `features`: "rfcomm" for rfcomm.open / send / close and
-/// their events (2.0.2)
-pub const FEATURES: &[&str] = &["rfcomm"];
+/// their events (2.0.2), "media_button" for the [`Event::MediaButton`]
+/// events (after 3.0.2)
+pub const FEATURES: &[&str] = &["rfcomm", "media_button"];
 
 /// The longest `device.scan` (seconds); a longer one is cut to it
 pub const MAX_SCAN_SECONDS: u32 = 600;
@@ -199,6 +200,38 @@ pub struct AdapterState {
     #[ts(optional = nullable)]
     #[serde(default)]
     pub loader: Option<LoaderStatus>,
+    /// The USB adapter the running Bluetooth stack has open; None while no
+    /// stack runs (before the first scan or connection) and over the
+    /// emulator's TCP transport
+    #[ts(optional = nullable)]
+    #[serde(default)]
+    pub active: Option<ActiveAdapter>,
+}
+
+/// The adapter BlueCaster uses (AdapterState::active): what its entry in
+/// `adapters` tells, without the device's instance ID or address
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+
+pub struct ActiveAdapter {
+    /// As AdapterInfo::display_name: "RTL8761BU (0x2357:0x0604)"
+    pub display_name: String,
+    /// As AdapterInfo::windows_name: "TP-Link UB500 Adapter"
+    #[ts(optional = nullable)]
+    #[serde(default)]
+    pub windows_name: Option<String>,
+    pub vid: u16,
+    pub pid: u16,
+    /// The chip's vendor: "Realtek", "Intel", ..., "Unknown"
+    pub vendor: String,
+    /// The Realtek chip ("RTL8761BU"); None for other vendors and unknown
+    /// chips
+    #[ts(optional = nullable)]
+    #[serde(default)]
+    pub chip: Option<String>,
+    /// As AdapterInfo::bt_version: "5.3"
+    #[ts(optional = nullable)]
+    #[serde(default)]
+    pub bt_version: Option<String>,
 }
 
 /// Where a firmware loader is (AdapterState::loader)
@@ -1686,6 +1719,33 @@ pub struct LogLine {
     pub session: Option<u32>,
 }
 
+/// A headphone button (Event::MediaButton)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaButton {
+    Play,
+    Pause,
+    Stop,
+    Next,
+    Previous,
+    FastForward,
+    Rewind,
+    VolumeUp,
+    VolumeDown,
+    Mute,
+}
+
+/// A headphone button was pressed or released (Event::MediaButton)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+
+pub struct ButtonPress {
+    pub button: MediaButton,
+    /// False: released. LE Audio headphones send only the press.
+    pub pressed: bool,
+    /// The button came over LE Audio (media control), not Classic (AVRCP)
+    pub le_audio: bool,
+}
+
 /// One part of the state changed, or a subscribed stream produced data
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
@@ -1725,6 +1785,9 @@ pub enum Event {
     /// An RFCOMM channel closed without its connection's rfcomm.close (to
     /// that connection only); its last event
     RfcommClosed(RfcommClosed),
+    /// A headphone button arrived (to every connection, not part of the
+    /// state), also with the "media keys" setting off
+    MediaButton(ButtonPress),
     /// The core is shutting down
     Bye,
 }
