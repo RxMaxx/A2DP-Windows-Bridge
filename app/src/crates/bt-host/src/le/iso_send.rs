@@ -54,7 +54,9 @@
 //! neither sent nor failed: the same SDU goes again with the same sequence
 //! number on HCI_EVENT_TRANSPORT_PACKET_SENT (or 1 ms later), and the round
 //! waits for it. The [`le_audio::sdu_queue::SendGuard`] keeps those rounds
-//! at most queue + 2 intervals ahead of real time.
+//! at most queue + 2 intervals ahead of real time. A stop in the middle of
+//! a round lets that round finish first ([`IsoSender::finish_round`], for
+//! [`FINISH_ROUND_INTERVALS`] at most), so every BIS ends on the same SDU.
 //!
 //! BTstack (1.8.3) refuses the CIS can-send-now request with Command
 //! Disallowed until the CIG is active, which is only after the ISO data
@@ -94,6 +96,11 @@ const MIN_CIS_QUEUE_DEPTH: u8 = 4;
 
 /// SDU sets the CIS sender runs ahead of real time
 pub const LEAD_SETS: u64 = 2;
+
+/// Intervals a stopping broadcast waits at most for the rest of its round:
+/// each BIS gets room once an interval, so one is enough unless the
+/// controller is held up
+const FINISH_ROUND_INTERVALS: u32 = 2;
 
 /// The least time an SDU may wait for room in the controller past its
 /// interval: a few intervals of completions held up (a busy controller, a
@@ -483,6 +490,14 @@ pub struct IsoSender {
     /// packet buffer was taken: sent again, same SDU and sequence number
     bis_retry: Vec<usize>,
     round_open: bool,
+    /// Stopping: no further round
+    stopping: bool,
+    /// Stopping: the round going on finishes first, until this run loop
+    /// time at most
+    finish_by_ms: Option<u32>,
+    /// That round is out (or its time ran out): the stop goes on, until
+    /// taken
+    round_finished: bool,
     current: SduSet,
     guard: SendGuard,
     /// Send guard waits: how many, the run loop time the current one is
@@ -576,6 +591,9 @@ impl IsoSender {
         self.served = vec![false; bis_handles.len()];
         self.bis_retry.clear();
         self.round_open = false;
+        self.stopping = false;
+        self.finish_by_ms = None;
+        self.round_finished = false;
         self.current = SduSet::new();
         self.guard = SendGuard::new(self.frame_us, u64::from(queue_depth) + 2);
         self.guard_waits = 0;
@@ -613,8 +631,45 @@ impl IsoSender {
         self.stall_reported = false;
     }
 
+    /// Broadcast stop, first step: a round that only some BIS got goes on
+    /// until every BIS has its SDU, for [`FINISH_ROUND_INTERVALS`] at most,
+    /// and no further round starts. True while it does: the caller stops
+    /// once [`IsoSender::take_round_finished`] says so. False: no round to
+    /// finish, the caller stops now.
+    pub(crate) fn finish_round(&mut self, out: &dyn IsoOut) -> bool {
+        if self.finish_by_ms.is_some() {
+            return true;
+        }
+        if self.stopping || !self.sending || self.bigs.is_empty() || !self.round_open || self.served.iter().all(|&s| s)
+        {
+            return false;
+        }
+        self.stopping = true;
+        let wait = (FINISH_ROUND_INTERVALS * self.frame_us).div_ceil(1000).max(1);
+        self.finish_by_ms = Some(out.time_ms().wrapping_add(wait));
+        if self.bis_retry.is_empty() {
+            // With a BIS waiting to go again, its 1 ms timer runs already
+            out.timer_start(wait);
+        }
+        tracing::debug!(
+            "LE Audio: stopping after the round going on ({} of {} BIS still to send, {wait} ms at most)",
+            self.served.iter().filter(|&&s| !s).count(),
+            self.served.len()
+        );
+        true
+    }
+
+    /// The round of [`IsoSender::finish_round`] is out or its time ran out:
+    /// true once
+    pub(crate) fn take_round_finished(&mut self) -> bool {
+        std::mem::take(&mut self.round_finished)
+    }
+
     /// Stops sending (logs the totals)
     pub(crate) fn stop(&mut self, out: &dyn IsoOut) {
+        self.stopping = false;
+        self.finish_by_ms = None;
+        self.round_finished = false;
         if !self.sending {
             return;
         }
@@ -771,6 +826,10 @@ impl IsoSender {
     fn on_bis_can_send(&mut self, out: &dyn IsoOut, handle: u16) {
         let Some(index) = self.cis_handles.iter().position(|&h| h == handle) else { return };
         if !self.round_open || self.served[index] {
+            if self.stopping {
+                // Stopping: no further round
+                return;
+            }
             // First BIS of a round: the next frame interval for all BIS
             self.start_round();
         }
@@ -831,6 +890,11 @@ impl IsoSender {
         if self.round_open && self.served.iter().all(|&s| s) {
             self.round_open = false;
             self.publish();
+            if self.finish_by_ms.take().is_some() {
+                // Stopping: every BIS ends on this round's SDU
+                self.round_finished = true;
+                return;
+            }
             self.request_next(out);
         }
     }
@@ -929,8 +993,24 @@ impl IsoSender {
         if !self.bigs.is_empty() {
             if !self.bis_retry.is_empty() {
                 self.retry_bis(out);
-            } else if guard_wait.is_some() {
+            } else if guard_wait.is_some() && self.finish_by_ms.is_none() {
                 self.request_bigs(out);
+            }
+            if let Some(by) = self.finish_by_ms {
+                let now = out.time_ms();
+                if !past(by, now) {
+                    // Never waits on a controller that gives no room
+                    tracing::debug!(
+                        "LE Audio: the round going on did not finish in time ({} BIS without its SDU), stopping",
+                        self.served.iter().filter(|&&s| !s).count()
+                    );
+                    self.finish_by_ms = None;
+                    self.round_open = false;
+                    self.bis_retry.clear();
+                    self.round_finished = true;
+                } else if self.bis_retry.is_empty() {
+                    out.timer_start(by.wrapping_sub(now));
+                }
             }
         } else if self.active {
             self.tick(out);
@@ -1395,6 +1475,149 @@ mod tests {
         s.stop(&out);
         assert_eq!(stats.lock().unwrap().sets_sent, 2);
         assert_eq!(stats.lock().unwrap().sdus_sent, 4);
+    }
+
+    /// Two BIGs of one BIS each, the first round sent on both
+    fn two_bigs_one_round_in(out: &Fake, q: SharedSduQueue) -> IsoSender {
+        let mut s = IsoSender::new(Arc::new(Mutex::new(LeStreamStats::default())));
+        s.start_bigs(out, &[(0, vec![0x10]), (1, vec![0x20])], q, 10_000, 2);
+        s.on_bis_can_send_now(out, &bis_can_send(0, 0, 0x10));
+        s.on_bis_can_send_now(out, &bis_can_send(1, 0, 0x20));
+        out.take();
+        s
+    }
+
+    #[test]
+    fn a_stop_mid_round_finishes_the_round_on_every_bis() {
+        let out = Fake::default();
+        let mut s = two_bigs_one_round_in(&out, queue(2));
+        // The next round: BIG 0 got its SDU, BIG 1 has no room yet
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 0, 0x10));
+        assert_eq!(out.take(), ["send 10 #1 ee"]);
+        assert!(s.finish_round(&out));
+        assert_eq!(out.take(), ["timer 20"]);
+        // Asked again (a second stop): still waiting, no second timer
+        assert!(s.finish_round(&out));
+        assert!(out.take().is_empty());
+        // BIG 0 has room again first: no further round
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 0, 0x10));
+        assert!(out.take().is_empty());
+        assert!(!s.take_round_finished());
+        // BIG 1 gets its SDU of the round: both end on #1, no further request
+        s.on_bis_can_send_now(&out, &bis_can_send(1, 0, 0x20));
+        assert_eq!(out.take(), ["send 20 #1 ee"]);
+        assert!(s.take_round_finished());
+        assert!(!s.take_round_finished());
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 0, 0x10));
+        at(&mut s, &out, 20);
+        assert!(out.take().is_empty());
+        s.stop(&out);
+        assert_eq!(out.take(), ["timer stop"]);
+    }
+
+    #[test]
+    fn a_stop_between_rounds_stops_at_once() {
+        let out = Fake::default();
+        let mut s = two_bigs_one_round_in(&out, queue(2));
+        assert!(!s.finish_round(&out));
+        assert!(out.take().is_empty());
+        assert!(!s.take_round_finished());
+        // Not sending
+        s.stop(&out);
+        assert!(!s.finish_round(&out));
+    }
+
+    #[test]
+    fn a_stop_waits_for_a_refused_bis_send() {
+        let out = Fake::default();
+        let mut s = two_bigs_one_round_in(&out, queue(2));
+        // BIG 0 refused while BTstack's packet buffer is taken, BIG 1 no
+        // room yet
+        out.busy.set(1);
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 0, 0x10));
+        assert_eq!(out.take(), ["busy 10 #1", "timer 1"]);
+        // The retry's 1 ms timer runs: no timer of its own
+        assert!(s.finish_round(&out));
+        assert!(out.take().is_empty());
+        s.on_hci_event(&out, &PACKET_SENT);
+        assert_eq!(out.take(), ["send 10 #1 ee"]);
+        // The retry's timer: the rest of the wait
+        at(&mut s, &out, 1);
+        assert_eq!(out.take(), ["timer 19"]);
+        s.on_bis_can_send_now(&out, &bis_can_send(1, 0, 0x20));
+        assert_eq!(out.take(), ["send 20 #1 ee"]);
+        assert!(s.take_round_finished());
+    }
+
+    #[test]
+    fn a_stop_does_not_wait_on_a_controller_without_room() {
+        let out = Fake::default();
+        let mut s = two_bigs_one_round_in(&out, queue(2));
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 0, 0x10));
+        out.take();
+        assert!(s.finish_round(&out));
+        assert_eq!(out.take(), ["timer 20"]);
+        // A timer that fires early waits the rest
+        at(&mut s, &out, 5);
+        assert_eq!(out.take(), ["timer 15"]);
+        assert!(!s.take_round_finished());
+        at(&mut s, &out, 20);
+        assert!(out.take().is_empty());
+        assert!(s.take_round_finished());
+        // Room after that: nothing more
+        s.on_bis_can_send_now(&out, &bis_can_send(1, 0, 0x20));
+        assert!(out.take().is_empty());
+    }
+
+    #[test]
+    fn a_stop_does_not_wait_on_a_send_refused_to_the_end() {
+        let out = Fake::default();
+        let mut s = IsoSender::new(Arc::new(Mutex::new(LeStreamStats::default())));
+        s.start_big(&out, 0, &[0x10, 0x11], queue(2), 10_000, 2);
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 0, 0x10));
+        out.busy.set(u32::MAX);
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 1, 0x11));
+        assert!(s.finish_round(&out));
+        out.take();
+        for ms in 1..=20 {
+            assert!(!s.take_round_finished());
+            at(&mut s, &out, ms);
+        }
+        assert!(s.take_round_finished());
+        assert_eq!(out.sends(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_start_after_a_stop_mid_round_begins_afresh() {
+        let out = Fake::default();
+        let q = queue(2);
+        let mut s = two_bigs_one_round_in(&out, q.clone());
+        out.busy.set(1);
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 0, 0x10));
+        assert!(s.finish_round(&out));
+        // The time runs out with BIS 0x10 still to send again
+        out.busy.set(u32::MAX);
+        at(&mut s, &out, 20);
+        assert!(s.take_round_finished());
+        s.stop(&out);
+        out.busy.set(0);
+        out.take();
+        // Late events of the old BIGs do nothing
+        s.on_hci_event(&out, &PACKET_SENT);
+        s.on_bis_can_send_now(&out, &bis_can_send(1, 0, 0x20));
+        at(&mut s, &out, 21);
+        assert!(out.take().is_empty());
+        // Started again (quickly): numbers from 0, a full first round, no
+        // leftover retry
+        s.start_bigs(&out, &[(0, vec![0x30]), (1, vec![0x31])], q.clone(), 10_000, 2);
+        assert_eq!(out.take(), ["queue 2", "request BIG 0", "request BIG 1"]);
+        s.on_hci_event(&out, &PACKET_SENT);
+        at(&mut s, &out, 22);
+        assert!(out.take().is_empty());
+        s.on_bis_can_send_now(&out, &bis_can_send(1, 0, 0x31));
+        s.on_bis_can_send_now(&out, &bis_can_send(0, 0, 0x30));
+        assert_eq!(out.take(), ["send 31 #0 ee", "send 30 #0 ee", "request BIG 0", "request BIG 1"]);
+        assert!(!s.take_round_finished());
     }
 
     #[test]

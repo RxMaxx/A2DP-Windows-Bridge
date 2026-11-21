@@ -193,11 +193,12 @@ impl LeCtx<'_> {
         self.terminate_bigs();
     }
 
-    /// le_stop_broadcast's work: stop sending, LE Terminate BIG for each,
-    /// then the advertising goes; `done(true)` at the end
+    /// le_stop_broadcast's work: stop sending (after the round going on, so
+    /// every BIS ends on the same SDU), LE Terminate BIG for each, then the
+    /// advertising goes; `done(true)` at the end
     pub(crate) fn stop_broadcast(&mut self, done: LeDone) {
-        self.core.iso.stop(self.stack);
         let Some(b) = self.core.broadcast.as_mut() else {
+            self.core.iso.stop(self.stack);
             done(true);
             return;
         };
@@ -206,8 +207,23 @@ impl LeCtx<'_> {
             start(false);
         }
         b.stopped.push(done);
-        if b.state != State::Terminating {
+        let state = b.state;
+        if state == State::Streaming && self.core.iso.finish_round(self.stack) {
+            // Goes on in on_last_round_sent
+            return;
+        }
+        self.core.iso.stop(self.stack);
+        if state != State::Terminating {
             self.terminate_bigs();
+        }
+    }
+
+    /// The round going on when the stop came is out (or its time ran out)
+    pub(crate) fn on_last_round_sent(&mut self) {
+        if self.core.broadcast.as_ref().is_some_and(|b| b.state == State::Streaming) {
+            self.terminate_bigs();
+        } else {
+            self.core.iso.stop(self.stack);
         }
     }
 

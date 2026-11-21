@@ -401,7 +401,11 @@ A broadcast (BIG) is still sent in rounds on `HCI_EVENT_BIS_CAN_SEND_NOW`,
 with a send guard keeping the rounds at most queue + 2 intervals ahead. A
 BIS send refused with 0x57 (the packet buffer taken, typically for the
 second BIS of the first round) waits in the round and goes again with the
-same SDU and sequence number on `HCI_EVENT_TRANSPORT_PACKET_SENT`.
+same SDU and sequence number on `HCI_EVENT_TRANSPORT_PACKET_SENT`. A stop
+while a round is only partly sent lets that round finish first
+(`IsoSender::finish_round`, 2 intervals at most, no further round), so every
+BIS ends on the same SDU; LE Terminate BIG follows once the round is out or
+the time has run out.
 
 The UI's ISO counters (`LinkSample.iso`) come from `BtHost::le_stream_stats()`
 (sets, silence, underruns, dropped, prefill).
@@ -593,7 +597,8 @@ it.
   (`bluecaster_broadcast_advertise`, `bluecaster_big_create`, `bluecaster_big_terminate`,
   `bluecaster_broadcast_advertise_stop`).
 - bt-host `le/broadcast.rs`: advertising + LE Create BIG ->
-  GAP_SUBEVENT_BIG_CREATED -> `IsoSender::start_big`; stop: LE Terminate
+  GAP_SUBEVENT_BIG_CREATED -> `IsoSender::start_big`; stop: the round going
+  on finishes, LE Terminate
   BIG -> GAP_SUBEVENT_BIG_TERMINATED -> advertising removed ("Auracast:
   stopped"). A BIG the controller ends counts as a lost stream
   (error.auracast). `BtHost::le_start_broadcast` / `le_stop_broadcast`.
@@ -645,7 +650,9 @@ is unfinished).
 `--layout auracast-split` starts two sinks, one following "<name> L" and
 one "<name> R" (for `--auracast-split`). Checked by hand on 2026-11-21: both
 BIGs up, each sink got every SDU of its BIS; a refused LE Create BIG for
-either broadcast ends the other and removes both advertising sets.
+either broadcast ends the other and removes both advertising sets. After a
+stop both sinks have received the same number of SDUs; before the stop
+let the last round finish, R ended one SDU short in 3 of 3 runs.
 Real hardware: not tried.
 
 ## LE Audio off
