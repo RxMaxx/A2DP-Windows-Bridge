@@ -138,6 +138,9 @@ impl LeCtx<'_> {
         }
         let mut bigs = Vec::with_capacity(groups.len());
         let mut failed = None;
+        // The test knobs below only for more than one BIG: a single
+        // broadcast keeps its preset
+        let many = groups.len() > 1;
         for g in &groups {
             if failed.is_some() {
                 bigs.push(Big::Gone);
@@ -152,8 +155,8 @@ impl LeCtx<'_> {
                 num_bis: g.bis.len() as u8,
                 sdu_interval_us: p.sdu_interval_us(),
                 max_sdu: p.octets,
-                max_transport_latency_ms: p.max_transport_latency_ms,
-                rtn: p.rtn,
+                max_transport_latency_ms: many.then(latency_override).flatten().unwrap_or(p.max_transport_latency_ms),
+                rtn: many.then(rtn_override).flatten().unwrap_or(p.rtn),
                 phy: plan.phy,
                 framing: p.framing,
                 code: config.code,
@@ -397,4 +400,25 @@ impl LeCtx<'_> {
     pub(crate) fn broadcast_plan(&self) -> Option<StreamPlan> {
         self.core.broadcast.as_ref().map(|b| b.plan.clone())
     }
+}
+
+/// Max transport latency for every BIG from `BLUECASTER_AURACAST_LATENCY_MS`
+/// (a test knob): with the presets' 60-65 ms the Zephyr LL (nRF5340) picks a
+/// 50 ms ISO interval with five SDUs per event, and stalls on the next BIG
+fn latency_override() -> Option<u16> {
+    let ms = std::env::var("BLUECASTER_AURACAST_LATENCY_MS").ok()?.trim().parse::<u16>().ok()?;
+    (5..=4000).contains(&ms).then(|| {
+        tracing::info!("Auracast: max transport latency {ms} ms (BLUECASTER_AURACAST_LATENCY_MS)");
+        ms
+    })
+}
+
+/// Retransmissions for every BIG from `BLUECASTER_AURACAST_RTN` (a test
+/// knob): fewer repeats, less air time for four BIS at 48 kHz
+fn rtn_override() -> Option<u8> {
+    let rtn = std::env::var("BLUECASTER_AURACAST_RTN").ok()?.trim().parse::<u8>().ok()?;
+    (rtn <= 15).then(|| {
+        tracing::info!("Auracast: RTN {rtn} (BLUECASTER_AURACAST_RTN)");
+        rtn
+    })
 }
