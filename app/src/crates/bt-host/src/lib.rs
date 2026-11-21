@@ -11,7 +11,9 @@
 
 pub mod afh;
 mod app;
+pub mod atheros;
 pub mod bringup;
+pub mod broadcom;
 pub mod capture;
 pub mod chips;
 pub mod debug_command;
@@ -58,6 +60,7 @@ pub use le::iso_recv::{
     ISO_STATUS_LOST, ISO_STATUS_POSSIBLY_INVALID, ISO_STATUS_VALID, LeRxHandle, LeRxStats, LeRxStream, MAX_RX_SDU,
     RxSdu,
 };
+pub use le::modules::csip::{forget_stored_file as le_forget_stored_sirk, stored_sets as le_stored_sets};
 pub use le::{
     LeAddr, LeBroadcast, LeConfig, LeDeviceId, LeDeviceInfo, LeRequest, LeScanResult, LeSduSink, LeStreamRequest,
     LeStreamStarted, LeStreamStats, LeStreamStatus,
@@ -65,7 +68,7 @@ pub use le::{
 pub use media::{MediaPacket, MediaSink};
 pub use rfcomm::{
     MAX_SEND_BYTES as RFCOMM_MAX_SEND_BYTES, OPEN_DEADLINE as RFCOMM_OPEN_DEADLINE, RfcommCloseReason, RfcommError,
-    RfcommEvent, RfcommOpened, RfcommReply, RfcommSink, parse_uuid,
+    RfcommEvent, RfcommOpened, RfcommReply, RfcommSink, is_voice_service, parse_uuid, uuid_str,
 };
 pub use sdp_services::{SdpRecord, ServicesError};
 use shared::{Shared, Wait};
@@ -178,12 +181,18 @@ pub struct HostConfig {
     pub mediatek_loader: bool,
     /// Run the Qualcomm rampatch and NVM download first
     pub qualcomm_loader: bool,
+    /// Run the Qualcomm Atheros AR30xx patch and system configuration
+    /// download first
+    pub atheros_loader: bool,
     /// Run the download of a Realtek chip whose firmware comes from
     /// Realtek's Windows driver first (crate::realtek_btnic):
     /// its VID:PID
     pub realtek_driver_chip: Option<(u16, u16)>,
     /// VID:PID of present Broadcom adapters (PatchRAM file names)
     pub broadcom_ids: Vec<(u16, u16)>,
+    /// Where the Broadcom loader remembers a failed patch per adapter
+    /// (crate::broadcom); None: not kept
+    pub broadcom_marks: Option<Arc<dyn broadcom::PatchMarks>>,
     /// Upper limit of the media payload (clamped)
     pub media_payload_limit: u16,
     pub capture: HciCapture,
@@ -254,8 +263,10 @@ impl HostConfig {
             intel_loader: false,
             mediatek_loader: false,
             qualcomm_loader: false,
+            atheros_loader: false,
             realtek_driver_chip: None,
             broadcom_ids: Vec::new(),
+            broadcom_marks: None,
             media_payload_limit: media::MEDIA_PAYLOAD_LIMIT_DEFAULT,
             capture: HciCapture::new(),
             afh: None,
@@ -281,6 +292,9 @@ pub enum InitFailure {
     Timeout,
     /// Another BtHost runs in this process
     Busy,
+    /// A firmware loader left the controller in a state only a power cycle
+    /// ends: the adapter must be unplugged and plugged back in
+    NeedsReplug,
 }
 
 /// How a connection attempt failed
@@ -326,6 +340,22 @@ pub enum MediaKey {
     Previous,
 }
 
+/// A headphone button as it arrived ([`HostEvent::Button`]), also one with
+/// no Windows media key
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Button {
+    Play,
+    Pause,
+    Stop,
+    Next,
+    Previous,
+    FastForward,
+    Rewind,
+    VolumeUp,
+    VolumeDown,
+    Mute,
+}
+
 /// Things that happen without a call
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostEvent {
@@ -340,6 +370,10 @@ pub enum HostEvent {
     BatteryRefused,
     /// A headphone button to pass to Windows as a media key
     MediaKey(MediaKey),
+    /// A headphone button was pressed or released (AVRCP), or pressed (LE
+    /// Audio's media control, which has no release), whatever the "media
+    /// keys" setting: for the IPC clients
+    Button { button: Button, pressed: bool, le_audio: bool },
     /// The HCI transport stopped working for good
     TransportFailed,
     /// The HFP audio connection ([`BtHost::voice_start`])
@@ -564,13 +598,14 @@ impl BtHost {
         let voice_on = config.voice;
         let le_shared = Arc::new(le::core::LeShared::default());
         tracing::debug!(
-            "host start: transport {:?}, realtek pid 0x{:04X} files {:?}, intel loader {}, mediatek loader {}, qualcomm loader {}, realtek driver chip {:04X?}, broadcom {:04X?}, payload limit {}, le audio {}, battery {}",
+            "host start: transport {:?}, realtek pid 0x{:04X} files {:?}, intel loader {}, mediatek loader {}, qualcomm loader {}, atheros loader {}, realtek driver chip {:04X?}, broadcom {:04X?}, payload limit {}, le audio {}, battery {}",
             config.transport,
             config.realtek_pid,
             config.realtek_files,
             config.intel_loader,
             config.mediatek_loader,
             config.qualcomm_loader,
+            config.atheros_loader,
             config.realtek_driver_chip,
             config.broadcom_ids,
             config.media_payload_limit,
@@ -595,8 +630,10 @@ impl BtHost {
                         intel_loader,
                         mediatek_loader,
                         qualcomm_loader,
+                        atheros_loader,
                         realtek_driver_chip,
                         broadcom_ids,
+                        broadcom_marks,
                         media_payload_limit: _,
                         capture,
                         afh,
@@ -638,6 +675,10 @@ impl BtHost {
                             .set_packet_logger(Some(Box::new(move |t, incoming, p| logger.log_packet(t, incoming, p))));
                         let (sink, consumer, media_streaming) = media::queue(stats.clone(), remote);
                         let _ = remote_tx.send((remote, sink));
+                        // A Broadcom adapter the patch of Broadcom's Windows
+                        // driver is for (crate::broadcom)
+                        let broadcom_loader =
+                            !tcp && broadcom_ids.iter().any(|&(vid, pid)| broadcom::patch_files(vid, pid).is_some());
                         let setup = Setup {
                             tcp,
                             link_key_file,
@@ -646,6 +687,7 @@ impl BtHost {
                             realtek_files,
                             realtek_firmware_file,
                             broadcom_ids,
+                            broadcom_marks,
                             battery,
                             voice,
                             on_loader,
@@ -687,6 +729,11 @@ impl BtHost {
                             // with USB requests) before it is used
                             stack.install_transport(backend);
                             app.start_qualcomm_loader(stack);
+                        } else if atheros_loader && !tcp {
+                            // The AR30xx ROM needs its patch and system
+                            // configuration (sent with USB requests) first
+                            stack.install_transport(backend);
+                            app.start_atheros_loader(stack);
                         } else if let Some((vid, pid)) = realtek_driver_chip.filter(|_| !tcp)
                             && let Some((chip, file)) = realtek_btnic::chip(vid, pid)
                         {
@@ -694,6 +741,11 @@ impl BtHost {
                             // driver, sent in the driver's own sequence
                             stack.install_transport(backend);
                             app.start_realtek_driver_loader(stack, chip, file);
+                        } else if broadcom_loader {
+                            // Its ROM takes the patch of Broadcom's Windows
+                            // driver, unless the firmware folder has a .hcd
+                            stack.install_transport(backend);
+                            app.start_broadcom_loader(stack);
                         } else {
                             app.setup_hci_and_power_on(stack, Some(backend));
                         }
@@ -1712,6 +1764,30 @@ impl BtHost {
             }
         })
         .is_some()
+    }
+
+    /// Drops the LE bond of the identity `addr` (and the SIRK kept with it)
+    /// from the running stack, which writes its bonds file. False when no
+    /// stack with LE holds the bonds: the caller edits the files
+    /// ([`le_bond_file::forget`], [`le_forget_stored_sirk`]).
+    pub fn forget_le_bond(&self, addr: [u8; 6]) -> bool {
+        self.call(Duration::from_secs(2), move |app, s| {
+            if !s.le_initialized() {
+                return false;
+            }
+            let entries: Vec<_> = (0..s.le_device_db_max_count())
+                .filter_map(|i| s.le_device_db_info(i))
+                .filter(|e| e.addr == addr)
+                .collect();
+            for e in &entries {
+                s.le_delete_bonding(e.addr_type, &e.addr);
+            }
+            if let Some(le) = app.le.as_mut().filter(|le| le.initialized()) {
+                le.run(s, |ctx| le::modules::csip::forget_stored(ctx, addr));
+            }
+            true
+        })
+        .unwrap_or(false)
     }
 
     /// Drops `addr`'s link key alone from the running stack and its file

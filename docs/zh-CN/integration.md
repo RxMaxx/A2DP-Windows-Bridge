@@ -95,7 +95,17 @@ sequenceDiagram
 
 `stream.state` 是 `idle`、`connecting`、`streaming`、`reconnecting`、`error` 之一；`stream.message` 以[消息键](#errors-and-messages)说明原因。
 
-**修订号。** 每个状态事件都带有下一个修订号（`rev` + 1）。出现跳号说明丢失了事件：请发送 `state.snapshot` 获取新快照。如果客户端读取太慢，核心也会主动向其发送新的 `snapshot`。非状态事件（`link`、`log`、`receiver`、`rfcomm_data`、`rfcomm_closed`）带有当前修订号，不会使其递增。
+`adapter.active` 是 BlueCaster 正在使用的 USB 适配器。没有打开任何适配器时（第一次扫描或连接之前，以及蓝牙重新启动期间），其值为 `null`。
+
+```json
+"active": {"display_name": "RTL8761BU (0x2357:0x0604)", "windows_name": "TP-Link UB500 Adapter", "vid": 9047, "pid": 1540, "vendor": "Realtek", "chip": "RTL8761BU", "bt_version": "5.1"}
+```
+
+`vid` 和 `pid` 是数字。`windows_name`、`chip` 和 `bt_version` 可能为 `null`。只有 Realtek 适配器才能获知 `chip`。
+
+每个客户端无需订阅即可收到状态事件。只有在状态发生变化时才会发送事件，因此连接可能长时间收不到任何消息。
+
+**修订号。** 每个状态事件都带有下一个修订号（`rev` + 1）。出现跳号说明丢失了事件：请发送 `state.snapshot` 获取新快照。如果客户端读取太慢，核心也会主动向其发送新的 `snapshot`。非状态事件（`link`、`log`、`receiver`、`rfcomm_data`、`rfcomm_closed`、`media_button`）带有当前修订号，不会使其递增。
 
 核心关闭时会发送事件 `bye` 并关闭管道。
 
@@ -136,23 +146,42 @@ sequenceDiagram
 | `diag.info` | `{"mask": bool}`（可选） | `DiagInfo`（“复制诊断信息”的文本） |
 | `rfcomm.open`、`rfcomm.send`、`rfcomm.close` | 请参阅 [RFCOMM 直通](#rfcomm-passthrough) | |
 
+调用 `diag.subscribe` 时，请始终同时传入 `logs` 和 `link`。每次调用都会同时设置两者，因此省略 `logs` 会关闭日志事件。
+
 以下方法供 BlueCaster 窗口使用，工具使用时需谨慎：`profile.save` / `profile.delete`、`settings.set`（替换**全部**设置：请发送包含你的更改的最新 `settings`，切勿只发送部分对象）、`device.forget` / `device.rename`、`adapter.*`（`adapter.assign_winusb` 和 `adapter.restore_driver` 会显示 UAC 提示；开发者模式的芯片工具 `adapter.probe` 和 `adapter.run_script` 会停止蓝牙堆栈）、`app.quit`。其余方法服务于窗口自己的页面，可能随时更改，恕不另行通知：`stream.start_custom`、其他 `device.*` 方法（`device.import_windows_pairings` 会显示 UAC 提示）、`audio.apps`、`audio.mixer` / `audio.mixer_set`、上述两个以外的 `diag.*`、`receiver.*` 和 `app.*`。完整的方法列表（含参数和结果）见 `protocol.rs` 中的 `Method` 枚举。
 
 ## RFCOMM 直通 {#rfcomm-passthrough}
 
 当 `welcome.features` 包含 `"rfcomm"` 时可用（2.0.2-beta.10 及更高版本）。工具可以借此通过 BlueCaster 现有的链路访问耳机自己的 RFCOMM 服务（厂商控制应用：电量、降噪、EQ）；通过 BlueCaster 连接的耳机，Windows 本身是看不到的。
 
-- `rfcomm.open {address, uuid}` → `{channel_id, mtu}`。`address` 必须是正在串流的设备；核心绝不会为此建立连接或配对（而是返回 `rfcomm.not_connected`）。`uuid` 是完整的 128 位 UUID，或基于蓝牙基础 UUID 的 16 位 `"xxxx"`。即使排在其他打开请求之后，应答也会在 20 秒内到达，因此请至少等待 25 秒。错误：`rfcomm.not_connected`、`rfcomm.service_not_found`、`rfcomm.open_failed`、`rfcomm.busy`。
+- `rfcomm.open {address, uuid}` → `{channel_id, mtu}`。`address` 必须是正在串流的设备；核心绝不会为此建立连接或配对（而是返回 `rfcomm.not_connected`）。`uuid` 是完整的 128 位 UUID，或基于蓝牙基础 UUID 的 16 位 `"xxxx"`。即使排在其他打开请求之后，应答也会在 20 秒内到达，因此请至少等待 25 秒。错误：`rfcomm.not_connected`、`rfcomm.service_not_found`、`rfcomm.service_reserved`、`rfcomm.open_failed`、`rfcomm.busy`。
+- 耳机和免提服务（`1108`、`1112`、`111E`、`111F`）无论使用哪种 UUID 形式，都会被拒绝并返回 `rfcomm.service_reserved`。BlueCaster 将它们用于耳机麦克风。
+- RFCOMM 直通需要经典蓝牙（A2DP）连接。对于通过 LE Audio 连接的设备，`rfcomm.open` 始终返回 `rfcomm.not_connected`。
 - `rfcomm.send {channel_id, data}` → `null`。`data` 为 base64（标准，带填充），每个请求最多 64 KiB，按请求顺序以最多 `mtu` 大小的帧发送。错误：`rfcomm.no_channel`、`rfcomm.busy`（队列已满，未发送）、`rfcomm.timeout`（不确定是否已发送：请勿重复发送，请重新打开信道）。
+- 发送大量数据（例如固件更新）时，请放慢速度。信道与音频共用同一条无线链路，快速发送大量数据可能导致声音中断。
 - 收到的数据以 `rfcomm_data` 事件 `{channel_id, data}` 到达，且只发给打开该信道的连接。
 - `rfcomm.close {channel_id}` → `null`，在此之前发送的数据全部发出后返回；之后不会再收到 `rfcomm_closed`。
 - 管道连接结束时，信道也会关闭；信道还可能随 `rfcomm_closed` 事件 `{channel_id, reason}` 关闭：`remote`（设备关闭了信道或链路断开）、`disconnected`（A2DP 连接结束）、`stopped`（蓝牙堆栈停止）、`overflow`（客户端未读取的接收数据超过 1 MiB）。
+
+## 耳机按钮 {#headphone-buttons}
+
+当 `welcome.features` 包含 `"media_button"` 时可用。耳机上的按钮按下或松开时，所有客户端都会收到 `media_button` 事件。无需订阅。
+
+```json
+{"type": "event", "rev": 42, "event": {"kind": "media_button", "value": {"button": "play", "pressed": true, "le_audio": false}}}
+```
+
+- `button` 是 `play`、`pause`、`stop`、`next`、`previous`、`fast_forward`、`rewind`、`volume_up`、`volume_down`、`mute` 之一。其他按钮不会上报。
+- 按下按钮时 `pressed` 为 `true`，松开时为 `false`。LE Audio 耳机只上报按下。
+- 事件来自 LE Audio 耳机时，`le_audio` 为 `true`。
+- 耳机会根据自己判断的播放状态发送 `play` 或 `pause`，而这个判断可能已经过时。如果只需切换播放和暂停，请对两者做相同处理。
+- BlueCaster 仍会把播放/暂停、下一首、上一首和停止作为媒体键传给 Windows。如果你的工具自己处理按钮，请让用户关闭 **音频设备 > 用音频设备的按钮控制播放**。关闭该设置后，事件仍会送达。
 
 ## 兼容性 {#compatibility}
 
 - **功能。** 使用新增内容之前，请检查 `welcome.features`。2.0.2-beta.10 之前的核心不包含该字段。
 - **未知请求。** 核心无法读取的请求（未知方法、错误的参数）会以错误 `ipc.bad_request` 应答；连接保持打开。2.0.2-beta.10 之前的核心则会关闭连接。其他任何无法读取的帧都会关闭连接。
-- **新字段。** 核心会随时间向状态和事件中添加字段。请忽略不认识的字段，不要因为这些字段而拒绝消息。
+- **新字段。** 核心会随时间向状态和事件中添加字段。请忽略不认识的字段，不要因为这些字段而拒绝消息。事件类型也会以同样的方式增加：遇到不认识的 `kind` 时，请跳过该事件。
 - **3.0.0 中的改名**（[#193](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/193)）：管道将改为 `\\.\pipe\bluecaster-<SID>`。在 3.0.0 之后至少 6 个月内，核心仍会以相同的协议同时在 `\\.\pipe\a2dpwb-<SID>` 上监听；移除前会先在发布说明中公布。请先尝试 `bluecaster-<SID>`，失败时再回退到 `a2dpwb-<SID>`。核心的互斥体改为 `Local\BlueCaster_Core`，同一期间也继续持有 `Local\A2DPWB_v2_Core`，两者的移除会一起公告。
 
 ## 示例 {#example}

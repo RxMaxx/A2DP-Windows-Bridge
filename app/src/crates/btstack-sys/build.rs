@@ -150,8 +150,10 @@ fn main() {
     // ENABLE_PRINTF_TO_LOG sends those lines to the HCI dump log instead
     // (HCI_DUMP_LOG_LEVEL_PRINT), for this file only
     let mut realtek = build.clone();
-    // csrc/realtek.c includes btstack_chipset_realtek.c (reads its firmware table)
-    realtek.define("ENABLE_PRINTF_TO_LOG", None).file(csrc.join("realtek.c"));
+    // csrc/realtek.c includes btstack_chipset_realtek.c (reads its firmware
+    // table), as patched_realtek writes it to OUT_DIR
+    let patched = patched_realtek(&btstack);
+    realtek.include(patched.parent().unwrap()).define("ENABLE_PRINTF_TO_LOG", None).file(csrc.join("realtek.c"));
     realtek.compile("btstack_realtek");
 
     let mut core: Vec<PathBuf> = std::fs::read_dir(btstack.join("src"))
@@ -293,6 +295,31 @@ fn patched_hci(btstack: &Path) -> PathBuf {
 
 fn replace_once(source: &mut String, file: &str, from: &str, to: &str) {
     replace_n(source, file, from, to, 1);
+}
+
+/// chipset/realtek/btstack_chipset_realtek.c taking an "RTBTCore" (v2)
+/// firmware over USB on a chip whose key ID reads 0, written to OUT_DIR as
+/// btstack_chipset_realtek_patched.c (csrc/realtek.c includes it).
+///
+/// BTstack stops such a download over USB ("Wrong key id"), although its
+/// own section parser handles key ID 0: it skips the security sections and
+/// takes the plain and dummy ones. Realtek's Windows driver treats key ID 0
+/// the same way (bt-host realtek_btnic: section 3 only for another key ID).
+/// A file with no section for the chip still fails, as "firmware_size == 0".
+fn patched_realtek(btstack: &Path) -> PathBuf {
+    const FILE: &str = "btstack_chipset_realtek.c";
+    let mut source = std::fs::read_to_string(btstack.join("chipset/realtek").join(FILE)).unwrap();
+    source.insert_str(0, "/* BlueCaster: patched by btstack-sys build.rs (patched_realtek) */\n");
+    replace_once(
+        &mut source,
+        FILE,
+        "if ((realtek_interface == REALTEK_INTERFACE_USB) && (key_id == 0)) {",
+        "if (0) { /* BlueCaster: key ID 0, a chip without a security key */",
+    );
+    let path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("btstack_chipset_realtek_patched.c");
+    std::fs::write(&path, source).unwrap();
+    println!("cargo:rerun-if-changed={}", btstack.join("chipset/realtek").join(FILE).display());
+    path
 }
 
 fn replace_n(source: &mut String, file: &str, from: &str, to: &str, n: usize) {

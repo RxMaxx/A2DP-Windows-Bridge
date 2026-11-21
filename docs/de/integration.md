@@ -95,7 +95,17 @@ Ein Client braucht keinen eigenen Zustand. Er behält den letzten Snapshot und w
 
 `stream.state` ist eines von `idle`, `connecting`, `streaming`, `reconnecting`, `error`; `stream.message` nennt den Grund als [Meldungsschlüssel](#errors-and-messages).
 
-**Revisionen.** Jedes Zustands-Event trägt die nächste Revision (`rev` + 1). Eine Lücke bedeutet, dass ein Event verloren gegangen ist. Fordern Sie dann mit `state.snapshot` einen neuen Snapshot an. Liest ein Client zu langsam, sendet ihm der Kern auch unaufgefordert einen neuen `snapshot`. Events, die keinen Zustand betreffen (`link`, `log`, `receiver`, `rfcomm_data`, `rfcomm_closed`), tragen die aktuelle Revision und erhöhen sie nicht.
+`adapter.active` ist der USB-Adapter, den BlueCaster gerade verwendet. Der Wert ist `null`, solange kein Adapter geöffnet ist: vor der ersten Gerätesuche oder Verbindung und während Bluetooth neu startet.
+
+```json
+"active": {"display_name": "RTL8761BU (0x2357:0x0604)", "windows_name": "TP-Link UB500 Adapter", "vid": 9047, "pid": 1540, "vendor": "Realtek", "chip": "RTL8761BU", "bt_version": "5.1"}
+```
+
+`vid` und `pid` sind Zahlen. `windows_name`, `chip` und `bt_version` können `null` sein. `chip` ist nur bei Realtek-Adaptern bekannt.
+
+Jeder Client erhält die Zustands-Events, ohne sie abonnieren zu müssen. Ein Event kommt nur, wenn sich etwas ändert. Eine Verbindung kann daher lange still bleiben.
+
+**Revisionen.** Jedes Zustands-Event trägt die nächste Revision (`rev` + 1). Eine Lücke bedeutet, dass ein Event verloren gegangen ist. Fordern Sie dann mit `state.snapshot` einen neuen Snapshot an. Liest ein Client zu langsam, sendet ihm der Kern auch unaufgefordert einen neuen `snapshot`. Events, die keinen Zustand betreffen (`link`, `log`, `receiver`, `rfcomm_data`, `rfcomm_closed`, `media_button`), tragen die aktuelle Revision und erhöhen sie nicht.
 
 Wenn der Kern beendet wird, sendet er das Event `bye` und schließt die Pipe.
 
@@ -136,23 +146,42 @@ Methoden für Werkzeuge:
 | `diag.info` | `{"mask": bool}` (optional) | `DiagInfo` (der Text von „Diagnose kopieren“) |
 | `rfcomm.open`, `rfcomm.send`, `rfcomm.close` | siehe [RFCOMM-Passthrough](#rfcomm-passthrough) | |
 
+Senden Sie bei jedem `diag.subscribe` sowohl `logs` als auch `link`. Jeder Aufruf setzt beide Werte. Fehlt `logs`, werden die Protokoll-Events ausgeschaltet.
+
 Methoden, die das BlueCaster-Fenster verwendet und die ein Werkzeug nur mit Vorsicht einsetzen sollte: `profile.save` / `profile.delete`, `settings.set` (ersetzt **alle** Einstellungen: Senden Sie die neuesten `settings` mit Ihrer Änderung, nie ein unvollständiges Objekt), `device.forget` / `device.rename`, `adapter.*` (`adapter.assign_winusb` und `adapter.restore_driver` zeigen eine UAC-Abfrage; `adapter.probe` und `adapter.run_script`, die Chip-Werkzeuge des Entwicklermodus, halten den Bluetooth-Stack an), `app.quit`. Die übrigen Methoden dienen den Seiten des Fensters und können sich ohne Ankündigung ändern: `stream.start_custom`, die anderen `device.*`-Methoden (`device.import_windows_pairings` zeigt eine UAC-Abfrage), `audio.apps`, `audio.mixer` / `audio.mixer_set`, `diag.*` außer den beiden oben, `receiver.*` und `app.*`. Die vollständige Liste mit Parametern und Ergebnissen ist das Enum `Method` in `protocol.rs`.
 
 ## RFCOMM-Passthrough {#rfcomm-passthrough}
 
 Verfügbar, wenn `welcome.features` `"rfcomm"` enthält (2.0.2-beta.10 und neuer). Damit erreicht ein Werkzeug die RFCOMM-Dienste der Kopfhörer (Steuer-Apps der Hersteller: Akku, Geräuschunterdrückung, EQ) über die bestehende Verbindung von BlueCaster. Windows selbst sieht Kopfhörer, die über BlueCaster verbunden sind, nicht.
 
-- `rfcomm.open {address, uuid}` → `{channel_id, mtu}`. `address` muss das Gerät sein, an das gerade gestreamt wird. Der Kern baut dafür nie selbst eine Verbindung oder Kopplung auf (`rfcomm.not_connected`). `uuid` ist eine vollständige 128-Bit-UUID oder eine 16-Bit-`"xxxx"` auf der Bluetooth-Basis-UUID. Die Antwort kommt innerhalb von 20 s, auch wenn andere Öffnungsanfragen davor warten. Warten Sie daher mindestens 25 s. Fehler: `rfcomm.not_connected`, `rfcomm.service_not_found`, `rfcomm.open_failed`, `rfcomm.busy`.
+- `rfcomm.open {address, uuid}` → `{channel_id, mtu}`. `address` muss das Gerät sein, an das gerade gestreamt wird. Der Kern baut dafür nie selbst eine Verbindung oder Kopplung auf (`rfcomm.not_connected`). `uuid` ist eine vollständige 128-Bit-UUID oder eine 16-Bit-`"xxxx"` auf der Bluetooth-Basis-UUID. Die Antwort kommt innerhalb von 20 s, auch wenn andere Öffnungsanfragen davor warten. Warten Sie daher mindestens 25 s. Fehler: `rfcomm.not_connected`, `rfcomm.service_not_found`, `rfcomm.service_reserved`, `rfcomm.open_failed`, `rfcomm.busy`.
+- Die Headset- und Freisprechdienste (`1108`, `1112`, `111E`, `111F`) werden in beiden UUID-Formen mit `rfcomm.service_reserved` abgelehnt. BlueCaster verwendet sie für das Headset-Mikrofon.
+- Der Passthrough braucht eine klassische (A2DP-)Verbindung. Bei einem Gerät, das über LE Audio verbunden ist, liefert `rfcomm.open` immer `rfcomm.not_connected`.
 - `rfcomm.send {channel_id, data}` → `null`. `data` ist Base64 (Standard, mit Padding), höchstens 64 KiB pro Anfrage, gesendet in Frames von höchstens `mtu` Bytes in der Reihenfolge der Anfragen. Fehler: `rfcomm.no_channel`, `rfcomm.busy` (Warteschlange voll, nicht gesendet), `rfcomm.timeout` (unklar, ob gesendet wurde: nicht wiederholen, sondern den Kanal neu öffnen).
+- Senden Sie große Datenmengen langsam, zum Beispiel bei einem Firmware-Update. Der Kanal teilt sich die Funkverbindung mit der Audioübertragung. Schnelles Senden kann zu Aussetzern führen.
 - Empfangene Daten kommen als Events `rfcomm_data` `{channel_id, data}` an, und zwar nur bei der Verbindung, die den Kanal geöffnet hat.
 - `rfcomm.close {channel_id}` → `null`, sobald die vorher gesendeten Daten übertragen sind. Es folgt kein `rfcomm_closed`.
 - Ein Kanal wird auch geschlossen, wenn die Pipe-Verbindung endet, oder mit einem Event `rfcomm_closed` `{channel_id, reason}`: `remote` (das Gerät hat ihn geschlossen oder die Verbindung ist abgebrochen), `disconnected` (die A2DP-Verbindung wurde beendet), `stopped` (der Bluetooth-Stack wurde angehalten), `overflow` (der Client hat mehr als 1 MiB empfangener Daten ungelesen gelassen).
+
+## Kopfhörertasten {#headphone-buttons}
+
+Verfügbar, wenn `welcome.features` `"media_button"` enthält. Wird eine Taste am Kopfhörer gedrückt oder losgelassen, erhält jeder Client ein `media_button`-Event. Ein Abonnement ist nicht nötig.
+
+```json
+{"type": "event", "rev": 42, "event": {"kind": "media_button", "value": {"button": "play", "pressed": true, "le_audio": false}}}
+```
+
+- `button` ist eines von `play`, `pause`, `stop`, `next`, `previous`, `fast_forward`, `rewind`, `volume_up`, `volume_down`, `mute`. Andere Tasten werden nicht gemeldet.
+- `pressed` ist `true`, wenn die Taste gedrückt wird, und `false`, wenn sie losgelassen wird. LE-Audio-Kopfhörer melden nur das Drücken.
+- `le_audio` ist `true`, wenn das Event von LE-Audio-Kopfhörern kam.
+- Kopfhörer senden `play` oder `pause`, je nachdem, ob ihrer Ansicht nach gerade etwas läuft. Diese Annahme kann veraltet sein. Behandeln Sie beide gleich, wenn Sie die Wiedergabe umschalten.
+- BlueCaster gibt Wiedergabe/Pause, nächsten und vorherigen Titel sowie Stopp weiterhin als Medientasten an Windows weiter. Wenn Ihr Werkzeug die Tasten selbst verarbeitet, bitten Sie den Benutzer, **Audiogeräte > Wiedergabe über die Tasten des Audiogeräts steuern** auszuschalten. Die Events kommen auch an, wenn diese Einstellung ausgeschaltet ist.
 
 ## Kompatibilität {#compatibility}
 
 - **Features.** Prüfen Sie `welcome.features`, bevor Sie eine Ergänzung verwenden. Kerne vor 2.0.2-beta.10 lassen das Feld weg.
 - **Unbekannte Anfragen.** Eine Anfrage, die der Kern nicht lesen kann (eine unbekannte Methode, fehlerhafte Parameter), wird mit dem Fehler `ipc.bad_request` beantwortet. Die Verbindung bleibt offen. Kerne vor 2.0.2-beta.10 schließen stattdessen die Verbindung. Jeder andere unlesbare Frame beendet die Verbindung.
-- **Neue Felder.** Der Kern ergänzt mit der Zeit Felder im Zustand und in Events. Ignorieren Sie unbekannte Felder und weisen Sie eine Nachricht nicht deswegen zurück.
+- **Neue Felder.** Der Kern ergänzt mit der Zeit Felder im Zustand und in Events. Ignorieren Sie unbekannte Felder und weisen Sie eine Nachricht nicht deswegen zurück. Ebenso kommen neue Event-Arten hinzu: Überspringen Sie ein Event, dessen `kind` Sie nicht kennen.
 - **Umbenennung in 3.0.0** ([#193](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/193)): Die Pipe wird zu `\\.\pipe\bluecaster-<SID>`. Der Kern wartet mit demselben Protokoll mindestens 6 Monate nach 3.0.0 weiterhin auch auf `\\.\pipe\a2dpwb-<SID>`. Bevor dieser Name entfernt wird, kündigen die Release Notes das an. Versuchen Sie zuerst `bluecaster-<SID>` und weichen Sie auf `a2dpwb-<SID>` aus. Der Mutex des Kerns heißt dann `Local\BlueCaster_Core`. Für denselben Zeitraum hält der Kern zusätzlich `Local\A2DPWB_v2_Core`. Beide Entfernungen werden gemeinsam angekündigt.
 
 ## Beispiel {#example}

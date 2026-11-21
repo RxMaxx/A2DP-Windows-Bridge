@@ -608,12 +608,15 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
             abr: false,
             bitrate_capped: false,
             hi_res_set: false,
+            low_latency: false,
             source: req.source.info(),
             details: None,
         });
         tracing::info!("LE Audio streaming: {}", started.status.summary);
     };
     report(&started, audio.as_ref(), mic_note.as_ref());
+    // The set first: the other earbud is never saved as a device of its own
+    inner.learn_le_set(&host, &req.device, &started.status.devices, le.extra_devices.is_empty());
     inner.save_le_device(&addr, &req.device_name);
 
     // Windows volume <-> headset volume through the VCP module
@@ -629,10 +632,28 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
     // The headset volume (VCP) for the volume slider (issue #86: disabled
     // while LE Audio streamed), as AVRCP's reports are for classic devices
     let mut shown_volume = None;
+    // CIS of the stream that get no SDU through while the others play (an
+    // earbud whose controller queue never empties)
+    let mut shown_stalled = 0;
     while !stopped() {
         inner.wait_tick(Duration::from_millis(200));
         if stopped() {
             break;
+        }
+        let stalled = host.le_stream_stats().cis_stalled;
+        if stalled != shown_stalled {
+            shown_stalled = stalled;
+            if stalled > 0 {
+                tracing::warn!("LE Audio: {stalled} CIS get no audio through, the others play on");
+                inner.notify(StreamState::Streaming, Msg::new("status.le_set_partial"));
+            } else {
+                tracing::info!("LE Audio: every CIS gets audio through again");
+                let partial = (host.le_set_members_missing() > 0).then(|| Msg::new("status.le_set_partial"));
+                inner.notify(
+                    StreamState::Streaming,
+                    mic_note.clone().or(partial).unwrap_or_else(|| Msg::new("status.connected")),
+                );
+            }
         }
         if let Some(v) = volume.as_mut() {
             v.tick(sync_volume, &crate::volume_sync::LeHeadphones(&host));
@@ -833,7 +854,14 @@ pub fn broadcast_config(le: &LeRequest) -> Result<BroadcastConfig, String> {
     })?;
     let random = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64)
         ^ u64::from(std::process::id()).rotate_left(32);
-    Ok(BroadcastConfig { name, code, preset, stereo: !b.mono, broadcast_id: broadcast::broadcast_id(random) })
+    Ok(BroadcastConfig {
+        name,
+        code,
+        preset,
+        stereo: !b.mono,
+        split: !b.mono && b.split,
+        broadcast_id: broadcast::broadcast_id(random),
+    })
 }
 
 /// The session of a broadcast (Auracast source, developer mode): no device
@@ -914,6 +942,7 @@ fn run_broadcast(inner: &Arc<Inner>, req: StreamRequest) {
         abr: false,
         bitrate_capped: false,
         hi_res_set: false,
+        low_latency: false,
         source: req.source.info(),
         details: None,
     });
@@ -1095,6 +1124,7 @@ mod tests {
             overflows: 2,
             send_errors: 0,
             prefill: 5,
+            ..Default::default()
         };
         assert_eq!(
             le_stats_line(&s),

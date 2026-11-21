@@ -24,6 +24,9 @@ Layouts (--layout):
            (--auracast), the sink scans, syncs to the periodic advertising
            and the BIG (--broadcast-code for an encrypted one) and receives
            every BIS; both controllers are le_audio/broadcast.py's
+  auracast-split
+           two broadcast sinks, one following "<name> L", the other
+           "<name> R" (BlueCaster with --auracast --auracast-split)
 
 --privacy: the sinks use resolvable private addresses (a new one after each
 link went down); READY then lists their current RPAs, not the public
@@ -59,6 +62,7 @@ LAYOUTS = {
     'earbuds': [('BlueCaster LE L', FL, 1, [1]), ('BlueCaster LE R', FR, 1, [1])],
     'mono': [('BlueCaster LE M', 0, 1, [1])],
     'auracast': [],   # one broadcast sink, no unicast server
+    'auracast-split': [],   # two broadcast sinks, on "<name> L" and "<name> R"
 }
 
 log = logging.getLogger('emu_le_audio')
@@ -74,7 +78,7 @@ def capture_path(base, index):
 async def main(args):
     link = LeLocalLink()
     transport = await open_transport(f'tcp-server:127.0.0.1:{args.port}')
-    (BroadcastController if args.layout == 'auracast' else LeEmuController)(
+    (BroadcastController if args.layout.startswith('auracast') else LeEmuController)(
         'BlueCaster',
         host_source=transport.source,
         host_sink=transport.sink,
@@ -84,6 +88,12 @@ async def main(args):
     if args.layout == 'auracast':
         await broadcast_sink.start(link, SINK_ADDRESSES[0], args.capture, args.broadcast_code)
         print(f'READY 127.0.0.1:{args.port} sinks={SINK_ADDRESSES[0]}', flush=True)
+        await asyncio.get_running_loop().create_future()
+    if args.layout == 'auracast-split':
+        for index, suffix in enumerate([' L', ' R']):
+            await broadcast_sink.start(link, SINK_ADDRESSES[index], capture_path(args.capture, index),
+                                       args.broadcast_code, suffix)
+        print(f'READY 127.0.0.1:{args.port} sinks={",".join(SINK_ADDRESSES)}', flush=True)
         await asyncio.get_running_loop().create_future()
     sinks = []
     for index, (name, locations, ases, counts) in enumerate(LAYOUTS[args.layout]):

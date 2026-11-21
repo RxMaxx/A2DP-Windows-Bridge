@@ -45,6 +45,32 @@ export function Button(props: ButtonProps) {
   );
 }
 
+/**
+ * A ref for text cut with an ellipsis (`.clamp-2`, `.ellipsis`): the full
+ * text as the native tooltip while it is cut, none while it fits.
+ * Checked again as the text or the element's size changes.
+ */
+export function titleWhenCut(text: () => string): (el: HTMLElement) => void {
+  return (el) => {
+    const check = () => {
+      // A line cut away is far more than the pixel a line's height rounds to
+      const cut = el.scrollHeight > el.clientHeight + 4 || el.scrollWidth > el.clientWidth + 1;
+      if (cut) el.title = text();
+      else el.removeAttribute("title");
+    };
+    createEffect(() => {
+      text();
+      check();
+    });
+    // The display font may come after the first layout
+    void document.fonts?.ready.then(check);
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    onCleanup(() => ro.disconnect());
+  };
+}
+
 /** Icon-only button: the label is for screen readers and the tooltip */
 export function IconButton(props: JSX.ButtonHTMLAttributes<HTMLButtonElement> & { icon: IconName; label: string }) {
   const [own, rest] = splitProps(props, ["icon", "label", "class"]);

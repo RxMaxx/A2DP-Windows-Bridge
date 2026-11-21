@@ -67,6 +67,7 @@ Usage: bluecaster-core --cli [-d XX:XX:XX:XX:XX:XX] [options]
   -q <quality>          hq (default); sq, mq for LDAC and LHDC V5; mhq for LHDC V5; ll (low latency)
                         for aptX Adaptive (other codecs: hq, their highest bit rate)
   -a                    adaptive bit rate (LDAC, LHDC V5, aptX Adaptive; SBC / SBC XQ: bitpool)
+  --lhdcv5-ll           LHDC V5 low latency, where the device lists it
   --fallback            a codec -c the device does not offer falls back to the
                         best one it offers (as the app does), instead of an error
   --force-codec         a codec -c the device does not offer is asked for anyway
@@ -109,6 +110,8 @@ LE Audio (experimental, LC3 over LE isochronous channels):
   --auracast-code <code>
                         encrypt the broadcast with this code (4-16 bytes)
   --auracast-mono       one mono channel instead of left and right
+  --auracast-split      left and right as two broadcasts of their own
+                        (<name> L / <name> R, a mono channel each)
 
 Headset microphone:
   --headset-mic [on|auto]
@@ -141,6 +144,9 @@ Development / testing:
                         Disconnect / Connect in the app (A2DP)
   --wait-off            headphones turned off: wait for them, as the app does
   --services            once streaming, list the services the device gives in SDP
+  --ipc                 serve the IPC pipe during the run (needs
+                        BLUECASTER_INSTANCE, so it never takes the installed
+                        core's pipe)
   --eq <point>[,<point>...]
                         the playback EQ on, a point as <Hz>:<dB>[:<Q>[:<type>]]
                         (type peak, lowshelf, highshelf, highpass, lowpass;
@@ -174,6 +180,8 @@ struct Args {
     codec: Option<CodecKind>,
     quality: Quality,
     abr: bool,
+    /// --lhdcv5-ll: LHDC V5 low latency (issue #543)
+    lhdcv5_low_latency: bool,
     /// --fallback: a codec the device does not offer falls back, as a profile's
     fallback: bool,
     /// --force-codec: a codec the device does not offer is asked for anyway
@@ -195,6 +203,8 @@ struct Args {
     probe: bool,
     /// --services: once streaming, the services the device lists in SDP
     services: bool,
+    /// --ipc: the IPC pipe served during the run (a test instance's only)
+    ipc: bool,
     /// --headset-mic [on|auto], --mic-output: headset mode once streaming
     headset_mic: HeadsetMic,
     mic_output: Option<String>,
@@ -248,6 +258,8 @@ struct LeArgs {
     broadcast_code: Option<String>,
     /// --auracast-mono
     broadcast_mono: bool,
+    /// --auracast-split
+    broadcast_split: bool,
 }
 
 /// --le-scan without a time (v1 scan_seconds)
@@ -278,6 +290,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
         codec: None,
         quality: Quality::High,
         abr: false,
+        lhdcv5_low_latency: false,
         fallback: false,
         force_codec: false,
         unlisted_options: false,
@@ -294,6 +307,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
         scan: None,
         probe: false,
         services: false,
+        ipc: false,
         headset_mic: HeadsetMic::Off,
         mic_output: None,
         voice_codec: None,
@@ -340,6 +354,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
             }
             "-q" => a.quality = Quality::from_key(&value(&mut it, "-q")?.to_lowercase()),
             "-a" => a.abr = true,
+            "--lhdcv5-ll" => a.lhdcv5_low_latency = true,
             "--fallback" => a.fallback = true,
             "--force-codec" => a.force_codec = true,
             "--unlisted-options" => a.unlisted_options = true,
@@ -398,6 +413,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
             }
             "--probe" => a.probe = true,
             "--services" => a.services = true,
+            "--ipc" => a.ipc = true,
             "--headset-mic" => {
                 // An optional mode; alone: on
                 let mode = match it.peek().map(|s| s.as_str()) {
@@ -484,9 +500,13 @@ fn parse(args: &[String]) -> Result<Args, String> {
             }
             "--auracast-code" => a.le.broadcast_code = Some(value(&mut it, "--auracast-code")?),
             "--auracast-mono" => a.le.broadcast_mono = true,
+            "--auracast-split" => a.le.broadcast_split = true,
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown option {other}")),
         }
+    }
+    if a.le.broadcast_mono && a.le.broadcast_split {
+        return Err("--auracast-mono and --auracast-split cannot be used together".into());
     }
     Ok(a)
 }
@@ -539,8 +559,12 @@ pub fn run(args: &[String]) -> i32 {
         eoutln!("Cannot create HCI capture file {}: {e}", path.display());
         return 1;
     }
+    if a.ipc && ipc::instance_suffix().is_empty() {
+        eoutln!("--ipc needs BLUECASTER_INSTANCE (a test instance's own pipe)");
+        return 2;
+    }
     let (tx, rx) = mpsc::channel();
-    let service = Service::new(
+    let service = Arc::new(Service::new(
         ServiceOptions {
             config_dir: bluecaster_core::paths::config_dir(),
             hci_tcp: a.hci_tcp.clone(),
@@ -549,7 +573,10 @@ pub fn run(args: &[String]) -> i32 {
             usb: a.usb.as_ref().map(|(_, s)| s.clone()).unwrap_or_default(),
         },
         tx,
-    );
+    ));
+    if a.ipc {
+        serve_ipc(service.clone());
+    }
     if !a.eq.is_empty() {
         let eq = bluecaster_core::media_eq::MediaEq { enabled: true, bands: a.eq.clone() };
         outln!("Playback EQ: {} point(s)", eq.settings().bands().len());
@@ -791,6 +818,7 @@ pub fn run(args: &[String]) -> i32 {
         auto_order: codec::AutoOrder::default(),
         quality: a.quality,
         abr: a.abr,
+        lhdcv5_low_latency: a.lhdcv5_low_latency,
         sbc_bitpool: a.sbc_bitpool,
         sbcxq_bitpool: a.sbc_bitpool,
         sbc_min_bitpool: 0,
@@ -956,6 +984,17 @@ fn stream_session(
             Ok(ServiceEvent::OtherDeviceBack(a)) => outln!("Another device connected: {}", bt_host::addr_str(&a)),
             // The loader's own log lines say it
             Ok(ServiceEvent::Loader(_)) => {}
+            // The set is kept with the saved device; merging is the UI core's
+            Ok(ServiceEvent::LeSetLearned) => {}
+            // Over TCP there is no USB adapter to tell
+            Ok(ServiceEvent::Adapter(_)) => {}
+            // --ipc: the clients get the button
+            Ok(ServiceEvent::Button(b)) => {
+                outln!("Headphone button: {:?} {}", b.button, if b.pressed { "pressed" } else { "released" });
+                if let Some(state) = IPC_STATE.get() {
+                    state.on_service_event(ServiceEvent::Button(b));
+                }
+            }
             Ok(ServiceEvent::Voice(Some(v))) => outln!(
                 "Voice: {} at {} Hz, microphone to {}",
                 v.codec,
@@ -966,6 +1005,36 @@ fn stream_session(
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return false,
         }
+    }
+}
+
+/// The state --ipc serves ([`serve_ipc`])
+static IPC_STATE: std::sync::OnceLock<Arc<crate::state::CoreState>> = std::sync::OnceLock::new();
+
+/// --ipc: the IPC pipe of this test instance, for the run (the emulator's
+/// RFCOMM passthrough and button cases). The state the clients see is not
+/// kept up to date: the service's events stay with the command line, which
+/// passes on only the headphone buttons.
+fn serve_ipc(service: Arc<Service>) {
+    let spawned = std::thread::Builder::new().name("ipc".into()).spawn(move || {
+        let rt = match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
+            Ok(rt) => rt,
+            Err(e) => return eoutln!("IPC runtime: {e}"),
+        };
+        let sid = match win_sys::pipe::current_user_sid() {
+            Ok(sid) => sid,
+            Err(e) => return eoutln!("cannot read the user SID: {e}"),
+        };
+        let state = crate::state::CoreState::new(service, Box::new(|_| {}), Box::new(|| {}), Box::new(|_| {}));
+        let _ = IPC_STATE.set(state.clone());
+        let (name, old_name) = (ipc::pipe_name(&sid), ipc::old_pipe_name(&sid));
+        outln!("IPC: serving the pipe of instance {}", ipc::instance_suffix().trim_start_matches('-'));
+        if let Err(e) = rt.block_on(crate::server::serve(state, name, old_name)) {
+            eoutln!("IPC server: {e}");
+        }
+    });
+    if let Err(e) = spawned {
+        eoutln!("IPC thread: {e}");
     }
 }
 
@@ -1191,6 +1260,7 @@ fn le_broadcast(a: &Args, service: &Service, rx: &mpsc::Receiver<ServiceEvent>, 
         code: le.broadcast_code.clone(),
         quality: "hq".into(),
         mono: Some(le.broadcast_mono),
+        split: Some(le.broadcast_split),
         source: "tone".into(),
         ..Default::default()
     };
@@ -1662,7 +1732,8 @@ mod tests {
             parse(&args("--cli --hci-tcp 127.0.0.1:9900 --auracast BlueCaster-test --test-tone --duration 5")).unwrap();
         assert!(a.le.on && a.test_tone && a.device.is_none());
         assert_eq!(a.le.broadcast.as_deref(), Some("BlueCaster-test"));
-        assert!(a.le.broadcast_code.is_none() && !a.le.broadcast_mono);
+        assert!(a.le.broadcast_code.is_none() && !a.le.broadcast_mono && !a.le.broadcast_split);
+        assert!(parse(&args("--cli --auracast Speakers --auracast-split")).unwrap().le.broadcast_split);
         let a = parse(&[
             "--cli".into(),
             "--auracast".into(),
@@ -1679,6 +1750,13 @@ mod tests {
         assert!(a.le.broadcast_mono);
         assert_eq!(a.le.preset.as_deref(), Some("24_2_2"));
         assert_eq!(parse(&args("--cli --auracast")).err().as_deref(), Some("--auracast needs a value"));
+        // Mono and split exclude each other, in either order
+        for both in ["--auracast-mono --auracast-split", "--auracast-split --auracast-mono"] {
+            assert_eq!(
+                parse(&args(&format!("--cli --auracast Speakers {both}"))).err().as_deref(),
+                Some("--auracast-mono and --auracast-split cannot be used together")
+            );
+        }
     }
 
     #[test]

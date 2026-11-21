@@ -269,6 +269,11 @@ pub fn le_devices_file(config: &Path) -> PathBuf {
     devices_dir(config).join("le_audio_devices.txt")
 }
 
+/// The coordinated sets of the saved LE Audio devices (member addresses)
+pub fn le_sets_file(config: &Path) -> PathBuf {
+    devices_dir(config).join("le_audio_sets.txt")
+}
+
 pub fn device_codecs_file(config: &Path) -> PathBuf {
     devices_dir(config).join("device_codecs.json")
 }

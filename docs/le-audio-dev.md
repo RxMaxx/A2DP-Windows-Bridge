@@ -349,19 +349,63 @@ buffer (`le_audio::sdu_queue::SduQueue`: prefill queue + 3 sets, one more per
 underrun up to queue + 7, 16 at most, dropping the oldest beyond that). No
 allocation per frame: sets are recycled through the queue's pool.
 
-The BTstack thread sends on `HCI_EVENT_CIS_CAN_SEND_NOW` (`le/iso_send.rs`):
-complete SDUs, sequence numbers per CIS, **no time stamp** (the controller
-places SDUs by sequence number), up to 2 SDUs queued per CIS
-(`hci_set_num_iso_packets_to_queue`; queue x CIS within the controller's ISO
-buffers), and a send guard that keeps the sent sets at most queue + 2
-intervals ahead of real time. A round starts once every CIS that is still up
-has its SDU, so one CIS going down does not stall the others. Underrun -> encoded
-silence ("LE Audio: no audio for SDU set N ..."). While sending, the system
-timer resolution is 1 ms (`btstack_sys::HighTimerResolution`, like v1's
-`timeBeginPeriod(1)`); otherwise BTstack's Windows run loop and its clock move
-in 15.6 ms steps. At the end: "LE Audio: stopped sending: N SDU sets
-(...), S silence, U underruns, ..." and, if the guard had to wait, how late
-its timer fired.
+The BTstack thread sends unicast audio paced by the SDU interval
+(`le/iso_send.rs`, run loop timer `TIMER_ISO`), 2 intervals ahead of real
+time. Each interval it takes the next set and gives every CIS its SDU with
+that interval's sequence number: complete SDUs, **no time stamp**, and the
+number counts SDU intervals, so a dropped SDU leaves a gap. Each CIS then
+sends on its own while it has fewer SDUs in the controller than its depth,
+counted from our sends and Number Of Completed Packets (both HCI events
+reach `IsoSender::on_hci_event` through `LeCore::on_hci`).
+
+- BTstack's CIS can-send-now is not used for sending (only to learn that the
+  CIG is active): `hci_iso_notify_can_send_now` grants the CIS of a CIG in
+  lockstep and stops at the first CIS whose queue is full ("wait for next
+  round"), so one CIS whose completions came late or never stopped the
+  others. `bluecaster_iso_send` (shim.c) sends without it; BTstack itself
+  does not check controller space for ISO.
+- Depth per CIS: its share of the controller's ISO buffers (at most 16),
+  narrowed to what the flush timeout of LE CIS Established needs (FT x ISO
+  interval in SDU intervals + 5, at least 4). A controller holds a PDU the
+  peer did not acknowledge until its flush point, so with FT 10 an SDU can
+  stay ~100 ms. MediaTek controllers keep 12 or Developer > Debug "ISO
+  packets queued per CIS".
+- A CIS without room keeps its SDUs waiting and sends them once completions
+  make room. An SDU is dropped ("late") only when its interval plus a wait
+  budget has passed: the CIG's max transport latency C->P, 40 to 200 ms
+  (100 ms if unknown). Completions held up for a few intervals, as a
+  controller does with a PDU the peer did not acknowledge or the emulator
+  during a 50-100 ms pause, cost no audio; a CIS that never completes keeps
+  at most budget / interval + 3 SDUs waiting. A late run loop timer makes
+  the missed intervals at once, skipping only those already past the
+  budget. BTstack's single HCI packet buffer is often taken (the
+  previous ISO packet, a GATT write): the send is refused with 0x57
+  (`BTSTACK_ACL_BUFFERS_FULL`) and the same SDU, same sequence number, goes
+  again on `HCI_EVENT_TRANSPORT_PACKET_SENT`.
+- Watchdog: a CIS without a completion for 2 s while SDUs wait in the
+  controller is stalled ("CIS 0x....: no SDU completed for 2 s"). All CIS
+  stalled -> the stream is reported lost and set up again; some -> the
+  others play on, `LeStreamStats::cis_stalled` and `status.le_set_partial`.
+- Logs: every LE CIS Established ("CIS 0x.... parameters: NSE, BN, FT, max
+  PDU, ISO interval, transport latency, PHY"), every 10 s "LE stream health"
+  (per CIS: SDUs/s, late, completion delay p50 / p90, queue peak), and at the
+  end each CIS's counters before "LE Audio: stopped sending: ...". The
+  counters are published about once a second, so the live bit rate is what
+  was really sent.
+
+Underrun -> encoded silence ("LE Audio: no audio for SDU set N ...").
+While sending, the system timer resolution is 1 ms
+(`btstack_sys::HighTimerResolution`, like v1's `timeBeginPeriod(1)`);
+otherwise BTstack's Windows run loop and its clock move in 15.6 ms steps.
+A broadcast (BIG) is still sent in rounds on `HCI_EVENT_BIS_CAN_SEND_NOW`,
+with a send guard keeping the rounds at most queue + 2 intervals ahead. A
+BIS send refused with 0x57 (the packet buffer taken, typically for the
+second BIS of the first round) waits in the round and goes again with the
+same SDU and sequence number on `HCI_EVENT_TRANSPORT_PACKET_SENT`. A stop
+while a round is only partly sent lets that round finish first
+(`IsoSender::finish_round`, 2 intervals at most, no further round), so every
+BIS ends on the same SDU; LE Terminate BIG follows once the round is out or
+the time has run out.
 
 The UI's ISO counters (`LinkSample.iso`) come from `BtHost::le_stream_stats()`
 (sets, silence, underruns, dropped, prefill).
@@ -382,7 +426,11 @@ It prints `READY 127.0.0.1:P sinks=<addr>[,<addr>]`. Options:
 `--ascs-release-waits-for-cis`, `--drop-link-after S`, `--privacy`,
 `--no-iso-buffers`, `--refuse-cis N` / `--cis-up-after S` (the controller
 refuses the Nth CIS of LE Create CIS with 0x1E; the others come up, with
-`--cis-up-after` only S seconds later), `--mic [SINKS]` / `--mic-rates` (a
+`--cis-up-after` only S seconds later), `--iso-buffers N` (ISO buffers of
+BlueCaster's controller), `--completion-delay-ms MS` (Number Of Completed
+Packets MS after delivery, with the matching FT in LE CIS Established),
+`--withhold-completions N` (the Nth CIS never completes while up),
+`--mic [SINKS]` / `--mic-rates` (a
 microphone: Source PAC 16 / 32 kHz 10 ms, a source ASE, a 1 kHz tone sent
 from pre-encoded LC3 frames in `le_audio/mic_frames.py` once BlueCaster has
 written Receiver Start Ready), and each profile's own options (`--csip-set`,
@@ -397,7 +445,7 @@ Emulator facts to know:
   P->C interval; a late SDU from the emulated headset's own sender is logged
   as "late microphone SDU" and does not fail a case). An SDU that arrives more than
   2 ms after its interval began is logged as `late SDU` and fails the case (a
-  real controller's queue of 2 SDUs per CIS would have run empty); stalls in
+  real controller's queue would have run empty); stalls in
   the emulator's own event loop are not counted. The emulator runs asyncio on
   the performance counter with 1 ms timers.
 - Every HCI command gets an answer (unknown ones: Unknown HCI Command).
@@ -526,7 +574,8 @@ pick it up. It is started from the Developer screen's Auracast tab (name,
 password, high / standard quality, stereo / mono, test tone or system
 audio; `stream.start_broadcast`, refused with `developer.off` unless
 developer mode is on) or with `--cli --auracast <name> [--auracast-code
-<code>] [--auracast-mono] [--le-preset 24_2_2]`, which goes through the
+<code>] [--auracast-mono | --auracast-split] [--le-preset 24_2_2]`, which
+goes through the
 same service path (`state::broadcast_request`, `le_stream::run_broadcast`).
 It needs LE Audio on (`le_audio_experimental`, else error.le_audio_disabled)
 and an adapter with ISO buffers and the Isochronous Broadcaster feature.
@@ -548,11 +597,38 @@ it.
   (`bluecaster_broadcast_advertise`, `bluecaster_big_create`, `bluecaster_big_terminate`,
   `bluecaster_broadcast_advertise_stop`).
 - bt-host `le/broadcast.rs`: advertising + LE Create BIG ->
-  GAP_SUBEVENT_BIG_CREATED -> `IsoSender::start_big`; stop: LE Terminate
+  GAP_SUBEVENT_BIG_CREATED -> `IsoSender::start_big`; stop: the round going
+  on finishes, LE Terminate
   BIG -> GAP_SUBEVENT_BIG_TERMINATED -> advertising removed ("Auracast:
   stopped"). A BIG the controller ends counts as a lost stream
   (error.auracast). `BtHost::le_start_broadcast` / `le_stop_broadcast`.
 - core `le_stream::run_broadcast`: no device; capture as for unicast.
+- Split (`--auracast-split`, the Auracast tab's "Left / right separately",
+  `stream.start_broadcast`'s `split`): left and right as two broadcasts of
+  their own, "<name> L" and "<name> R" (Broadcast_ID + 1 for R), each an
+  advertising set (SID 1 / 2) and a BIG (handle 0 / 1) of one mono BIS
+  without a location, for a pair of speakers that each tune to one
+  broadcast (as FlooGoo's "true wireless stereo" firmware does).
+  `le_audio::broadcast::groups` lists the broadcasts, `group_plan` /
+  `group_adv_data` give each its BASE and announcements; the shim holds
+  `BLUECASTER_BROADCASTS` (4) slots, a slot's index being its BIG handle;
+  bt-host creates every BIG and starts sending once all are up
+  (`IsoSender::start_bigs`: one SDU set per interval across the BIGs, each
+  BIG asked for BIS can-send-now, the round ends when every BIS got its
+  SDU). A BIG that fails or ends takes the others with it. Every slot after
+  the first advertises from a static random address of its own (derived
+  from the public one): Android lists broadcasters by address and showed
+  two sets from one address as one broadcast whose name kept changing.
+  Tried on 2026-11-20 on an ASUS BT600 (Realtek, 0B05:1D70) with two JBL
+  GO 4, one on L and one on R, at 24_2_2 and 48_4_2: a good stereo image,
+  no audible offset between the two, now and then a short stutter, on the
+  whole it works fairly well. Open: the cause of the stutters, and how far
+  apart in time the BIGs' anchors are on other controllers (each receiver
+  renders relative to its own BIG).
+  Split and mono exclude each other: `--auracast-mono` with
+  `--auracast-split` is an argument error, and `stream.start_broadcast` with
+  both `mono` and `split` true is refused as a bad request
+  (`stream.bad_channels`).
 
 BTstack 1.8.1 pitfalls found along the way:
 - `HCI_EVENT_BIS_CAN_SEND_NOW` is emitted only 4 bytes long, so the BIS handle
@@ -571,6 +647,12 @@ SDU), encrypted with the right code (synced) and a wrong one (MIC failure,
 no audio), mono 24_2_2. Not done yet: `run_test.py` cases and
 `bluecaster_decode` support for BIS (the decoder change in `tools/a2dp_decode`
 is unfinished).
+`--layout auracast-split` starts two sinks, one following "<name> L" and
+one "<name> R" (for `--auracast-split`). Checked by hand on 2026-11-21: both
+BIGs up, each sink got every SDU of its BIS; a refused LE Create BIG for
+either broadcast ends the other and removes both advertising sets. After a
+stop both sinks have received the same number of SDUs; before the stop
+let the last round finish, R ended one SDU short in 3 of 3 runs.
 Real hardware: not tried.
 
 ## LE Audio off

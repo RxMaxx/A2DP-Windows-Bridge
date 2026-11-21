@@ -183,6 +183,8 @@ export function createCore(transport: Transport) {
       setState("snap", null);
       return;
     }
+    // Headphone buttons are for other clients: not state, no revision
+    if (ev.kind === "media_button") return;
     const cur = state.rev;
     if (cur !== null) {
       if (rev <= cur) return; // already in the snapshot

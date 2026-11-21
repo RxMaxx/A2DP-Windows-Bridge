@@ -12,7 +12,7 @@ import type { Core } from "../ipc/store";
 
 type Source = "tone" | "loopback";
 type Quality = "hq" | "sq";
-type Channels = "stereo" | "mono";
+type Channels = "stereo" | "mono" | "split";
 
 /** The core's limits (le_audio::broadcast): UTF-8 bytes */
 export const NAME_BYTES = [4, 32] as const;
@@ -111,6 +111,7 @@ export function Auracast() {
         code: c.code === "" ? null : c.code,
         quality: c.quality,
         mono: c.channels === "mono",
+        split: c.channels === "split",
         source: c.source,
       }),
     );
@@ -185,6 +186,7 @@ export function Auracast() {
           options={[
             ["stereo", t("ui.dev.auracast_stereo")],
             ["mono", t("ui.dev.auracast_mono")],
+            ["split", t("ui.dev.auracast_split")],
           ]}
           onChange={(channels) => set({ channels })}
         />

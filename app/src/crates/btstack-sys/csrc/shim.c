@@ -1051,24 +1051,36 @@ static void cig_slots_reset(void) {
     memset(cig_slots, 0, sizeof(cig_slots));
 }
 
-/* ---- Broadcast storage (Auracast source): one extended + periodic
- * advertising set and one BIG. BTstack keeps pointers to the advertising
- * data, the set and the BIG parameters until the set is removed / the BIG
- * terminated. ---- */
+/* ---- Broadcast storage (Auracast source): per broadcast one extended +
+ * periodic advertising set and one BIG, in slot `big_handle` (several
+ * broadcasts at once, e.g. left and right as broadcasts of their own).
+ * BTstack keeps pointers to the advertising data, the set and the BIG
+ * parameters until the set is removed / the BIG terminated. ---- */
 
 #define BLUECASTER_ADV_DATA_MAX 251
-static le_advertising_set_t bc_adv_set;
-static uint8_t bc_adv_data[BLUECASTER_ADV_DATA_MAX];
-static uint8_t bc_pa_data[BLUECASTER_ADV_DATA_MAX];
-static int bc_adv_in_use;
-static uint8_t bc_adv_handle;
-static le_audio_big_t bc_big;
-static le_audio_big_params_t bc_big_params;
-static int bc_big_in_use;
+#define BLUECASTER_BROADCASTS 4
+typedef struct {
+    le_advertising_set_t adv_set;
+    uint8_t adv_data[BLUECASTER_ADV_DATA_MAX];
+    uint8_t pa_data[BLUECASTER_ADV_DATA_MAX];
+    int adv_in_use;
+    uint8_t adv_handle;
+    le_audio_big_t big;
+    le_audio_big_params_t big_params;
+    int big_in_use;
+} bc_slot_t;
+static bc_slot_t bc_slots[BLUECASTER_BROADCASTS];
 
 static void broadcast_reset(void) {
-    bc_adv_in_use = 0;
-    bc_big_in_use = 0;
+    for (int i = 0; i < BLUECASTER_BROADCASTS; i++) {
+        bc_slots[i].adv_in_use = 0;
+        bc_slots[i].big_in_use = 0;
+    }
+}
+
+/* The slot of a BIG handle, NULL when out of range */
+static bc_slot_t *bc_slot(uint8_t big_handle) {
+    return big_handle < BLUECASTER_BROADCASTS ? &bc_slots[big_handle] : NULL;
 }
 
 /* ---- Housekeeping on HCI events (registered by bluecaster_le_init) ---- */
@@ -1091,9 +1103,14 @@ static void le_hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
         if (size >= 5 && packet[2] == GAP_SUBEVENT_CIG_CREATED && packet[3] != ERROR_CODE_SUCCESS)
             cig_slot_release(packet[4]);
         /* Nor a BIG that failed or ended */
-        if (size >= 5 && packet[2] == GAP_SUBEVENT_BIG_CREATED && packet[3] != ERROR_CODE_SUCCESS)
-            bc_big_in_use = 0;
-        if (size >= 4 && packet[2] == GAP_SUBEVENT_BIG_TERMINATED) bc_big_in_use = 0;
+        if (size >= 5 && packet[2] == GAP_SUBEVENT_BIG_CREATED && packet[3] != ERROR_CODE_SUCCESS) {
+            bc_slot_t *s = bc_slot(packet[4]);
+            if (s != NULL) s->big_in_use = 0;
+        }
+        if (size >= 4 && packet[2] == GAP_SUBEVENT_BIG_TERMINATED) {
+            bc_slot_t *s = bc_slot(packet[3]);
+            if (s != NULL) s->big_in_use = 0;
+        }
         break;
     case BTSTACK_EVENT_STATE:
         /* HCI reset its state (power off): no CIG, BIG or advertising set is
@@ -1406,7 +1423,11 @@ uint8_t bluecaster_cig_create(uint8_t cig_id, uint32_t sdu_interval_c_to_p, uint
 }
 
 /* One HCI ISO data packet with a complete SDU: handle | PB 0b10, no time
- * stamp, SDU header (sequence number, length). For CIS can-send-now. */
+ * stamp, SDU header (sequence number, length). The caller keeps the
+ * controller's queue (bt-host iso_send counts completions; BTstack does not
+ * check ISO space). BTSTACK_ACL_BUFFERS_FULL while BTstack's one outgoing
+ * packet buffer is taken: nothing sent, send it again after
+ * HCI_EVENT_TRANSPORT_PACKET_SENT. */
 uint8_t bluecaster_iso_send(uint16_t cis_handle, uint16_t sequence_number, const uint8_t *sdu, uint16_t len) {
     if ((uint32_t)len + 4u > HCI_ISO_PAYLOAD_SIZE) return ERROR_CODE_INVALID_HCI_COMMAND_PARAMETERS;
     if (hci_is_packet_buffer_reserved()) return BTSTACK_ACL_BUFFERS_FULL;
@@ -1423,16 +1444,20 @@ uint8_t bluecaster_iso_send(uint16_t cis_handle, uint16_t sequence_number, const
 /* ---- Broadcast (Auracast source) ---- */
 
 /* Extended advertising (non-connectable, non-scannable) with `adv` and
- * periodic advertising with `pa` (the BASE), both started. Intervals in
- * 0.625 ms (extended) and 1.25 ms (periodic) units. */
-uint8_t bluecaster_broadcast_advertise(uint8_t sid, uint16_t adv_interval_min, uint16_t adv_interval_max,
-                                   uint16_t pa_interval_min, uint16_t pa_interval_max, const uint8_t *adv,
-                                   uint16_t adv_len, const uint8_t *pa, uint16_t pa_len, uint8_t *out_handle) {
-    if (bc_adv_in_use) return ERROR_CODE_COMMAND_DISALLOWED;
+ * periodic advertising with `pa` (the BASE), both started, in broadcast
+ * slot `slot` (the BIG handle its BIG will get). Intervals in 0.625 ms
+ * (extended) and 1.25 ms (periodic) units. */
+uint8_t bluecaster_broadcast_advertise(uint8_t slot, uint8_t sid, uint16_t adv_interval_min,
+                                   uint16_t adv_interval_max, uint16_t pa_interval_min, uint16_t pa_interval_max,
+                                   const uint8_t *adv, uint16_t adv_len, const uint8_t *pa, uint16_t pa_len,
+                                   uint8_t *out_handle) {
+    bc_slot_t *s = bc_slot(slot);
+    if (s == NULL) return ERROR_CODE_INVALID_HCI_COMMAND_PARAMETERS;
+    if (s->adv_in_use) return ERROR_CODE_COMMAND_DISALLOWED;
     if (adv_len > BLUECASTER_ADV_DATA_MAX || pa_len > BLUECASTER_ADV_DATA_MAX)
         return ERROR_CODE_INVALID_HCI_COMMAND_PARAMETERS;
-    memcpy(bc_adv_data, adv, adv_len);
-    memcpy(bc_pa_data, pa, pa_len);
+    memcpy(s->adv_data, adv, adv_len);
+    memcpy(s->pa_data, pa, pa_len);
     le_extended_advertising_parameters_t params;
     memset(&params, 0, sizeof(params));
     params.advertising_event_properties = 0; /* non-connectable, non-scannable, undirected */
@@ -1446,67 +1471,87 @@ uint8_t bluecaster_broadcast_advertise(uint8_t sid, uint16_t adv_interval_min, u
     params.advertising_sid = sid;
     bd_addr_t local;
     gap_local_bd_addr(local);
-    int random = btstack_is_null_bd_addr(local);
+    /* Slot 0 advertises from the public address; every other slot from a
+     * static random address of its own (receivers such as Android list
+     * broadcasters by address: two sets from one address show as one
+     * broadcast whose name keeps changing). Derived from the public
+     * address, so it stays the same from run to run. */
+    int random = btstack_is_null_bd_addr(local) || slot > 0;
     if (random) params.own_address_type = BD_ADDR_TYPE_LE_RANDOM;
-    uint8_t status = gap_extended_advertising_setup(&bc_adv_set, &params, &bc_adv_handle);
+    uint8_t status = gap_extended_advertising_setup(&s->adv_set, &params, &s->adv_handle);
     if (status != ERROR_CODE_SUCCESS) return status;
-    bc_adv_in_use = 1;
+    s->adv_in_use = 1;
     if (random) {
-        /* A static random address (top bits 0b11) */
-        bd_addr_t addr = {0xC2, 0xA2, 0xD0, 0x00, 0x00, 0x01};
-        gap_extended_advertising_set_random_address(bc_adv_handle, addr);
+        bd_addr_t addr;
+        if (btstack_is_null_bd_addr(local)) {
+            static const bd_addr_t fallback = {0xC2, 0xA2, 0xD0, 0x00, 0x00, 0x01};
+            memcpy(addr, fallback, 6);
+        } else {
+            memcpy(addr, local, 6);
+        }
+        /* Static random: top bits 0b11 (addr[0] is the most significant
+         * octet), one per slot */
+        addr[0] |= 0xC0;
+        addr[5] = (uint8_t)(addr[5] ^ (0x5A + slot));
+        gap_extended_advertising_set_random_address(s->adv_handle, addr);
     }
-    gap_extended_advertising_set_adv_data(bc_adv_handle, adv_len, bc_adv_data);
+    gap_extended_advertising_set_adv_data(s->adv_handle, adv_len, s->adv_data);
     le_periodic_advertising_parameters_t pa_params;
     pa_params.periodic_advertising_interval_min = pa_interval_min;
     pa_params.periodic_advertising_interval_max = pa_interval_max;
     pa_params.periodic_advertising_properties = 0;
-    gap_periodic_advertising_set_params(bc_adv_handle, &pa_params);
-    gap_periodic_advertising_set_data(bc_adv_handle, pa_len, bc_pa_data);
-    gap_periodic_advertising_start(bc_adv_handle, 0);
-    status = gap_extended_advertising_start(bc_adv_handle, 0, 0);
-    *out_handle = bc_adv_handle;
+    gap_periodic_advertising_set_params(s->adv_handle, &pa_params);
+    gap_periodic_advertising_set_data(s->adv_handle, pa_len, s->pa_data);
+    gap_periodic_advertising_start(s->adv_handle, 0);
+    status = gap_extended_advertising_start(s->adv_handle, 0, 0);
+    *out_handle = s->adv_handle;
     return status;
 }
 
-/* Stops periodic and extended advertising and removes the set */
-uint8_t bluecaster_broadcast_advertise_stop(void) {
-    if (!bc_adv_in_use) return ERROR_CODE_SUCCESS;
-    gap_periodic_advertising_stop(bc_adv_handle);
-    gap_extended_advertising_stop(bc_adv_handle);
-    uint8_t status = gap_extended_advertising_remove(bc_adv_handle);
-    bc_adv_in_use = 0;
+/* Stops periodic and extended advertising of slot `slot` and removes its
+ * set */
+uint8_t bluecaster_broadcast_advertise_stop(uint8_t slot) {
+    bc_slot_t *s = bc_slot(slot);
+    if (s == NULL || !s->adv_in_use) return ERROR_CODE_SUCCESS;
+    gap_periodic_advertising_stop(s->adv_handle);
+    gap_extended_advertising_stop(s->adv_handle);
+    uint8_t status = gap_extended_advertising_remove(s->adv_handle);
+    s->adv_in_use = 0;
     return status;
 }
 
-/* LE Create BIG on the advertising set (GAP_SUBEVENT_BIG_CREATED follows,
- * after BTstack set up the ISO data paths). `code`: 16 bytes, or NULL for
- * an unencrypted BIG. */
+/* LE Create BIG `big_handle` on the advertising set of slot `big_handle`
+ * (GAP_SUBEVENT_BIG_CREATED follows, after BTstack set up the ISO data
+ * paths). `code`: 16 bytes, or NULL for an unencrypted BIG. */
 uint8_t bluecaster_big_create(uint8_t big_handle, uint8_t num_bis, uint32_t sdu_interval_us, uint16_t max_sdu,
                           uint16_t max_transport_latency_ms, uint8_t rtn, uint8_t phy, uint8_t framing,
                           const uint8_t *code) {
-    if (!bc_adv_in_use || bc_big_in_use) return ERROR_CODE_COMMAND_DISALLOWED;
+    bc_slot_t *s = bc_slot(big_handle);
+    if (s == NULL) return ERROR_CODE_INVALID_HCI_COMMAND_PARAMETERS;
+    if (!s->adv_in_use || s->big_in_use) return ERROR_CODE_COMMAND_DISALLOWED;
     if (num_bis == 0 || num_bis > MAX_NR_BIS) return ERROR_CODE_INVALID_HCI_COMMAND_PARAMETERS;
-    memset(&bc_big_params, 0, sizeof(bc_big_params));
-    bc_big_params.big_handle = big_handle;
-    bc_big_params.advertising_handle = bc_adv_handle;
-    bc_big_params.num_bis = num_bis;
-    bc_big_params.sdu_interval_us = sdu_interval_us;
-    bc_big_params.max_sdu = max_sdu;
-    bc_big_params.max_transport_latency_ms = max_transport_latency_ms;
-    bc_big_params.rtn = rtn;
-    bc_big_params.phy = phy;
-    bc_big_params.packing = 0; /* sequential */
-    bc_big_params.framing = framing;
-    bc_big_params.encryption = code != NULL;
-    if (code != NULL) memcpy(bc_big_params.broadcast_code, code, 16);
-    uint8_t status = gap_big_create(&bc_big, &bc_big_params);
-    if (status == ERROR_CODE_SUCCESS) bc_big_in_use = 1;
+    le_audio_big_params_t *p = &s->big_params;
+    memset(p, 0, sizeof(*p));
+    p->big_handle = big_handle;
+    p->advertising_handle = s->adv_handle;
+    p->num_bis = num_bis;
+    p->sdu_interval_us = sdu_interval_us;
+    p->max_sdu = max_sdu;
+    p->max_transport_latency_ms = max_transport_latency_ms;
+    p->rtn = rtn;
+    p->phy = phy;
+    p->packing = 0; /* sequential */
+    p->framing = framing;
+    p->encryption = code != NULL;
+    if (code != NULL) memcpy(p->broadcast_code, code, 16);
+    uint8_t status = gap_big_create(&s->big, p);
+    if (status == ERROR_CODE_SUCCESS) s->big_in_use = 1;
     return status;
 }
 
 /* LE Terminate BIG (GAP_SUBEVENT_BIG_TERMINATED follows) */
 uint8_t bluecaster_big_terminate(uint8_t big_handle) {
-    if (!bc_big_in_use) return ERROR_CODE_COMMAND_DISALLOWED;
+    bc_slot_t *s = bc_slot(big_handle);
+    if (s == NULL || !s->big_in_use) return ERROR_CODE_COMMAND_DISALLOWED;
     return gap_big_terminate(big_handle);
 }
