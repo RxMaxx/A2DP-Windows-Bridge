@@ -245,6 +245,8 @@ NEGOTIATION = {
     # asked of an EarFun gave aptX, not aptX Adaptive); aptX HD missing:
     # LDAC above it, not AAC below
     'fallback-lhdcv5-to-ldac': ('lhdcv5', ['--codecs', 'sbc', 'aac', 'ldac'], 'ldac', ['--fallback']),
+    # LHDC V5 low latency asked for (issue #543): the sink lists it (P9 0x40)
+    'lhdcv5-ll': ('lhdcv5', [], 'lhdcv5', ['--lhdcv5-ll']),
     'fallback-aptxhd-to-ldac': ('aptxhd', ['--codecs', 'sbc', 'aac', 'ldac'], 'ldac', ['--fallback']),
     'fallback-opus-to-aptxad': ('opus', APTXAD_SINK, 'aptxad', ['--fallback']),
     # Opus 05: 48 kHz from a 44.1 kHz request; Auto never takes it (AAC here)
@@ -379,12 +381,19 @@ DEV_SETTINGS = {
 }
 QUALITY_ON, QUALITY_OFF = 'Huawei control: 2BA2 010101', 'Huawei control: 2BA2 010100'
 HI_RES_ON, HI_RES_OFF, HI_RES_CODEC = 'OPPO control: 0403 1801', 'OPPO control: 0403 1800', 'OPPO control: 041A 080100'
+LL_ASKED = 'LHDC V5: asking for low latency'
 ENCODED_1000, ENCODED_400 = 'encoder ready: LHDC V5 1000 kbps', 'encoder ready: LHDC V5 400 kbps'
 CTKD_GIVEN, CTKD_ASKING = f'CTKD: {SINK_ADDRESS} gave its LE keys', f'CTKD: asking {SINK_ADDRESS} for its LE keys'
 PAIRED = f'new link key from pairing with {SINK_ADDRESS}'
 # What these cases' logs must, and must not, have: name -> (log, text, whether
 # it is there, or how many times)
 LOG_CHECKS = {
+    # Issue #543: low latency only when asked for; then 10 ms encoding, the
+    # 100 ms send queue limit and the queue guard (ABR off)
+    'lhdcv5': [('bluecaster.log', LL_ASKED, False), ('bluecaster.log', 'LHDC V5: encode interval 20 ms', True)],
+    'lhdcv5-ll': [('bluecaster.log', LL_ASKED, True), ('bluecaster.log', 'LHDC V5: encode interval 10 ms', True),
+                  ('bluecaster.log', 'packets dropped after 100 ms (LHDC V5 low latency)', True),
+                  ('bluecaster.log', 'LHDC V5: queue guard on', True)],
     'sbcxq-abr-hold': [('bluecaster.log', 'encode at send time', True)],
     'ldac-hold': [('bluecaster.log', 'encode at send time', True)],
     'huawei-ldac': [('sink.log', QUALITY_ON, True), ('sink.log', QUALITY_OFF, False),
@@ -1113,10 +1122,12 @@ LINK_CASES = {
         ('sink.log', r'delay report sent \(187\.5 ms\)', True),
     ]),
     # Headphone buttons: each pass-through answer carries the command's state
-    # flag, so a release is not answered as a press (issue #420)
-    'avrcp-keys': (['--avrcp-keys', '3'], ['--duration', '8'], [
+    # flag, so a release is not answered as a press (issue #420); each press
+    # and release reaches the IPC clients (--ipc, buttons_client)
+    'avrcp-keys': (['--avrcp-keys', '3'], ['--duration', '8', '--ipc'], [
         ('sink.log', r'avrcp keys: 6 of 6 answers carry the state flag sent', True),
         ('bluecaster.log', r'AVRCP operation 0x49 released', True),
+        ('bluecaster.log', r'Headphone button: FastForward released', True),
     ]),
     # A headset that answers OPEN with a stray REJECT of DISCOVER under the
     # OPEN's label first: BTstack waits on for the OPEN accept
@@ -1125,6 +1136,18 @@ LINK_CASES = {
         ('bluecaster.log', r'ignoring a response to signal 1 while waiting for 6', True),
         ('bluecaster.log', r'streaming started', True),
         ('bluecaster.log', r'stream configuration timed out', False),
+    ]),
+    # The IPC's RFCOMM passthrough (--ipc, rfcomm_client): an echo service
+    # opened by its UUID while streaming, the hands-free service refused,
+    # a channel closed by the client and one by the stream's end. One log
+    # line per open, with the client and the service and no address.
+    'rfcomm': (['--echo', '--codecs', 'sbc'], ['--duration', '12', '--ipc'], [
+        ('sink.log', r'echo: channel open.*echo: 16 bytes.*echo: channel closed', True),
+        ('bluecaster.log', r'streaming started.*'
+                           r'IPC: emu-rfcomm/1 #\d+ rfcomm.open of 5D6A7B8C-0E1F-4A2B-9C3D-4E5F60718293: opened #', True),
+        ('bluecaster.log', r'IPC: emu-rfcomm/1 #\d+ rfcomm.open of 0000111E-0000-1000-8000-00805F9B34FB: '
+                           r'refused in \d+ ms: rfcomm.service_reserved', True),
+        ('bluecaster.log', r'rfcomm.open of [^\n]*' + SINK_ADDRESS, False),
     ]),
 }
 # Dual-mode pairing cases (issue #86): sink options, BlueCaster runs ('le' or
@@ -1377,9 +1400,209 @@ def main_scan(args):
     sys.exit(0 if passed == len(results) else 1)
 
 
+ECHO_UUID = '5D6A7B8C-0E1F-4A2B-9C3D-4E5F60718293'   # emu_sink.py EchoService.UUID
+
+
+class IpcClient:
+    """A client of the core's named pipe (docs/integration.md): frames of a
+    u32 length and JSON. Reads only what has arrived (PeekNamedPipe), so a
+    write never waits behind a blocking read on the same handle."""
+
+    def __init__(self, instance, name, log):
+        import ctypes
+        import msvcrt
+        sid = subprocess.run(['whoami', '/user', '/fo', 'csv', '/nh'], capture_output=True,
+                             text=True).stdout.strip().split(',')[1].strip('"')
+        path = rf'\\.\pipe\bluecaster-{sid}-{instance}'
+        deadline = time.time() + 30
+        while True:
+            try:
+                self.pipe = open(path, 'r+b', buffering=0)
+                break
+            except OSError:
+                if time.time() > deadline:
+                    raise RuntimeError('the IPC pipe never appeared') from None
+                time.sleep(0.2)
+        self.handle = msvcrt.get_osfhandle(self.pipe.fileno())
+        self.peek = ctypes.windll.kernel32.PeekNamedPipe
+        self.peek.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p,
+                              ctypes.POINTER(ctypes.c_ulong), ctypes.c_void_p]
+        self.available = ctypes.c_ulong()
+        self.log, self.next_id, self.events = log, 0, []
+        self.send({'type': 'hello', 'protocol': 1, 'client': name})
+        self.welcome = self.recv(5)
+        self.snapshot = self.recv(5)
+
+    def close(self):
+        self.pipe.close()
+
+    def send(self, msg):
+        data = json.dumps(msg).encode()
+        self.pipe.write(struct.pack('<I', len(data)) + data)
+
+    def _read(self, n):
+        buf = b''
+        while len(buf) < n:
+            chunk = self.pipe.read(n - len(buf))
+            if not chunk:
+                raise EOFError('the core closed the pipe')
+            buf += chunk
+        return buf
+
+    def recv(self, timeout):
+        """The next message, or None after timeout seconds"""
+        import ctypes
+        deadline = time.time() + timeout
+        while True:
+            if not self.peek(self.handle, None, 0, None, ctypes.byref(self.available), None):
+                raise EOFError('the core closed the pipe')
+            if self.available.value >= 4:
+                msg = json.loads(self._read(struct.unpack('<I', self._read(4))[0]))
+                if msg.get('type') == 'event' and msg['event']['kind'] in ('rfcomm_data', 'rfcomm_closed'):
+                    self.log.write(f'{time.strftime("%H:%M:%S")} {json.dumps(msg["event"])}\n')
+                return msg
+            if time.time() > deadline:
+                return None
+            time.sleep(0.02)
+
+    def request(self, method, params=None, timeout=30):
+        """(result, error) of a request; the events meanwhile are kept"""
+        self.next_id += 1
+        msg = {'type': 'request', 'id': self.next_id, 'method': method}
+        if params is not None:
+            msg['params'] = params
+        self.send(msg)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            m = self.recv(deadline - time.time())
+            if m is None:
+                break
+            if m.get('type') == 'response' and m.get('id') == self.next_id:
+                self.log.write(f'{time.strftime("%H:%M:%S")} {method} {json.dumps(params)} -> '
+                               f'{json.dumps(m.get("result"))} {json.dumps(m.get("error"))}\n')
+                return m.get('result'), m.get('error')
+            if m.get('type') == 'event':
+                self.events.append(m['event'])
+        raise TimeoutError(f'{method}: no answer in {timeout} s')
+
+    def event(self, kind, timeout, match=lambda value: True):
+        """The first event of this kind (also one kept), or None"""
+        for i, e in enumerate(self.events):
+            if e['kind'] == kind and match(e['value']):
+                return self.events.pop(i)['value']
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            m = self.recv(deadline - time.time())
+            if m is None:
+                break
+            if m.get('type') == 'event':
+                if m['event']['kind'] == kind and match(m['event']['value']):
+                    return m['event']['value']
+                self.events.append(m['event'])
+        return None
+
+
+def rfcomm_client(instance, log):
+    """The 'rfcomm' link case's client: opens the sink's echo service once
+    A2DP is up, gets back what it sends, is refused the hands-free service,
+    closes the channel, then opens another one that must close when the
+    stream stops"""
+    import base64
+    failures = []
+    c = IpcClient(instance, 'emu-rfcomm/1', log)
+    try:
+        if 'rfcomm' not in c.welcome.get('features', []):
+            return [f'IPC: no "rfcomm" in the features: {c.welcome}']
+        # Opens fail with rfcomm.not_connected until the A2DP connection is
+        # up; the stream starts right after it (the log check makes sure)
+        time.sleep(1)
+        deadline = time.time() + 40
+        while True:
+            opened, error = c.request('rfcomm.open', {'address': SINK_ADDRESS, 'uuid': ECHO_UUID})
+            if not error or error['code'] != 'rfcomm.not_connected' or time.time() > deadline:
+                break
+            time.sleep(0.5)
+        if error:
+            return [f'rfcomm.open of the echo service: {error}']
+        channel = opened['channel_id']
+        sent = b'BlueCaster echo\n'
+        _, error = c.request('rfcomm.send', {'channel_id': channel, 'data': base64.b64encode(sent).decode()})
+        if error:
+            failures.append(f'rfcomm.send: {error}')
+        received = b''
+        while len(received) < len(sent):
+            data = c.event('rfcomm_data', 10, lambda v: v['channel_id'] == channel)
+            if data is None:
+                break
+            received += base64.b64decode(data['data'])
+        if received != sent:
+            failures.append(f'echo: sent {sent!r}, received {received!r}')
+        for uuid in ('111E', '0000111f-0000-1000-8000-00805f9b34fb'):
+            opened, error = c.request('rfcomm.open', {'address': SINK_ADDRESS, 'uuid': uuid})
+            if not error or error['code'] != 'rfcomm.service_reserved':
+                failures.append(f'rfcomm.open of {uuid}: {opened} {error}, expected rfcomm.service_reserved')
+        _, error = c.request('rfcomm.close', {'channel_id': channel})
+        if error:
+            failures.append(f'rfcomm.close: {error}')
+        _, error = c.request('rfcomm.send', {'channel_id': channel, 'data': 'AA=='})
+        if not error or error['code'] != 'rfcomm.no_channel':
+            failures.append(f'rfcomm.send after the close: {error}, expected rfcomm.no_channel')
+        # Another channel: it closes with the stream at --duration's end
+        opened, error = c.request('rfcomm.open', {'address': SINK_ADDRESS, 'uuid': ECHO_UUID})
+        if error:
+            return failures + [f'second rfcomm.open: {error}']
+        closed = c.event('rfcomm_closed', 30, lambda v: v['channel_id'] == opened['channel_id'])
+        if closed is None:
+            failures.append('no rfcomm_closed when the stream stopped')
+        elif closed['reason'] not in ('disconnected', 'stopped'):
+            failures.append(f'rfcomm_closed with reason {closed["reason"]} when the stream stopped')
+        else:
+            log.write(f'closed with the stream ({closed["reason"]})\n')
+    except EOFError as e:
+        failures.append(f'IPC: {e}')
+    finally:
+        c.close()
+    return failures
+
+
+def buttons_client(instance, log):
+    """The 'avrcp-keys' link case's client: every press and release of the
+    sink's FAST FORWARD arrives as a media_button event, in order; over the
+    emulator's TCP transport no adapter is in use"""
+    c = IpcClient(instance, 'emu-buttons/1', log)
+    try:
+        failures = []
+        if 'media_button' not in c.welcome.get('features', []):
+            failures.append(f'IPC: no "media_button" in the features: {c.welcome}')
+        adapter = c.snapshot['state']['adapter']
+        if 'active' not in adapter or adapter['active'] is not None:
+            failures.append(f'IPC: adapter.active should be null over TCP: {adapter.get("active", "missing")}')
+        got = []
+        while len(got) < 6:
+            value = c.event('media_button', 30)
+            if value is None:
+                break
+            log.write(f'{time.strftime("%H:%M:%S")} media_button {json.dumps(value)}\n')
+            got.append((value['button'], value['pressed'], value['le_audio']))
+        wanted = [('fast_forward', pressed, False) for _ in range(3) for pressed in (True, False)]
+        if got != wanted:
+            failures.append(f'media_button events {got}, expected {wanted}')
+        return failures
+    except EOFError as e:
+        return [f'IPC: {e}']
+    finally:
+        c.close()
+
+
+# Link cases with an IPC client beside the run: case -> function(instance,
+# log) -> failures, on a thread of its own from the start of bluecaster-core
+LINK_CLIENTS = {'rfcomm': rfcomm_client, 'avrcp-keys': buttons_client}
+
+
 def run_link_case(args, case, port):
     """bluecaster-core --cli with the sink ending or opening links: each pattern
-    of the case is found, or not, in bluecaster.log / sink.log."""
+    of the case is found, or not, in bluecaster.log / sink.log; with an IPC
+    client (LINK_CLIENTS) beside it, its checks too."""
     sink_args, bluecaster_args, checks = LINK_CASES[case]
     out = os.path.join(args.out, 'link-' + case)
     shutil.rmtree(out, ignore_errors=True)
@@ -1387,22 +1610,45 @@ def run_link_case(args, case, port):
     failures = []
     port = free_port(port)
     sink = start_sink(port, os.path.join(out, 'sink.pklg'), os.path.join(out, 'sink.log'), extra=sink_args)
+    client = LINK_CLIENTS.get(case)
+    client_failures = []
     try:
-        env = dict(os.environ, BLUECASTER_CONFIG_DIR=os.path.join(out, 'config'), BLUECASTER_LOG='debug')
+        # A test instance of its own (--ipc serves its pipe): never the
+        # installed core's, nor another run's
+        env = dict(os.environ, BLUECASTER_CONFIG_DIR=os.path.join(out, 'config'), BLUECASTER_LOG='debug',
+                   BLUECASTER_INSTANCE=f'emu-{case}-{port}')
         with open(os.path.join(out, 'bluecaster.log'), 'w', encoding='utf-8', errors='replace') as log:
+            proc = subprocess.Popen(
+                [args.bluecaster, '--cli', '--hci-tcp', f'127.0.0.1:{port}', '-d', SINK_ADDRESS]
+                + ([] if '-c' in bluecaster_args else ['-c', 'sbc'])
+                + ['--test-tone', '--hci-capture', os.path.join(out, 'bluecaster.pklg')] + bluecaster_args,
+                stdout=log, stderr=subprocess.STDOUT, env=env)
+            thread = None
+            if client:
+                def run_client():
+                    with open(os.path.join(out, 'client.log'), 'w', encoding='utf-8') as client_log:
+                        try:
+                            client_failures.extend(client(env['BLUECASTER_INSTANCE'], client_log))
+                        except Exception as e:  # noqa: BLE001 - reported as the case's failure
+                            client_failures.append(f'IPC client: {e!r}')
+                thread = threading.Thread(target=run_client, daemon=True)
+                thread.start()
             try:
-                rc = subprocess.run(
-                    [args.bluecaster, '--cli', '--hci-tcp', f'127.0.0.1:{port}', '-d', SINK_ADDRESS]
-                    + ([] if '-c' in bluecaster_args else ['-c', 'sbc'])
-                    + ['--test-tone', '--hci-capture', os.path.join(out, 'bluecaster.pklg')] + bluecaster_args,
-                    stdout=log, stderr=subprocess.STDOUT, env=env, timeout=120).returncode
+                rc = proc.wait(timeout=120)
             except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
                 rc = 'timeout'
+            if thread:
+                thread.join(30)
+                if thread.is_alive():
+                    client_failures.append('IPC client: still running after BlueCaster exited')
     finally:
         sink.terminate()
         sink.wait(10)
     if rc != 0:
         failures.append(f'BlueCaster exited with {rc} (see bluecaster.log)')
+    failures += client_failures
     for name, pattern, present in checks:
         if bool(re.search(pattern, read_text(os.path.join(out, name)), re.S)) != present:
             failures.append(f'{name}: "{pattern}" {"missing" if present else "found"}')

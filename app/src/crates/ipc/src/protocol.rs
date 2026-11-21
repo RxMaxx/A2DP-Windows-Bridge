@@ -7,8 +7,8 @@
 //! 3. Then [`ServerMessage::Event`]s, each replacing one part of the state,
 //!    with the next revision. A gap in the revisions means a lost event: the
 //!    client asks for a new snapshot ([`Method::StateSnapshot`]). Events
-//!    that are not state (link, log, receiver, rfcomm_data, rfcomm_closed)
-//!    carry the current revision: they are not compared with it.
+//!    that are not state (link, log, receiver, rfcomm_data, rfcomm_closed,
+//!    media_button) carry the current revision: they are not compared with it.
 //! 4. Requests ([`ClientMessage::Request`]) are answered by a
 //!    [`ServerMessage::Response`] with the same id. A request this core
 //!    cannot read (a method it does not know, or bad parameters) is
@@ -27,8 +27,9 @@ use ts_rs::TS;
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// The Welcome's `features`: "rfcomm" for rfcomm.open / send / close and
-/// their events (2.0.2)
-pub const FEATURES: &[&str] = &["rfcomm"];
+/// their events (2.0.2), "media_button" for the [`Event::MediaButton`]
+/// events (after 3.0.2)
+pub const FEATURES: &[&str] = &["rfcomm", "media_button"];
 
 /// The longest `device.scan` (seconds); a longer one is cut to it
 pub const MAX_SCAN_SECONDS: u32 = 600;
@@ -199,6 +200,38 @@ pub struct AdapterState {
     #[ts(optional = nullable)]
     #[serde(default)]
     pub loader: Option<LoaderStatus>,
+    /// The USB adapter the running Bluetooth stack has open; None while no
+    /// stack runs (before the first scan or connection) and over the
+    /// emulator's TCP transport
+    #[ts(optional = nullable)]
+    #[serde(default)]
+    pub active: Option<ActiveAdapter>,
+}
+
+/// The adapter BlueCaster uses (AdapterState::active): what its entry in
+/// `adapters` tells, without the device's instance ID or address
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+
+pub struct ActiveAdapter {
+    /// As AdapterInfo::display_name: "RTL8761BU (0x2357:0x0604)"
+    pub display_name: String,
+    /// As AdapterInfo::windows_name: "TP-Link UB500 Adapter"
+    #[ts(optional = nullable)]
+    #[serde(default)]
+    pub windows_name: Option<String>,
+    pub vid: u16,
+    pub pid: u16,
+    /// The chip's vendor: "Realtek", "Intel", ..., "Unknown"
+    pub vendor: String,
+    /// The Realtek chip ("RTL8761BU"); None for other vendors and unknown
+    /// chips
+    #[ts(optional = nullable)]
+    #[serde(default)]
+    pub chip: Option<String>,
+    /// As AdapterInfo::bt_version: "5.3"
+    #[ts(optional = nullable)]
+    #[serde(default)]
+    pub bt_version: Option<String>,
 }
 
 /// Where a firmware loader is (AdapterState::loader)
@@ -311,6 +344,10 @@ pub struct StreamInfo {
     /// reconnect for it
     #[serde(default)]
     pub hi_res_set: bool,
+    /// LHDC V5 low latency is in the configuration in use (asked for by
+    /// the profile, listed by the device; issue #543)
+    #[serde(default)]
+    pub low_latency: bool,
     /// Where the audio comes from
     #[serde(default)]
     pub source: Option<SourceInfo>,
@@ -403,6 +440,9 @@ pub struct CodecDeviceCaps {
     pub bit_depths: Vec<u32>,
     /// Its largest bit rate in bps (0 = not said)
     pub max_bitrate: u32,
+    /// LHDC V5: it lists low latency (issue #543)
+    #[serde(default)]
+    pub lhdcv5_low_latency: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -611,6 +651,9 @@ pub struct Profile {
     /// hq, sq, mq; mhq for LHDC V5; ll for aptX Adaptive
     pub quality: String,
     pub abr: bool,
+    /// LHDC V5: low latency asked for (issue #543)
+    #[serde(default)]
+    pub lhdcv5_low_latency: bool,
     pub codec_fallback: bool,
     /// The codec was chosen on its card while the device did not offer it:
     /// asked for anyway, no fallback (issue #86)
@@ -814,6 +857,9 @@ pub struct CodecValues {
     pub sample_rate: u32,
     pub bit_depth: u32,
     pub abr: bool,
+    /// LHDC V5: low latency asked for (issue #543)
+    #[serde(default)]
+    pub lhdcv5_low_latency: bool,
     pub sbc_bitpool: u8,
     pub sbcxq_bitpool: u8,
     pub sbc_min_bitpool: u8,
@@ -832,6 +878,7 @@ impl Default for CodecValues {
             sample_rate: 0,
             bit_depth: 0,
             abr: false,
+            lhdcv5_low_latency: false,
             sbc_bitpool: 0,
             sbcxq_bitpool: 0,
             sbc_min_bitpool: 0,
@@ -1672,6 +1719,33 @@ pub struct LogLine {
     pub session: Option<u32>,
 }
 
+/// A headphone button (Event::MediaButton)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaButton {
+    Play,
+    Pause,
+    Stop,
+    Next,
+    Previous,
+    FastForward,
+    Rewind,
+    VolumeUp,
+    VolumeDown,
+    Mute,
+}
+
+/// A headphone button was pressed or released (Event::MediaButton)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+
+pub struct ButtonPress {
+    pub button: MediaButton,
+    /// False: released. LE Audio headphones send only the press.
+    pub pressed: bool,
+    /// The button came over LE Audio (media control), not Classic (AVRCP)
+    pub le_audio: bool,
+}
+
 /// One part of the state changed, or a subscribed stream produced data
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
@@ -1711,6 +1785,9 @@ pub enum Event {
     /// An RFCOMM channel closed without its connection's rfcomm.close (to
     /// that connection only); its last event
     RfcommClosed(RfcommClosed),
+    /// A headphone button arrived (to every connection, not part of the
+    /// state), also with the "media keys" setting off
+    MediaButton(ButtonPress),
     /// The core is shutting down
     Bye,
 }
@@ -1765,6 +1842,10 @@ pub enum Method {
         #[ts(optional = nullable)]
         #[serde(default)]
         abr: Option<bool>,
+        /// LHDC V5 low latency, as a profile's (issue #543)
+        #[ts(optional = nullable)]
+        #[serde(default)]
+        lhdcv5_low_latency: Option<bool>,
         #[ts(optional = nullable)]
         #[serde(default)]
         codec_fallback: Option<bool>,
@@ -1774,10 +1855,12 @@ pub enum Method {
     /// profile stays. `name`: the Broadcast Name (4-32 bytes); `code`: the
     /// Broadcast Code (4-16 bytes; none or empty: open); `quality`: "hq"
     /// (48 kHz) or "sq" (24 kHz); `mono`: one channel instead of left and
-    /// right; `source` / `source_id` / `source_name` as for
-    /// stream.start_custom ("app" fails with error.le_audio_capture). Error
-    /// developer.off while developer mode is off; a name or code out of
-    /// range fails the stream (error.auracast).
+    /// right; `split`: left and right as two broadcasts of their own
+    /// ("<name> L" / "<name> R", one mono BIS each; not with `mono`);
+    /// `source` / `source_id` / `source_name` as for stream.start_custom
+    /// ("app" fails with error.le_audio_capture). Error developer.off while
+    /// developer mode is off; a name or code out of range fails the stream
+    /// (error.auracast).
     #[serde(rename = "stream.start_broadcast")]
     StreamStartBroadcast {
         name: String,
@@ -1788,6 +1871,9 @@ pub enum Method {
         #[ts(optional = nullable)]
         #[serde(default)]
         mono: Option<bool>,
+        #[ts(optional = nullable)]
+        #[serde(default)]
+        split: Option<bool>,
         source: String,
         #[ts(optional = nullable)]
         #[serde(default)]
@@ -2051,6 +2137,8 @@ pub enum Method {
     /// "disconnected"), or the device closes it ("remote"). Answered within
     /// 20 s, also behind other opens: wait at least 25 s. -> RfcommOpened.
     /// Errors: rfcomm.not_connected, rfcomm.service_not_found,
+    /// rfcomm.service_reserved (headset / hands-free 0x1108, 0x1112,
+    /// 0x111E, 0x111F: the core's own headset microphone link),
     /// rfcomm.open_failed (also when out of time: a channel that opens
     /// later is closed), rfcomm.busy (too many channels, or out of time
     /// behind other opens).
@@ -2667,6 +2755,18 @@ mod tests {
         assert_eq!(
             m(serde_json::json!({"method": "diag.subscribe", "params": {"logs": "info", "link": true}})),
             Method::DiagSubscribe { logs: Some(LogLevel::Info), link: true, receiver: None }
+        );
+        // Each call sets both: a missing `logs` turns the log lines off, a
+        // missing `link` is refused
+        assert_eq!(
+            m(serde_json::json!({"method": "diag.subscribe", "params": {"link": true}})),
+            Method::DiagSubscribe { logs: None, link: true, receiver: None }
+        );
+        assert!(
+            serde_json::from_value::<Method>(
+                serde_json::json!({"method": "diag.subscribe", "params": {"logs": "info"}})
+            )
+            .is_err()
         );
         let custom = m(serde_json::json!({"method": "stream.start_custom", "params": {
             "device": "AA:BB:CC:DD:EE:FF", "codec": "sbc", "quality": "hq", "source": "tone"}}));

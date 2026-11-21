@@ -31,8 +31,8 @@ use crate::rfcomm::{Rfcomm, TIMER_RFCOMM};
 use crate::sdp_services::SdpServices;
 use crate::shared::Shared;
 use crate::stats::LinkStats;
-use crate::{AfhClassification, ConnectFailure, Controls, DiscoveredDevice, HostEvent, InitFailure, MediaKey};
-use crate::{intel, mediatek, qualcomm, realtek_btnic};
+use crate::{AfhClassification, Button, ConnectFailure, Controls, DiscoveredDevice, HostEvent, InitFailure, MediaKey};
+use crate::{atheros, broadcom, intel, mediatek, qualcomm, realtek_btnic};
 
 pub(crate) type Job = Box<dyn FnOnce(&mut HostApp, &Stack) + Send>;
 
@@ -76,6 +76,8 @@ pub(crate) struct Setup {
     /// HostConfig::realtek_firmware_file
     pub realtek_firmware_file: Option<PathBuf>,
     pub broadcom_ids: Vec<(u16, u16)>,
+    /// HostConfig::broadcom_marks
+    pub broadcom_marks: Option<std::sync::Arc<dyn broadcom::PatchMarks>>,
     /// HFP audio gateway for the headphones' battery level
     pub battery: bool,
     /// The HFP audio gateway also offers the audio connection
@@ -372,6 +374,18 @@ impl HostApp {
         self.start_loader(stack, Box::new(loader));
     }
 
+    /// The Qualcomm Atheros AR30xx patch and system configuration download
+    /// (crate::atheros), then HCI init: the firmware folder first, then
+    /// Qualcomm Atheros' Windows driver
+    pub fn start_atheros_loader(&mut self, stack: &Stack) {
+        let dir = self.setup.firmware_dir.clone();
+        tracing::info!("Qualcomm Atheros adapter: checking its firmware, folder {}", dir.display());
+        let loader = atheros::Loader::new(Box::new(move |name| {
+            read_firmware_file(&dir, "qca", name).or_else(|| atheros::from_windows_driver(name))
+        }));
+        self.start_loader(stack, Box::new(loader));
+    }
+
     /// The download of a Realtek chip whose firmware only Realtek's Windows
     /// driver has (crate::realtek_btnic), then HCI init: the firmware folder
     /// first, then the driver
@@ -385,6 +399,30 @@ impl HostApp {
             chip,
             file,
         );
+        self.start_loader(stack, Box::new(loader));
+    }
+
+    /// The patch of Broadcom's Windows driver (crate::broadcom), then HCI
+    /// init: the firmware folder first, then the driver. A .hcd in the
+    /// firmware folder for the adapter goes BTstack's way instead, during
+    /// HCI init (the transport is installed already).
+    pub fn start_broadcom_loader(&mut self, stack: &Stack) {
+        let dir = self.setup.firmware_dir.clone();
+        if find_bcm_hcd(&dir, &self.setup.broadcom_ids).is_some() {
+            tracing::info!("Broadcom adapter: the firmware folder's .hcd is used instead of Broadcom's driver's patch");
+            self.setup_hci_and_power_on(stack, None);
+            return;
+        }
+        tracing::info!("Broadcom adapter: checking its patch");
+        // No .hcd in the folder: BTstack's PatchRAM check after Read Local
+        // Version has nothing to do
+        self.bcm_checked = true;
+        let mut loader = broadcom::Loader::new(Box::new(move |name| {
+            read_firmware_file(&dir, "brcm", name).or_else(|| broadcom::from_windows_driver(name))
+        }));
+        if let Some(marks) = self.setup.broadcom_marks.clone() {
+            loader = loader.with_marks(marks, env!("CARGO_PKG_VERSION"));
+        }
         self.start_loader(stack, Box::new(loader));
     }
 
@@ -531,7 +569,13 @@ impl HostApp {
                     e => e.to_string(),
                 };
                 self.show_loader_done(vendor, said, false);
-                self.init_failed(InitFailure::Failed);
+                // The adapter's start fails with the advice to replug it
+                let failure = if matches!(e, bringup::LoadError::Replug(_)) {
+                    InitFailure::NeedsReplug
+                } else {
+                    InitFailure::Failed
+                };
+                self.init_failed(failure);
             }
         }
     }
@@ -2439,6 +2483,11 @@ impl HostApp {
     }
 
     fn on_button(&mut self, stack: &Stack, op: u8, pressed: bool) {
+        // The IPC clients get every known button, press and release, also
+        // with the media keys off
+        if let Some(button) = avrcp_button(op) {
+            let _ = self.events.send(HostEvent::Button { button, pressed, le_audio: false });
+        }
         // A button sends a press and then a release; act on the press
         if !pressed {
             return;
@@ -2936,6 +2985,24 @@ fn completed_counts(p: &[u8]) -> Vec<(u16, u16)> {
         .collect()
 }
 
+/// The button of an AVRCP pass-through operation; None for one that has
+/// no name in the IPC (numbers, channels, menus)
+fn avrcp_button(op: u8) -> Option<Button> {
+    Some(match op {
+        AVRCP_OPERATION_ID_PLAY => Button::Play,
+        AVRCP_OPERATION_ID_PAUSE => Button::Pause,
+        AVRCP_OPERATION_ID_STOP => Button::Stop,
+        AVRCP_OPERATION_ID_FORWARD => Button::Next,
+        AVRCP_OPERATION_ID_BACKWARD => Button::Previous,
+        AVRCP_OPERATION_ID_FAST_FORWARD => Button::FastForward,
+        AVRCP_OPERATION_ID_REWIND => Button::Rewind,
+        AVRCP_OPERATION_ID_VOLUME_UP => Button::VolumeUp,
+        AVRCP_OPERATION_ID_VOLUME_DOWN => Button::VolumeDown,
+        AVRCP_OPERATION_ID_MUTE => Button::Mute,
+        _ => return None,
+    })
+}
+
 /// A debug command's return parameters as hex bytes for the log, the
 /// controller's own address (little-endian, as HCI carries it) replaced:
 /// the diagnostics mask only addresses written as addresses
@@ -2958,8 +3025,23 @@ fn return_bytes(bytes: &[u8], local_address: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ConnectFailure, completed_counts, missing_loader_warning, remove_alias, return_bytes, signaling_failure,
+        ConnectFailure, avrcp_button, completed_counts, missing_loader_warning, remove_alias, return_bytes,
+        signaling_failure,
     };
+    use crate::Button;
+    use btstack_sys::consts::*;
+
+    #[test]
+    fn avrcp_operations_name_their_buttons() {
+        assert_eq!(avrcp_button(AVRCP_OPERATION_ID_PLAY), Some(Button::Play));
+        assert_eq!(avrcp_button(AVRCP_OPERATION_ID_PAUSE), Some(Button::Pause));
+        assert_eq!(avrcp_button(AVRCP_OPERATION_ID_FORWARD), Some(Button::Next));
+        assert_eq!(avrcp_button(AVRCP_OPERATION_ID_BACKWARD), Some(Button::Previous));
+        assert_eq!(avrcp_button(AVRCP_OPERATION_ID_FAST_FORWARD), Some(Button::FastForward));
+        assert_eq!(avrcp_button(AVRCP_OPERATION_ID_VOLUME_DOWN), Some(Button::VolumeDown));
+        // A number key
+        assert_eq!(avrcp_button(0x20), None);
+    }
 
     #[test]
     fn counts_completed_packets_by_handle() {

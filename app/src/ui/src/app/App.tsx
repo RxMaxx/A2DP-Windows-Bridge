@@ -315,7 +315,7 @@ function DevicePill(props: { entry: AudioEntry | null }) {
       <span class="status-pill-text">
         {/* As Home's card: the device, battery and state, the codec */}
         <Show when={device()}>
-          <span class="status-pill-device ellipsis">{device()}</span>
+          <span class="status-pill-device clamp-2">{device()}</span>
         </Show>
         <span class="status-pill-line">
           <Show when={live() && showsBattery(stream())}>

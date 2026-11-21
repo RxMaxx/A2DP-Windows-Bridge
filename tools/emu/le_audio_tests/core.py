@@ -48,7 +48,21 @@ CASES = [
     # lost (no LE Remove CIG)
     Case('cis-refused-late', 'earbuds', r'.*', sink_args=['--refuse-cis', '1', '--cis-up-after', '0.5'],
          expect_error=CIS_REFUSED),
+    # The controller (20 ISO buffers, as a Realtek adapter) completes each SDU
+    # 40 ms after its interval, as one holds a PDU the earbud did not
+    # acknowledge until its flush point: BlueCaster must queue enough per CIS
+    # to send every SDU in time (with 2 per CIS it sent about a third)
+    Case('slow-completions', 'earbuds', r'LC3 48000 Hz 10 ms 155 octets, 2 channel\(s\) over 2 CIS',
+         sink_args=['--iso-buffers', '20', '--completion-delay-ms', '40'], tags=('slow-completions',)),
+    # The controller never completes the SDUs of the second CIS: the first
+    # must play on (the sender ran both in lockstep and stopped), the second
+    # be reported stalled, and the stream not be set up again
+    Case('cis-stalled', 'earbuds', r'LC3 48000 Hz 10 ms 155 octets, 2 channel\(s\) over 2 CIS',
+         sink_args=['--withhold-completions', '1'], tones=None, tags=('cis-stalled',)),
 ]
+
+# bluecaster.log at the end of a stream: each CIS's own counters
+CIS_SENT = re.compile(r'LE Audio: CIS 0x([0-9A-F]+): (\d+) SDUs sent, (\d+) completed, (\d+) late')
 
 # The emulator's PACS Sink Audio Locations per sink, in capture order
 # (le_audio/bap.py logs them)
@@ -119,4 +133,35 @@ def check(case, ctx):
         failures.append('BlueCaster did not disconnect the CIS before Release')
     if 'contexts-later' in case.tags and 'no audio context available for Enable' not in log:
         failures.append('BlueCaster did not wait for an available audio context')
+    failures += check_cis_counters(case, ctx)
+    return failures
+
+
+def check_cis_counters(case, ctx):
+    """Every CIS got its SDUs into the controller in time (none dropped as
+    late), except where the case stalls one on purpose (cis-stalled: the
+    other CIS plays the whole time, the stalled one is reported and the
+    stream is not lost)"""
+    log = ctx['bluecaster_log']
+    counters = [(h, int(sent), int(late)) for h, sent, _, late in CIS_SENT.findall(log)]
+    if not counters:
+        return ['no per-CIS counters ("LE Audio: CIS 0x...: N SDUs sent") in bluecaster.log']
+    failures = []
+    if 'cis-stalled' in case.tags:
+        sent = sorted(n for _, n, _ in counters)
+        if sent[-1] < 100 * 4:
+            failures.append(f'the CIS that completes sent only {sent[-1]} SDUs')
+        if sent[0] > 20:
+            failures.append(f'the CIS without completions sent {sent[0]} SDUs (expected its queue only)')
+        if not re.search(r'CIS 0x[0-9A-F]+: no SDU completed for \d+ s', log):
+            failures.append('the CIS without completions was not reported stalled')
+        if 'ISO sending stalled' in log or 'stream lost' in log:
+            failures.append('the stream was given up although one CIS played')
+        return failures
+    if not case.lossy:
+        for handle, _, late in counters:
+            if late > 2:
+                failures.append(f'CIS 0x{handle}: {late} SDUs dropped as late')
+    if 'slow-completions' in case.tags and not re.search(r'parameters: NSE \d+, BN 1 / \d+, FT 4 / ', log):
+        failures.append('LE CIS Established parameters (FT 4) not logged')
     return failures

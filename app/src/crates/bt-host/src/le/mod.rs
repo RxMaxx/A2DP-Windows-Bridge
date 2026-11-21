@@ -156,6 +156,8 @@ pub struct LeBroadcast {
     pub code: Option<String>,
     /// One mono BIS instead of left and right
     pub mono: bool,
+    /// Left and right as two broadcasts of their own (not with `mono`)
+    pub split: bool,
 }
 
 /// One advertiser seen by [`crate::BtHost::le_scan`] /
@@ -232,6 +234,11 @@ pub struct LeStreamStats {
     /// Sets the buffer fills before sending audio (queue + 3, growing to
     /// queue + 7 after underruns)
     pub prefill: u32,
+    /// SDUs dropped unsent: their CIS had no room in the controller in
+    /// time (or the send failed)
+    pub late_sdus: u64,
+    /// CIS that are up but had no SDU completed for 2 s (the others play)
+    pub cis_stalled: u32,
 }
 
 /// A device as the worker sees it (a copy; v1 DeviceInfo)

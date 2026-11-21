@@ -111,8 +111,76 @@ pub struct BroadcastConfig {
     pub preset: StreamPreset,
     /// Two BIS (Front Left / Right), else one mono BIS
     pub stereo: bool,
-    /// 24 bits, random per broadcast
+    /// With `stereo`: left and right as two broadcasts of their own
+    /// ("<name> L" / "<name> R", one mono BIS each, a BIG each), for a
+    /// pair of speakers that each tune to one broadcast
+    pub split: bool,
+    /// 24 bits, random per broadcast (the first broadcast's when split)
     pub broadcast_id: u32,
+}
+
+/// One broadcast of a configuration: an advertising set and a BIG on it
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BroadcastGroup {
+    /// BIG handle, also btstack-sys' broadcast slot
+    pub big_handle: u8,
+    /// Advertising SID
+    pub sid: u8,
+    /// Broadcast Name as advertised
+    pub name: String,
+    pub broadcast_id: u32,
+    /// Its BIS: these entries of the plan's `cis`, in BIS order
+    pub bis: std::ops::Range<usize>,
+}
+
+/// The broadcasts of a configuration: one, or with `split` left and right
+/// each in a broadcast of its own (BIG 0 / 1, SID 1 / 2)
+pub fn groups(config: &BroadcastConfig) -> Vec<BroadcastGroup> {
+    if !(config.stereo && config.split) {
+        let n = if config.stereo { 2 } else { 1 };
+        return vec![BroadcastGroup {
+            big_handle: BIG_HANDLE,
+            sid: ADV_SID,
+            name: config.name.clone(),
+            broadcast_id: config.broadcast_id,
+            bis: 0..n,
+        }];
+    }
+    ["L", "R"]
+        .iter()
+        .enumerate()
+        .map(|(i, side)| BroadcastGroup {
+            big_handle: BIG_HANDLE + i as u8,
+            sid: ADV_SID + i as u8,
+            name: suffixed_name(&config.name, side),
+            // R = L + 1, after 0xFFFFFE (the last valid ID) 1
+            broadcast_id: config.broadcast_id.wrapping_add(i as u32).wrapping_sub(1) % 0x00FF_FFFE + 1,
+            bis: i..i + 1,
+        })
+        .collect()
+}
+
+/// `name` + " " + `suffix` within [`NAME_MAX`] octets (the name cut at a
+/// character boundary)
+fn suffixed_name(name: &str, suffix: &str) -> String {
+    let room = NAME_MAX - suffix.len() - 1;
+    let mut base = name.to_string();
+    while base.len() > room {
+        base.pop();
+    }
+    format!("{} {suffix}", base.trim_end())
+}
+
+/// The part of `plan` one broadcast sends (its BIS, numbered from 1 within
+/// its BIG), for its BASE
+pub fn group_plan(plan: &StreamPlan, group: &BroadcastGroup) -> StreamPlan {
+    let mut p = plan.clone();
+    p.cis = plan.cis[group.bis.clone()].to_vec();
+    for (i, bis) in p.cis.iter_mut().enumerate() {
+        bis.cis_id = i as u8 + 1;
+    }
+    p.cig_id = group.big_handle;
+    p
 }
 
 /// The Broadcast Name as advertised: trimmed, at most [`NAME_MAX`] octets
@@ -171,24 +239,32 @@ fn put_ad(out: &mut Vec<u8>, ty: u8, value: &[u8]) {
     out.extend_from_slice(value);
 }
 
-/// The extended advertising data: Broadcast Audio Announcement, Public
-/// Broadcast Announcement (no metadata), Broadcast Name
+/// The extended advertising data of the configuration's (first) broadcast
 pub fn adv_data(config: &BroadcastConfig) -> Vec<u8> {
+    let first = groups(config).swap_remove(0);
+    group_adv_data(config, &first)
+}
+
+/// The extended advertising data of one broadcast: Broadcast Audio
+/// Announcement, Public Broadcast Announcement (no metadata), Broadcast Name
+pub fn group_adv_data(config: &BroadcastConfig, group: &BroadcastGroup) -> Vec<u8> {
     let mut out = Vec::new();
-    let id = config.broadcast_id.to_le_bytes();
+    let id = group.broadcast_id.to_le_bytes();
     let mut v = UUID_BROADCAST_AUDIO_ANNOUNCEMENT.to_le_bytes().to_vec();
     v.extend_from_slice(&id[..3]);
     put_ad(&mut out, AD_SERVICE_DATA_UUID16, &v);
     let mut v = UUID_PUBLIC_BROADCAST_ANNOUNCEMENT.to_le_bytes().to_vec();
     v.extend_from_slice(&[pbp_features(config), 0]);
     put_ad(&mut out, AD_SERVICE_DATA_UUID16, &v);
-    put_ad(&mut out, AD_BROADCAST_NAME, config.name.as_bytes());
+    put_ad(&mut out, AD_BROADCAST_NAME, group.name.as_bytes());
     out
 }
 
 /// The stream plan of a broadcast: one entry per BIS (BIS index =
 /// `cis_id`, from 1), Front Left / Right from the left / right audio, or
-/// one mono BIS of the downmix
+/// one mono BIS of the downmix. Split: left, then right, each a mono BIS
+/// (no location: a speaker plays it whole) of a broadcast of its own
+/// ([`groups`]).
 pub fn plan(config: &BroadcastConfig) -> StreamPlan {
     let bis = |index: u8, allocation: u32, source: ChannelSource| CisPlan {
         device_id: 0,
@@ -199,7 +275,9 @@ pub fn plan(config: &BroadcastConfig) -> StreamPlan {
         channels: vec![ChannelPlan { allocation, source }],
         source_ase: None,
     };
-    let cis = if config.stereo {
+    let cis = if config.stereo && config.split {
+        vec![bis(1, LOCATION_MONO, ChannelSource::Left), bis(1, LOCATION_MONO, ChannelSource::Right)]
+    } else if config.stereo {
         vec![bis(1, LOCATION_FRONT_LEFT, ChannelSource::Left), bis(2, LOCATION_FRONT_RIGHT, ChannelSource::Right)]
     } else {
         vec![bis(1, LOCATION_MONO, ChannelSource::Mono)]
@@ -276,8 +354,49 @@ mod tests {
             code: code.map(|c| broadcast_code(c).unwrap()),
             preset: find_preset(preset).unwrap(),
             stereo,
+            split: false,
             broadcast_id: 0x123456,
         }
+    }
+
+    #[test]
+    fn split_left_and_right_into_broadcasts_of_their_own() {
+        let mut c = config(true, "24_2_2", None);
+        c.split = true;
+        let p = plan(&c);
+        let sources: Vec<_> = p.cis.iter().map(|b| (b.cis_id, b.allocation(), b.channels[0].source)).collect();
+        assert_eq!(sources, [(1, 0, ChannelSource::Left), (1, 0, ChannelSource::Right)]);
+        let g = groups(&c);
+        assert_eq!(g.len(), 2);
+        assert_eq!(
+            (g[0].big_handle, g[0].sid, g[0].name.as_str(), g[0].bis.clone()),
+            (0, 1, "BlueCaster test L", 0..1)
+        );
+        assert_eq!(
+            (g[1].big_handle, g[1].sid, g[1].name.as_str(), g[1].bis.clone()),
+            (1, 2, "BlueCaster test R", 1..2)
+        );
+        assert_eq!((g[0].broadcast_id, g[1].broadcast_id), (0x123456, 0x123457));
+        // Each announces its own name and ID, and a BASE of one mono BIS
+        let adv = group_adv_data(&c, &g[1]);
+        assert_eq!(&adv[4..7], &[0x57, 0x34, 0x12]);
+        assert!(adv.ends_with(b"BlueCaster test R"));
+        let base = base(&group_plan(&p, &g[1]));
+        assert_eq!(base[3..5], [1, 1]); // one subgroup of one BIS
+        assert_eq!(base[base.len() - 2..], [1, 0]); // BIS 1, no allocation
+        // A long name keeps room for the suffix
+        c.name = "x".repeat(NAME_MAX);
+        assert!(groups(&c).iter().all(|g| g.name.len() == NAME_MAX && g.name.ends_with(['L', 'R'])));
+        // The two IDs differ, also at the top of the range
+        for (id, right) in [(0x00FF_FFFD, 0x00FF_FFFE), (0x00FF_FFFE, 1)] {
+            c.broadcast_id = id;
+            let g = groups(&c);
+            assert_eq!((g[0].broadcast_id, g[1].broadcast_id), (id, right));
+        }
+        // Mono or plain stereo: one broadcast as before
+        c.split = false;
+        assert_eq!(groups(&c).len(), 1);
+        assert_eq!(groups(&c)[0].bis, 0..2);
     }
 
     #[test]

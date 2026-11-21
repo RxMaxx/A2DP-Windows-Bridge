@@ -2351,6 +2351,7 @@ mod tests {
             abr: false,
             bitrate_capped: false,
             hi_res_set: false,
+            low_latency: false,
             source: crate::stream::SourceInfo { kind: "app", name: "Spotify.exe".into(), waiting: true },
             details: Some(Box::new(crate::CodecDetails {
                 mtu: 679,
@@ -2534,6 +2535,7 @@ mod tests {
                 overflows: 3,
                 send_errors: 0,
                 prefill: 6,
+                ..Default::default()
             }),
             devices: vec![bt_host::LeDeviceInfo {
                 id: bt_host::LeDeviceId(1),

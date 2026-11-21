@@ -51,6 +51,61 @@ pub const CON_HANDLE_INVALID: u16 = 0xFFFF;
 const RPA_FRESH_MS: u32 = 5 * 60 * 1000;
 const RPA_CACHE_MAX: usize = 512;
 
+/// What a failed re-encryption with the stored LE keys leads to
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReencryptionFailure {
+    /// The device has no key for us (PIN or Key Missing: the LL answer of a
+    /// peripheral whose host has no LTK, and BTstack's report of a Pairing
+    /// Request from a device we hold an LTK for): forget the bond, pair anew
+    KeyMissing,
+    /// The device refused (Authentication Failure: an SMP Pairing Failed
+    /// during the re-encryption, reason unknown): pair anew on this link,
+    /// the stored bond stays until a new one replaces it
+    Refused,
+    /// The link dropped or timed out, the device ended it, the controller
+    /// was busy...: says nothing about the key. The bond stays and the
+    /// connect fails (the caller may try again).
+    Transient,
+}
+
+fn reencryption_failure(status: u8) -> ReencryptionFailure {
+    match status {
+        ERROR_CODE_PIN_OR_KEY_MISSING => ReencryptionFailure::KeyMissing,
+        ERROR_CODE_AUTHENTICATION_FAILURE => ReencryptionFailure::Refused,
+        _ => ReencryptionFailure::Transient,
+    }
+}
+
+/// The address to connect a device with. An RPA that resolves to the
+/// device is used only when the latest scan saw it (age at most
+/// `scan_age`, and not older than RPA_FRESH_MS): an RPA from before cannot
+/// be told from one the device stopped using (a device that restarts
+/// advertising often takes a new one). `rpas`: (RPA, ms since seen) of the
+/// RPAs resolved to the device with a bond held now. The device's address
+/// (`device`: its identity once SM told it) seen after the freshest RPA
+/// wins (the device switched back to it). Else the address given, with the
+/// device's address type when it is the device's address.
+fn pick_connect_address(
+    given: LeAddr,
+    device: LeAddr,
+    rpas: &[([u8; 6], u32)],
+    identity_age: Option<u32>,
+    scan_age: Option<u32>,
+) -> LeAddr {
+    let best = rpas
+        .iter()
+        .filter(|(_, age)| *age <= RPA_FRESH_MS && scan_age.is_some_and(|s| *age <= s))
+        .min_by_key(|(_, age)| *age);
+    match best {
+        // The device advertises with its identity again (seen after the
+        // RPA): an RPA it no longer uses gets no answer
+        Some((_, age)) if identity_age.is_some_and(|i| i < *age) => device,
+        Some((rpa, _)) => LeAddr { addr: *rpa, addr_type: LeAddr::RANDOM },
+        None if given.addr == device.addr => device,
+        None => given,
+    }
+}
+
 /// A device's identity address (upper case) and type, once SM learned it
 /// (bonded): what its kept services are filed under
 fn d_identity(ctx: &LeCtx<'_>, id: LeDeviceId) -> Option<(String, u8)> {
@@ -284,6 +339,9 @@ pub struct LeCore {
     devices: Vec<LeDevice>,
     scan_results: Vec<LeScanResult>,
     scanning: bool,
+    /// When the latest scan started (run loop ms): only RPAs seen since
+    /// are connected with
+    scan_started_ms: Option<u32>,
     /// Counts the LE Audio advertisers a scan listed (HostApp wakes the
     /// classic scan's waiters on a change: the list shows them at once)
     scan_found: u64,
@@ -537,38 +595,50 @@ impl<'a> LeCtx<'a> {
         self.core.rpa_cache.get(addr).filter(|e| e.ok).map(|e| e.identity)
     }
 
-    /// The RPA the device advertised most recently (scan / find just
-    /// before): a saved RPA or the identity is not what it answers to now
+    /// The RPA the device advertised in the latest scan (find just before):
+    /// a saved RPA or the identity is not what it answers to now
+    /// (pick_connect_address)
     fn connect_address(&self, dev: LeDeviceId, given: LeAddr) -> LeAddr {
         let Some(d) = self.device(dev) else { return given };
         let now = self.stack.time_ms();
-        let best = self
+        // rpa_cache holds resolutions with the bonds held now (delete_bond
+        // drops those of a bond it deletes)
+        let rpas: Vec<([u8; 6], u32)> = self
             .core
             .rpa_cache
             .iter()
             .filter_map(|(rpa, e)| {
                 let seen = e.seen_ms?;
-                (e.ok && now.wrapping_sub(seen) <= RPA_FRESH_MS && e.identity.addr == d.addr.addr)
-                    .then_some((now.wrapping_sub(seen), *rpa))
+                (e.ok && e.identity.addr == d.addr.addr).then_some((*rpa, now.wrapping_sub(seen)))
             })
-            .min_by_key(|(age, _)| *age);
+            .collect();
         let identity_age = self.core.identity_seen.get(&d.addr.addr).map(|&t| now.wrapping_sub(t));
+        let scan_age = self.core.scan_started_ms.map(|t| now.wrapping_sub(t));
+        let target = pick_connect_address(given, d.addr, &rpas, identity_age, scan_age);
         tracing::debug!(
-            "LE Audio: connect address for device {dev:?}: given {given}, freshest resolved RPA {:?}, identity seen {identity_age:?} ms ago",
-            best.map(|(age, rpa)| (crate::addr_str(&rpa), age))
-        );
-        match best {
-            // The device advertises with its identity again (seen after the
-            // RPA): an RPA it no longer uses gets no answer
-            Some((age, _)) if identity_age.is_some_and(|i| i < age) => {
-                if given.addr == d.addr.addr {
-                    given
-                } else {
-                    d.addr
-                }
+            "LE Audio: connect address for device {dev:?}: {} resolved RPA(s) seen {:?} ms ago, identity seen {identity_age:?} ms ago, scan started {scan_age:?} ms ago: {}",
+            rpas.len(),
+            rpas.iter().map(|(_, age)| *age).collect::<Vec<_>>(),
+            if target == given {
+                "the address given"
+            } else if target.addr == given.addr {
+                "the address given, with the device's address type"
+            } else if target.is_rpa() {
+                "an RPA of the latest scan"
+            } else {
+                "the device's address"
             }
-            Some((_, rpa)) => LeAddr { addr: rpa, addr_type: LeAddr::RANDOM },
-            None => given,
+        );
+        target
+    }
+
+    /// Deletes the LE bond of `identity` (as SM reported it) and the RPAs
+    /// resolved with its IRK: they no longer stand for the device
+    fn delete_bond(&mut self, identity: LeAddr) {
+        self.stack.le_delete_bonding(identity.addr_type, &identity.addr);
+        self.core.rpa_cache.retain(|_, e| !(e.ok && e.identity.addr == identity.addr));
+        for r in self.core.scan_results.iter_mut().filter(|r| r.identity.is_some_and(|i| i.addr == identity.addr)) {
+            r.identity = None;
         }
     }
 
@@ -756,6 +826,7 @@ impl<'a> LeCtx<'a> {
         tracing::debug!("LE Audio: scan start (active, interval 0x{interval:04X}, window 0x{window:04X})");
         self.core.scan_results.clear();
         self.core.scanning = true;
+        self.core.scan_started_ms = Some(self.stack.time_ms());
         self.stack.le_set_scan_params(true, interval, window, 0);
         self.stack.le_start_scan();
     }
@@ -1413,22 +1484,41 @@ impl<'a> LeCtx<'a> {
                 }
             }
             SM_EVENT_REENCRYPTION_COMPLETE => {
-                let Some((_, _, _, status)) = events::sm_reencryption_complete(p) else { return };
+                let Some((_, identity_type, identity, status)) = events::sm_reencryption_complete(p) else { return };
                 tracing::debug!("LE Audio: {addr}: re-encryption complete 0x{status:02X}");
-                if status != ERROR_CODE_SUCCESS {
-                    // The device lost its bond (reset or paired elsewhere):
-                    // pair anew
-                    tracing::warn!(
-                        "LE Audio: {addr}: encryption with the stored key failed (0x{status:02x}), pairing again"
-                    );
-                    self.stack.le_delete_bonding(addr.addr_type, &addr.addr);
-                    let Some(d) = self.device_mut(id) else { return };
-                    d.pair_attempts += 1;
-                    if d.pair_attempts < 2 && d.connected() {
-                        self.stack.sm_request_pairing(handle);
-                    } else {
-                        self.fail_connect(id, format!("encryption failed (0x{status:02x})"));
+                if status == ERROR_CODE_SUCCESS {
+                    return;
+                }
+                match reencryption_failure(status) {
+                    ReencryptionFailure::KeyMissing => {
+                        // The device lost its bond (reset or paired
+                        // elsewhere): pair anew
+                        tracing::warn!(
+                            "LE Audio: the device has no key for the stored bond (0x{status:02x}): pairing again"
+                        );
+                        self.delete_bond(LeAddr { addr: identity, addr_type: identity_type });
                     }
+                    ReencryptionFailure::Refused => {
+                        // SM allows pairing after a failed re-encryption; a
+                        // pairing that succeeds replaces the stored keys
+                        tracing::warn!(
+                            "LE Audio: the device refused the stored key (0x{status:02x}): pairing again, the stored bond stays until then"
+                        );
+                    }
+                    ReencryptionFailure::Transient => {
+                        tracing::warn!(
+                            "LE Audio: encryption with the stored key did not complete (0x{status:02x}): bond kept"
+                        );
+                        self.fail_connect(id, format!("encryption failed (0x{status:02x})"));
+                        return;
+                    }
+                }
+                let Some(d) = self.device_mut(id) else { return };
+                d.pair_attempts += 1;
+                if d.pair_attempts < 2 && d.connected() {
+                    self.stack.sm_request_pairing(handle);
+                } else {
+                    self.fail_connect(id, format!("encryption failed (0x{status:02x})"));
                 }
             }
             _ => {}
@@ -1823,12 +1913,12 @@ impl UnicastEnv for LeCtx<'_> {
         self.core.shared.iso_buffers().1
     }
 
-    fn start_sending(&mut self, cis_handles: &[u16], queue_depth: u8, frame_us: u32) {
+    fn start_sending(&mut self, cis_handles: &[u16], queue_share: u8, frame_us: u32, max_latency_ms: u16) {
         let queue = self.core.queue.get_or_insert_with(|| Arc::new(Mutex::new(SduQueue::new()))).clone();
         tracing::debug!(
-            "LE Audio: start sending on CIS {cis_handles:04X?}, queue depth {queue_depth}, frame {frame_us} us"
+            "LE Audio: start sending on CIS {cis_handles:04X?}, up to {queue_share} queued per CIS, frame {frame_us} us"
         );
-        self.core.iso.start(self.stack, cis_handles, queue, frame_us, queue_depth);
+        self.core.iso.start(self.stack, cis_handles, queue, frame_us, queue_share, max_latency_ms);
     }
 
     fn stop_sending(&mut self) {
@@ -1955,6 +2045,7 @@ impl LeCore {
             devices: Vec::new(),
             scan_results: Vec::new(),
             scanning: false,
+            scan_started_ms: None,
             scan_found: 0,
             connect: None,
             rpa_cache: HashMap::new(),
@@ -2044,6 +2135,7 @@ impl LeCore {
         self.devices.clear();
         self.scan_results.clear();
         self.scanning = false;
+        self.scan_started_ms = None;
         self.connect = None;
         self.rpa_cache.clear();
         self.identity_seen.clear();
@@ -2108,6 +2200,7 @@ impl LeCore {
         self.timers.clear();
         self.devices.clear();
         self.scan_results.clear();
+        self.scan_started_ms = None;
         self.rpa_cache.clear();
         self.identity_seen.clear();
         self.queue = None;
@@ -2122,6 +2215,9 @@ impl LeCore {
 
     pub(crate) fn on_hci(&mut self, stack: &Stack, packet: &[u8]) {
         if self.initialized {
+            // LE CIS Established, completed packets, packet sent
+            self.iso.on_hci_event(stack, packet);
+            self.after_last_round(stack);
             self.run(stack, |ctx| ctx.on_hci(packet));
         }
     }
@@ -2156,10 +2252,10 @@ impl LeCore {
         }
     }
 
-    /// The ISO handler: HCI_EVENT_CIS_CAN_SEND_NOW / _BIS_CAN_SEND_NOW, and
-    /// HCI ISO data (the microphone of source ASEs). The packet type comes
-    /// first: an ISO data packet's first byte is the handle's low byte and
-    /// could look like an event code.
+    /// The ISO handler: HCI_EVENT_BIS_CAN_SEND_NOW (CIS sending does not use
+    /// can-send-now), and HCI ISO data (the microphone of source ASEs). The
+    /// packet type comes first: an ISO data packet's first byte is the
+    /// handle's low byte and could look like an event code.
     pub(crate) fn on_iso(&mut self, stack: &Stack, packet_type: u8, packet: &[u8]) {
         if !self.initialized {
             return;
@@ -2171,13 +2267,26 @@ impl LeCore {
             return;
         }
         if packet_type == HCI_EVENT_PACKET {
-            self.iso.on_cis_can_send_now(stack, packet);
             self.iso.on_bis_can_send_now(stack, packet);
+            self.after_last_round(stack);
+        }
+    }
+
+    /// A stopping broadcast's last round is out: the stop goes on
+    fn after_last_round(&mut self, stack: &Stack) {
+        if self.iso.take_round_finished() {
+            self.run(stack, |ctx| ctx.on_last_round_sent());
         }
     }
 
     pub(crate) fn on_iso_timer(&mut self, stack: &Stack) {
         self.iso.on_timer(stack);
+        self.after_last_round(stack);
+        // No SDU completed on any CIS for a while: as a link lost (the
+        // stream is set up again)
+        if let Some(why) = self.iso.take_stall() {
+            self.run(stack, |ctx| ctx.stream_lost(&why));
+        }
     }
 
     /// TIMER_LE: the due timers of run_after
@@ -2335,6 +2444,51 @@ mod tests {
         let mut m = LeScanResult::default();
         parse_ad(&mut m, &[9, 0x09, b'A']);
         assert!(m.name.is_empty() && !m.le_audio);
+    }
+
+    #[test]
+    fn only_a_missing_key_deletes_the_bond() {
+        use ReencryptionFailure::*;
+        assert_eq!(reencryption_failure(ERROR_CODE_PIN_OR_KEY_MISSING), KeyMissing);
+        assert_eq!(reencryption_failure(ERROR_CODE_AUTHENTICATION_FAILURE), Refused);
+        // BTstack's reports of a link that went down (0x13 for any
+        // disconnection during the procedure) or an SM timeout (0x08), and
+        // what a controller may answer: the key is fine
+        for status in [0x08, 0x0C, 0x13, 0x16, 0x1A, 0x1F, 0x22, 0x23, 0x28, 0x2A, 0x3B, 0x3D, 0x3E] {
+            assert_eq!(reencryption_failure(status), Transient, "0x{status:02x}");
+        }
+    }
+
+    #[test]
+    fn connects_with_an_rpa_of_the_latest_scan_only() {
+        let identity = LeAddr { addr: [0x11, 0x22, 0x33, 0x44, 0x55, 0x66], addr_type: LeAddr::PUBLIC };
+        let random_identity = LeAddr { addr: [0xC1, 0x22, 0x33, 0x44, 0x55, 0x66], addr_type: LeAddr::RANDOM };
+        let old = [0x41, 1, 1, 1, 1, 1];
+        let new = [0x42, 2, 2, 2, 2, 2];
+        let rpa = |a: [u8; 6]| LeAddr { addr: a, addr_type: LeAddr::RANDOM };
+        // Seen during the find just before: the freshest one
+        assert_eq!(pick_connect_address(identity, identity, &[(old, 9_000), (new, 500)], None, Some(10_000)), rpa(new));
+        // The find did not see the device: an RPA from an earlier scan, even
+        // seconds old, is not used; the identity is
+        assert_eq!(pick_connect_address(identity, identity, &[(old, 11_000)], None, Some(10_000)), identity);
+        // No scan at all
+        assert_eq!(pick_connect_address(identity, identity, &[(old, 1_000)], None, None), identity);
+        // A scan long running: RPA_FRESH_MS still applies
+        assert_eq!(
+            pick_connect_address(identity, identity, &[(old, RPA_FRESH_MS + 1)], None, Some(RPA_FRESH_MS + 5_000)),
+            identity
+        );
+        // The identity seen after the RPA wins, with its own address type
+        let given = LeAddr { addr: random_identity.addr, addr_type: LeAddr::PUBLIC };
+        assert_eq!(
+            pick_connect_address(given, random_identity, &[(new, 3_000)], Some(1_000), Some(10_000)),
+            random_identity
+        );
+        // ... and also without a fresh RPA
+        assert_eq!(pick_connect_address(given, random_identity, &[], None, Some(10_000)), random_identity);
+        // An RPA given (a scan result) of a device not resolved to anything
+        // here stays as given
+        assert_eq!(pick_connect_address(rpa(new), identity, &[], None, Some(10_000)), rpa(new));
     }
 
     #[test]

@@ -1167,6 +1167,84 @@ fn jitter_ms() -> u32 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.subsec_millis() % 200)
 }
 
+// ============================================================================
+// The sets as the saved devices see them
+// ============================================================================
+
+/// The members of each known set: (the set's index, as `LeScanResult::set_id`
+/// gives it, and the identity addresses of its bonded members and of its
+/// connected ones). A set without any member known has no entry.
+pub(crate) fn known_sets(ctx: &mut LeCtx<'_>) -> Vec<(u32, Vec<[u8; 6]>)> {
+    let Some(rc) = state(ctx) else { return Vec::new() };
+    let st = rc.borrow();
+    let mut out: Vec<(u32, Vec<[u8; 6]>)> = Vec::new();
+    for (i, set) in st.sets.iter().enumerate() {
+        let mut members: Vec<[u8; 6]> = st.stored.iter().filter(|s| s.sirk == set.sirk).map(|s| s.addr.addr).collect();
+        for (id, m) in &st.members {
+            if m.set == Some(i)
+                && let Some(d) = ctx.device(*id)
+                && !members.contains(&d.addr.addr)
+            {
+                members.push(d.addr.addr);
+            }
+        }
+        if !members.is_empty() {
+            out.push((i as u32, members));
+        }
+    }
+    out
+}
+
+/// A forgotten device's SIRK goes with its bond. Its set stays known to the
+/// running stack: other members still resolve to it until the next start.
+pub(crate) fn forget_stored(ctx: &mut LeCtx<'_>, addr: [u8; 6]) {
+    let Some(rc) = state(ctx) else { return };
+    let mut st = rc.borrow_mut();
+    let before = st.stored.len();
+    st.stored.retain(|s| s.addr.addr != addr);
+    if st.stored.len() != before {
+        st.save_stored();
+    }
+}
+
+/// The identity addresses of the bonded members of each set kept in
+/// `<bond_dir>\le_audio_csip.txt`, read without a stack (empty when there
+/// is no such file or it cannot be decrypted). Only addresses leave this
+/// function: the SIRK stays in the encrypted file.
+pub fn stored_sets(bond_dir: &std::path::Path) -> Vec<Vec<[u8; 6]>> {
+    let Ok(bytes) = win_sys::dpapi::read_secret(&bond_dir.join(FILE_NAME)) else { return Vec::new() };
+    group_by_sirk(String::from_utf8_lossy(&bytes).lines().filter_map(parse_stored_line))
+}
+
+fn group_by_sirk(stored: impl Iterator<Item = Stored>) -> Vec<Vec<[u8; 6]>> {
+    let mut groups: Vec<(Key, Vec<[u8; 6]>)> = Vec::new();
+    for s in stored {
+        match groups.iter_mut().find(|(k, _)| *k == s.sirk) {
+            Some((_, members)) if !members.contains(&s.addr.addr) => members.push(s.addr.addr),
+            Some(_) => {}
+            None => groups.push((s.sirk, vec![s.addr.addr])),
+        }
+    }
+    groups.into_iter().map(|(_, m)| m).collect()
+}
+
+/// Drops `addr`'s line from `<bond_dir>\le_audio_csip.txt` while no stack
+/// holds it (a forgotten device). True when a line was dropped.
+pub fn forget_stored_file(bond_dir: &std::path::Path, addr: [u8; 6]) -> bool {
+    let path = bond_dir.join(FILE_NAME);
+    let Ok(bytes) = win_sys::dpapi::read_secret(&path) else { return false };
+    let stored: Vec<Stored> = String::from_utf8_lossy(&bytes).lines().filter_map(parse_stored_line).collect();
+    let kept: Vec<Stored> = stored.iter().filter(|s| s.addr.addr != addr).cloned().collect();
+    if kept.len() == stored.len() {
+        return false;
+    }
+    if let Err(e) = win_sys::dpapi::write_secret(&path, format_stored(&kept).as_bytes()) {
+        tracing::warn!("CSIP: cannot write the SIRK file: {e}");
+        return false;
+    }
+    true
+}
+
 pub fn create(setup: &mut LeModuleSetup) -> LeModuleEntry {
     let shared = Arc::new(Shared {
         crypto_ok: AtomicBool::new(false),
@@ -1299,5 +1377,50 @@ mod tests {
         r.addr = d.peer_addr;
         assert!(is_device(&r, &d));
         assert_eq!(scan_identity(&r), d.peer_addr);
+    }
+
+    #[test]
+    fn stored_members_group_by_their_set() {
+        let other: Key = [0x11; 16];
+        let line = |a: u8, k: &Key, rank: u8| Stored {
+            addr: LeAddr { addr: [0xC0, 0, 0, 0, 0, a], addr_type: 1 },
+            sirk: *k,
+            size: 2,
+            rank,
+        };
+        let stored = [
+            line(1, &SAMPLE_SIRK, 1),
+            line(3, &other, 1),
+            line(2, &SAMPLE_SIRK, 2),
+            // The same member twice: once
+            line(2, &SAMPLE_SIRK, 2),
+        ];
+        let text = format_stored(&stored);
+        let parsed = text.lines().filter_map(parse_stored_line);
+        assert_eq!(
+            group_by_sirk(parsed),
+            vec![vec![[0xC0, 0, 0, 0, 0, 1], [0xC0, 0, 0, 0, 0, 2]], vec![[0xC0, 0, 0, 0, 0, 3]]]
+        );
+    }
+
+    #[test]
+    fn a_forgotten_member_leaves_the_sirk_file() {
+        let dir = std::env::temp_dir().join(format!("bluecaster-csip-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let line = |a: u8| Stored {
+            addr: LeAddr { addr: [0xC0, 0, 0, 0, 0, a], addr_type: 1 },
+            sirk: SAMPLE_SIRK,
+            size: 2,
+            rank: a,
+        };
+        win_sys::dpapi::write_secret(&dir.join(FILE_NAME), format_stored(&[line(1), line(2)]).as_bytes()).unwrap();
+        assert_eq!(stored_sets(&dir), vec![vec![[0xC0, 0, 0, 0, 0, 1], [0xC0, 0, 0, 0, 0, 2]]]);
+        assert!(forget_stored_file(&dir, [0xC0, 0, 0, 0, 0, 1]));
+        assert!(!forget_stored_file(&dir, [0xC0, 0, 0, 0, 0, 1]));
+        assert_eq!(stored_sets(&dir), vec![vec![[0xC0, 0, 0, 0, 0, 2]]]);
+        // No file: no sets
+        assert!(stored_sets(&dir.join("missing")).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
