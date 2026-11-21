@@ -120,6 +120,9 @@ LE Audio (experimental, LC3 over LE isochronous channels):
                         off; older names: quad, front-rear, pairs,
                         rear-subgroups, subgroups
   --auracast-split      the same as --auracast-layout split
+  --auracast-rear-preset <name>
+                        use this BAP configuration for a matrix layout's rear
+                        (e.g. 24_2_2 with a 48 kHz front; same frame duration)
 
 Headset microphone:
   --headset-mic [on|auto]
@@ -268,6 +271,8 @@ struct LeArgs {
     broadcast_mono: bool,
     /// --auracast-layout (--auracast-split: split)
     broadcast_layout: Option<String>,
+    /// --auracast-rear-preset
+    broadcast_rear_preset: Option<String>,
 }
 
 /// --le-scan without a time (v1 scan_seconds)
@@ -518,6 +523,9 @@ fn parse(args: &[String]) -> Result<Args, String> {
                     );
                 }
                 a.le.broadcast_layout = Some(v);
+            }
+            "--auracast-rear-preset" => {
+                a.le.broadcast_rear_preset = Some(value(&mut it, "--auracast-rear-preset")?);
             }
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown option {other}")),
@@ -1303,6 +1311,9 @@ fn le_broadcast(a: &Args, service: &Service, rx: &mpsc::Receiver<ServiceEvent>, 
     if let (Some(p), Some(l)) = (&le.preset, request.le.as_mut()) {
         l.preset = Some(p.clone());
     }
+    if let (Some(p), Some(b)) = (&le.broadcast_rear_preset, request.le.as_mut().and_then(|l| l.broadcast.as_mut())) {
+        b.rear_preset = Some(p.clone());
+    }
     outln!("Starting the broadcast \"{}\"...", b.name.trim());
     service.start_streaming(request);
     let mut code = 0;
@@ -1766,6 +1777,9 @@ mod tests {
         assert_eq!(layout("--cli --auracast Speakers --auracast-split").unwrap().as_deref(), Some("split"));
         assert_eq!(layout("--cli --auracast Speakers --auracast-layout quad").unwrap().as_deref(), Some("quad"));
         assert!(layout("--cli --auracast Speakers --auracast-layout 5.1").is_err());
+        let a =
+            parse(&args("--cli --auracast Speakers --auracast-layout pairs --auracast-rear-preset 24_2_2")).unwrap();
+        assert_eq!(a.le.broadcast_rear_preset.as_deref(), Some("24_2_2"));
         let a = parse(&[
             "--cli".into(),
             "--auracast".into(),
