@@ -197,7 +197,9 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path
         tracing::debug!("adapter: usb selector {sel:?}");
     }
     // The adapter chosen in the settings, when it is on WinUSB and free: it
-    // is opened first, and only its chip counts for the Realtek setup
+    // is opened first, and only its chip counts for the Realtek setup and
+    // the vendor firmware loaders (an Intel card beside it on WinUSB would
+    // otherwise send the Intel bootloader commands to the chosen one)
     let chosen = chosen_adapter(&winusb, &settings.adapter_id);
     if !settings.adapter_id.is_empty() && chosen.is_none() {
         tracing::warn!(
@@ -274,7 +276,7 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path
             // The adapter's own driver package first (its
             // vendor's board-tuned firmware), else the newest generic one.
             // The adapter is the one the transport opens first (see above).
-            let own = winusb
+            let own = detected
                 .iter()
                 .find(|a| a.realtek_pid == Some(pid) && !a.device.in_use())
                 .and_then(|a| realtek_own_driver_firmware(fw, a.device.vid, a.device.pid));
@@ -289,8 +291,8 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path
         // firmware, Broadcom may take a PatchRAM
         // One held by another program cannot be loaded either (v1 skipped
         // it too)
-        config.intel_loader = winusb.iter().any(|a| a.vendor == ChipVendor::Intel && !a.device.in_use());
-        for a in winusb.iter().filter(|a| {
+        config.intel_loader = detected.iter().any(|a| a.vendor == ChipVendor::Intel && !a.device.in_use());
+        for a in detected.iter().filter(|a| {
             matches!(a.vendor, ChipVendor::Intel | ChipVendor::MediaTek | ChipVendor::Qualcomm) && a.device.in_use()
         }) {
             tracing::info!(
@@ -301,21 +303,21 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path
             );
         }
         // MediaTek: only the chips its loader knows, never one in use
-        config.mediatek_loader = winusb.iter().any(|a| {
+        config.mediatek_loader = detected.iter().any(|a| {
             a.vendor == ChipVendor::MediaTek
                 && chips::chip_supported(a.vendor, a.device.vid, a.device.pid)
                 && !a.device.in_use()
         });
         // Qualcomm: the same; the AR30xx have a loader of their own
         let ar30xx = |a: &Adapter| chips::QUALCOMM_AR30XX.contains(&(a.device.vid, a.device.pid));
-        config.qualcomm_loader = winusb.iter().any(|a| {
+        config.qualcomm_loader = detected.iter().any(|a| {
             a.vendor == ChipVendor::Qualcomm
                 && !ar30xx(a)
                 && chips::chip_supported(a.vendor, a.device.vid, a.device.pid)
                 && !a.device.in_use()
         });
         config.atheros_loader =
-            winusb.iter().any(|a| a.vendor == ChipVendor::Qualcomm && ar30xx(a) && !a.device.in_use());
+            detected.iter().any(|a| a.vendor == ChipVendor::Qualcomm && ar30xx(a) && !a.device.in_use());
         // A Realtek chip whose firmware comes from Realtek's Windows driver
         // (the RTL8852BD): the first one present, never one in use
         config.realtek_driver_chip = winusb
@@ -326,8 +328,11 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path
                     && !a.device.in_use()
             })
             .map(|a| (a.device.vid, a.device.pid));
-        config.broadcom_ids =
-            winusb.iter().filter(|a| a.vendor == ChipVendor::Broadcom).map(|a| (a.device.vid, a.device.pid)).collect();
+        config.broadcom_ids = detected
+            .iter()
+            .filter(|a| a.vendor == ChipVendor::Broadcom)
+            .map(|a| (a.device.vid, a.device.pid))
+            .collect();
         config.broadcom_marks = Some(std::sync::Arc::new(BroadcomPatchMarks { dir: config_dir.to_path_buf() }));
         tracing::debug!(
             "adapter: intel bootloader download {}, mediatek download {}, qualcomm download {}, atheros download {}, realtek driver chip {:04X?}, broadcom patchram ids {:04X?}",
@@ -338,7 +343,7 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path
             config.realtek_driver_chip,
             config.broadcom_ids
         );
-        for a in &winusb {
+        for a in &detected {
             if !chips::chip_supported(a.vendor, a.device.vid, a.device.pid) {
                 tracing::warn!(
                     "{} adapter {:04X}:{:04X}: firmware loading for this chip is not implemented; it may not work",
