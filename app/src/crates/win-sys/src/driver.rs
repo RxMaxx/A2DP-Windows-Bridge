@@ -221,6 +221,14 @@ impl DriverRecord {
             && self.version == info.version
             && self.service.eq_ignore_ascii_case(&info.service)
     }
+
+    /// The recorded driver is back, perhaps in a newer version: the same INF
+    /// and service. Windows Update replaces inbox INFs (usb.inf, bth.inf) in
+    /// place while the adapter is on WinUSB, so `restore` installs a newer
+    /// build of the same driver (#86)
+    pub fn is_back(&self, info: &DriverInfo) -> bool {
+        self.inf_name.eq_ignore_ascii_case(&info.inf_name) && self.service.eq_ignore_ascii_case(&info.service)
+    }
 }
 
 /// Whether a failed assignment was undone
@@ -527,7 +535,7 @@ pub fn restore(instance_id: &str, previous: Option<&DriverRecord>) -> Result<Res
         return Ok(RestoreOutcome {
             already_restored: true,
             reboot_required: false,
-            matches_previous: previous.map(|p| p.matches(&now)),
+            matches_previous: previous.map(|p| p.is_back(&now)),
             state: Some(driver_state(instance_id)?),
         });
     }
@@ -602,9 +610,15 @@ pub fn restore(instance_id: &str, previous: Option<&DriverRecord>) -> Result<Res
         }
     }
     let matches_previous = match (previous, &state) {
-        (Some(p), Some(s)) => Some(p.matches(&s.driver)),
+        (Some(p), Some(s)) => Some(p.is_back(&s.driver)),
         _ => None,
     };
+    if let (Some(p), Some(s)) = (previous, &state)
+        && p.is_back(&s.driver)
+        && p.version != s.driver.version
+    {
+        tracing::info!("driver: recorded version {}, Windows installed {}", p.version, s.driver.version);
+    }
     if let Some(s) = &state {
         tracing::info!(
             "driver: {instance_id} is now on {} {} {} (matches the record: {matches_previous:?})",
@@ -1508,7 +1522,11 @@ mod tests {
         assert!(rec.matches(&info));
         assert!(rec.matches(&DriverInfo { inf_name: "BTH.INF".into(), service: "bthusb".into(), ..info.clone() }));
         assert!(!rec.matches(&DriverInfo { version: "10.0.26100.2".into(), ..info.clone() }));
-        assert!(!rec.matches(&DriverInfo { service: "WINUSB".into(), inf_name: "winusb.inf".into(), ..info }));
+        assert!(!rec.matches(&DriverInfo { service: "WINUSB".into(), inf_name: "winusb.inf".into(), ..info.clone() }));
+        // Windows Update replaced the inbox INF while the adapter was on WinUSB
+        assert!(rec.is_back(&DriverInfo { version: "10.0.26100.2".into(), ..info.clone() }));
+        assert!(!rec.is_back(&DriverInfo { service: "WINUSB".into(), inf_name: "winusb.inf".into(), ..info.clone() }));
+        assert!(!rec.is_back(&DriverInfo { inf_name: "oem12.inf".into(), ..info }));
     }
 
     #[test]
