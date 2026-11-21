@@ -59,17 +59,23 @@ export function isChosenAdapter(a: Pick<AdapterInfo, "instance_id">, chosen: str
   return chosen.trim() !== "" && a.instance_id.toLowerCase() === chosen.trim().toLowerCase();
 }
 
-/** The choice of adapter: automatic, each adapter on WinUSB, and a chosen
- *  one that is not there (unplugged, or its driver changed) */
-export function adapterChoices(list: readonly AdapterInfo[], chosen: string): { value: string; label: string }[] {
-  const winusb = list.filter((a) => a.driver === "winusb");
-  const options = [
-    { value: "", label: t("ui.adapter.use_auto") },
-    ...winusb.map((a) => ({ value: a.instance_id, label: adapterName(a) })),
-  ];
-  if (chosen.trim() !== "" && !winusb.some((a) => isChosenAdapter(a, chosen)))
-    options.push({ value: chosen, label: t("ui.adapter.use_missing") });
-  return options;
+/** The adapter button on a card on WinUSB: "auto" on the chosen one (back
+ *  to the first one found), "use" on the others but the one in use while
+ *  none is chosen, none on the rest */
+export function adapterUseButton(
+  a: Pick<AdapterInfo, "instance_id" | "vid" | "pid" | "driver">,
+  chosen: string,
+  active: AdapterState["active"],
+): "use" | "auto" | null {
+  if (a.driver !== "winusb") return null;
+  if (isChosenAdapter(a, chosen)) return "auto";
+  if (chosen.trim() === "" && isActiveAdapter(a, active)) return null;
+  return "use";
+}
+
+/** A chosen adapter that is not on WinUSB (unplugged, or its driver changed) */
+export function chosenMissing(list: readonly AdapterInfo[], chosen: string): boolean {
+  return chosen.trim() !== "" && !list.some((a) => a.driver === "winusb" && isChosenAdapter(a, chosen));
 }
 
 /** "Realtek Bluetooth 5.3 Adapter (RTL8761BU)": the name Device Manager
@@ -142,8 +148,8 @@ export function Adapter() {
   const adapter = () => snap().adapter;
   // The order shown; the chip section goes with its adapter in it
   const sorted = () => usableFirst(adapter().adapters);
-  // The adapter to use (Settings::adapter_id): offered once two are on
-  // WinUSB, or while one is chosen
+  // The adapter to use (Settings::adapter_id): a button on each card, once
+  // two are on WinUSB or while one is chosen
   const chosen = () => snap().settings.adapter_id ?? "";
   const showChoice = () =>
     adapter().adapters.filter((a) => a.driver === "winusb").length > 1 || chosen().trim() !== "";
@@ -253,18 +259,16 @@ export function Adapter() {
           )}
         </Show>
       </p>
-      <Show when={showChoice()}>
-        <Field label={t("ui.adapter.use")} hint={t("ui.adapter.use_hint")}>
-          {(id, described) => (
-            <Select
-              id={id}
-              describedBy={described}
-              value={chosen()}
-              options={adapterChoices(adapter().adapters, chosen())}
-              onChange={choose}
-            />
-          )}
-        </Field>
+      <Show when={chosenMissing(adapter().adapters, chosen())}>
+        <Banner
+          kind="warn"
+          title={t("ui.adapter.use_missing")}
+          actions={
+            <Button icon="arrow_reset" onClick={() => choose("")}>
+              {t("ui.adapter.use_auto")}
+            </Button>
+          }
+        />
       </Show>
       {/* A firmware loader while the adapter starts (Intel's download), and
           how it ended: "ready" and its steps in developer mode only */}
@@ -348,6 +352,34 @@ export function Adapter() {
                       {adapterIds(a)}
                     </span>
                   </div>
+                  {/* Which adapter BlueCaster opens */}
+                  <Show when={showChoice() && adapterUseButton(a, chosen(), adapter().active)}>
+                    {(b) => (
+                      <div class="adapter-use">
+                        <Show
+                          when={b() === "use"}
+                          fallback={
+                            <Button
+                              icon="arrow_reset"
+                              title={t("ui.adapter.use_auto_hint")}
+                              onClick={() => choose("")}
+                            >
+                              {t("ui.adapter.use_auto")}
+                            </Button>
+                          }
+                        >
+                          <Button
+                            kind="strong"
+                            icon="checkmark"
+                            title={t("ui.adapter.use_hint")}
+                            onClick={() => choose(a.instance_id)}
+                          >
+                            {t("ui.adapter.use")}
+                          </Button>
+                        </Show>
+                      </div>
+                    )}
+                  </Show>
                 </div>
                 <div class="adapter-boxes">
                   <div class="adapter-box" role="group" aria-labelledby={driverHead}>

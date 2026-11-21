@@ -5,10 +5,11 @@ import { t } from "../i18n";
 import { MockCore, type MockScenario, sampleSnapshot } from "../ipc/mock";
 import { createCore } from "../ipc/store";
 import {
-  adapterChoices,
   adapterIds,
   adapterIdsHint,
   adapterName,
+  adapterUseButton,
+  chosenMissing,
   driverText,
   isActiveAdapter,
   isChosenAdapter,
@@ -342,26 +343,33 @@ describe("Adapter to use", () => {
     expect(isActiveAdapter({ ...intel, driver: "bluetooth" }, active)).toBe(false);
     expect(isChosenAdapter(intel, "usb\\vid_8087&pid_0033\\2")).toBe(true);
     expect(isChosenAdapter(intel, "")).toBe(false);
-    const values = (chosen: string) => adapterChoices([rtl, { ...intel, driver: "bluetooth" }], chosen).map((o) => o.value);
-    // Automatic, then the adapters on WinUSB
-    expect(values("")).toEqual(["", rtl.instance_id]);
-    // A chosen adapter that is not on WinUSB stays chosen, marked not connected
-    const missing = adapterChoices([rtl], intel.instance_id);
-    expect(missing.at(-1)).toEqual({ value: intel.instance_id, label: t("ui.adapter.use_missing") });
+    // Nothing chosen: "use" on all on WinUSB but the one in use
+    expect(adapterUseButton(intel, "", active)).toBeNull();
+    expect(adapterUseButton(rtl, "", active)).toBe("use");
+    expect(adapterUseButton({ ...rtl, driver: "bluetooth" }, "", active)).toBeNull();
+    // One chosen: "auto" on it, "use" on the others
+    expect(adapterUseButton(rtl, rtl.instance_id, active)).toBe("auto");
+    expect(adapterUseButton(intel, rtl.instance_id, active)).toBe("use");
+    // A chosen adapter that is not on WinUSB is told, with a way back
+    expect(chosenMissing([rtl], intel.instance_id)).toBe(true);
+    expect(chosenMissing([rtl, intel], intel.instance_id)).toBe(false);
+    expect(chosenMissing([rtl], "")).toBe(false);
   });
 
   it("chooses an adapter, restarts Bluetooth on it and shows it in use", async () => {
     const { calls, mock } = start("adapters");
-    const select = (await screen.findByRole("combobox", { name: t("ui.adapter.use") })) as HTMLSelectElement;
-    expect(select.value).toBe("");
+    await screen.findByRole("heading", { level: 1 });
+    const card = (name: RegExp) => screen.getByRole("region", { name }) as HTMLElement;
+    const useButton = (name: RegExp) => within(card(name)).queryByRole("button", { name: t("ui.adapter.use") });
     // The stack runs on the first one found: the Realtek adapter
     await mock.call("adapter.restart");
     (mock as unknown as { setAdapter(s: string): void }).setAdapter("ready");
-    const card = (name: RegExp) => screen.getByRole("region", { name }) as HTMLElement;
     await waitFor(() => expect(card(/TP-Link/)).toHaveClass("adapter-active"));
     expect(within(card(/TP-Link/)).getByText(t("ui.adapter.active"))).toBeInTheDocument();
+    // The one in use has no button while none is chosen; the other has
+    expect(useButton(/TP-Link/)).toBeNull();
     // The Intel card chosen: saved, Bluetooth stops, the card says chosen
-    fireEvent.change(select, { target: { value: "USB\\VID_8087&PID_0033\\5&19A12CFC&0&14" } });
+    fireEvent.click(useButton(/Intel/)!);
     await waitFor(() =>
       expect(calls.filter((c) => c.method === "settings.set").at(-1)?.params).toMatchObject({
         settings: { adapter_id: "USB\\VID_8087&PID_0033\\5&19A12CFC&0&14" },
@@ -369,17 +377,27 @@ describe("Adapter to use", () => {
     );
     await waitFor(() => expect(within(card(/Intel/)).getByText(t("ui.adapter.chosen"))).toBeInTheDocument());
     expect(card(/TP-Link/)).not.toHaveClass("adapter-active");
+    // Back to automatic on the chosen one, use on the other
+    expect(within(card(/Intel/)).getByRole("button", { name: t("ui.adapter.use_auto") })).toBeInTheDocument();
+    expect(useButton(/TP-Link/)).not.toBeNull();
     // Started again: the chosen one is in use
     (mock as unknown as { setAdapter(s: string): void }).setAdapter("ready");
     await waitFor(() => expect(card(/Intel/)).toHaveClass("adapter-active"));
     expect(within(card(/Intel/)).queryByText(t("ui.adapter.chosen"))).toBeNull();
     expect(screen.getByText(t("ui.adapter.active_line", "Intel(R) Wireless Bluetooth(R)"), { exact: false })).toBeInTheDocument();
+    // Automatic again
+    fireEvent.click(within(card(/Intel/)).getByRole("button", { name: t("ui.adapter.use_auto") }));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === "settings.set").at(-1)?.params).toMatchObject({
+        settings: { adapter_id: "" },
+      }),
+    );
   });
 
   it("is not offered with one adapter", async () => {
     start();
     await screen.findByRole("heading", { level: 1 });
-    expect(screen.queryByRole("combobox", { name: t("ui.adapter.use") })).toBeNull();
+    expect(screen.queryByRole("button", { name: t("ui.adapter.use") })).toBeNull();
   });
 });
 

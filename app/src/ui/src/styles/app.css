@@ -3459,6 +3459,11 @@ option {
   gap: var(--s3);
   padding: var(--s4);
 }
+/* "Use this adapter" at the card's right */
+.adapter-head > .adapter-use {
+  margin-left: auto;
+  flex-shrink: 0;
+}
 /* The adapter BlueCaster has open */
 .adapter-card.adapter-active {
   border-color: var(--accent-fill);
