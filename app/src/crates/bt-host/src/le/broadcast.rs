@@ -21,7 +21,8 @@ use btstack_sys::BigParams;
 use btstack_sys::consts::ERROR_CODE_SUCCESS;
 use btstack_sys::events;
 use le_audio::broadcast::{
-    ADV_INTERVAL, BroadcastConfig, BroadcastGroup, PA_INTERVAL, base_ad, describe, group_adv_data, group_plan, groups,
+    ADV_INTERVAL, BroadcastConfig, BroadcastGroup, PA_INTERVAL, describe, group_adv_data, group_base_ad, group_plan,
+    groups,
 };
 use le_audio::plan::StreamPlan;
 
@@ -121,7 +122,7 @@ impl LeCtx<'_> {
         }
         for (i, g) in groups.iter().enumerate() {
             let adv = group_adv_data(&config, g);
-            let pa = base_ad(&group_plan(&plan, g));
+            let pa = group_base_ad(&plan, g);
             if let Err(status) =
                 self.stack.broadcast_advertise(g.big_handle, g.sid, ADV_INTERVAL, PA_INTERVAL, &adv, &pa)
             {
@@ -135,7 +136,6 @@ impl LeCtx<'_> {
                 return;
             }
         }
-        let p = &plan.preset;
         let mut bigs = Vec::with_capacity(groups.len());
         let mut failed = None;
         for g in &groups {
@@ -143,6 +143,10 @@ impl LeCtx<'_> {
                 bigs.push(Big::Gone);
                 continue;
             }
+            // Each BIG at its broadcast's own configuration (a matrix
+            // layout's rear may run at another rate)
+            let gp = group_plan(&plan, g);
+            let p = &gp.preset;
             let params = BigParams {
                 big_handle: g.big_handle,
                 num_bis: g.bis.len() as u8,
