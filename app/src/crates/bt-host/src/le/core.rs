@@ -2217,6 +2217,7 @@ impl LeCore {
         if self.initialized {
             // LE CIS Established, completed packets, packet sent
             self.iso.on_hci_event(stack, packet);
+            self.after_last_round(stack);
             self.run(stack, |ctx| ctx.on_hci(packet));
         }
     }
@@ -2267,11 +2268,20 @@ impl LeCore {
         }
         if packet_type == HCI_EVENT_PACKET {
             self.iso.on_bis_can_send_now(stack, packet);
+            self.after_last_round(stack);
+        }
+    }
+
+    /// A stopping broadcast's last round is out: the stop goes on
+    fn after_last_round(&mut self, stack: &Stack) {
+        if self.iso.take_round_finished() {
+            self.run(stack, |ctx| ctx.on_last_round_sent());
         }
     }
 
     pub(crate) fn on_iso_timer(&mut self, stack: &Stack) {
         self.iso.on_timer(stack);
+        self.after_last_round(stack);
         // No SDU completed on any CIS for a while: as a link lost (the
         // stream is set up again)
         if let Some(why) = self.iso.take_stall() {
