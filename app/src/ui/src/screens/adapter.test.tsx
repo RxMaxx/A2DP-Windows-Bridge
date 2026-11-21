@@ -4,7 +4,15 @@ import { App } from "../app/App";
 import { t } from "../i18n";
 import { MockCore, type MockScenario, sampleSnapshot } from "../ipc/mock";
 import { createCore } from "../ipc/store";
-import { adapterIds, adapterIdsHint, adapterName, driverText } from "./Adapter";
+import {
+  adapterChoices,
+  adapterIds,
+  adapterIdsHint,
+  adapterName,
+  driverText,
+  isActiveAdapter,
+  isChosenAdapter,
+} from "./Adapter";
 import { chipReportUrl } from "../lib/links";
 
 let mock: MockCore | null = null;
@@ -316,6 +324,62 @@ describe("Adapter firmware", () => {
     answer().reject({ code: "ipc.timeout", message: { key: "ipc.error.timeout", args: ["adapter.download_firmware"] } });
     expect(await screen.findByText(/The download is taking a while/)).toBeInTheDocument();
     expect(screen.queryByText(/not responding/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("Adapter to use", () => {
+  const winusb = (instance_id: string, vid: number, pid: number) =>
+    ({ ...sampleSnapshot().adapter.adapters[0]!, instance_id, vid, pid, driver: "winusb" }) as const;
+
+  it("marks the adapter in use and offers the ones on WinUSB", () => {
+    const rtl = winusb("USB\\VID_2357&PID_0604\\1", 0x2357, 0x0604);
+    const intel = winusb("USB\\VID_8087&PID_0033\\2", 0x8087, 0x0033);
+    const active = { display_name: "", vid: 0x8087, pid: 0x0033, vendor: "Intel" };
+    expect(isActiveAdapter(intel, active)).toBe(true);
+    expect(isActiveAdapter(rtl, active)).toBe(false);
+    expect(isActiveAdapter(intel, null)).toBe(false);
+    // The same VID:PID with Windows' driver is not the one open
+    expect(isActiveAdapter({ ...intel, driver: "bluetooth" }, active)).toBe(false);
+    expect(isChosenAdapter(intel, "usb\\vid_8087&pid_0033\\2")).toBe(true);
+    expect(isChosenAdapter(intel, "")).toBe(false);
+    const values = (chosen: string) => adapterChoices([rtl, { ...intel, driver: "bluetooth" }], chosen).map((o) => o.value);
+    // Automatic, then the adapters on WinUSB
+    expect(values("")).toEqual(["", rtl.instance_id]);
+    // A chosen adapter that is not on WinUSB stays chosen, marked not connected
+    const missing = adapterChoices([rtl], intel.instance_id);
+    expect(missing.at(-1)).toEqual({ value: intel.instance_id, label: t("ui.adapter.use_missing") });
+  });
+
+  it("chooses an adapter, restarts Bluetooth on it and shows it in use", async () => {
+    const { calls, mock } = start("adapters");
+    const select = (await screen.findByRole("combobox", { name: t("ui.adapter.use") })) as HTMLSelectElement;
+    expect(select.value).toBe("");
+    // The stack runs on the first one found: the Realtek adapter
+    await mock.call("adapter.restart");
+    (mock as unknown as { setAdapter(s: string): void }).setAdapter("ready");
+    const card = (name: RegExp) => screen.getByRole("region", { name }) as HTMLElement;
+    await waitFor(() => expect(card(/TP-Link/)).toHaveClass("adapter-active"));
+    expect(within(card(/TP-Link/)).getByText(t("ui.adapter.active"))).toBeInTheDocument();
+    // The Intel card chosen: saved, Bluetooth stops, the card says chosen
+    fireEvent.change(select, { target: { value: "USB\\VID_8087&PID_0033\\5&19A12CFC&0&14" } });
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === "settings.set").at(-1)?.params).toMatchObject({
+        settings: { adapter_id: "USB\\VID_8087&PID_0033\\5&19A12CFC&0&14" },
+      }),
+    );
+    await waitFor(() => expect(within(card(/Intel/)).getByText(t("ui.adapter.chosen"))).toBeInTheDocument());
+    expect(card(/TP-Link/)).not.toHaveClass("adapter-active");
+    // Started again: the chosen one is in use
+    (mock as unknown as { setAdapter(s: string): void }).setAdapter("ready");
+    await waitFor(() => expect(card(/Intel/)).toHaveClass("adapter-active"));
+    expect(within(card(/Intel/)).queryByText(t("ui.adapter.chosen"))).toBeNull();
+    expect(screen.getByText(t("ui.adapter.active_line", "Intel(R) Wireless Bluetooth(R)"), { exact: false })).toBeInTheDocument();
+  });
+
+  it("is not offered with one adapter", async () => {
+    start();
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.queryByRole("combobox", { name: t("ui.adapter.use") })).toBeNull();
   });
 });
 

@@ -186,4 +186,4 @@ Welche Adapter und Kopfhörer tatsächlich mit BlueCaster im Einsatz waren, mit 
 
 USB-Bluetooth-Adapter ab Bluetooth 5.0 eignen sich im Allgemeinen am besten für Codecs mit hoher Bitrate wie LDAC.
 
-Haben mehrere Adapter WinUSB, verwendet BlueCaster den ersten, den es findet. Weisen Sie WinUSB nur dem Adapter zu, den Sie für BlueCaster verwenden.
+Haben mehrere Adapter WinUSB, verwendet BlueCaster den ersten, den es findet, außer Sie wählen auf der Seite **Adapter** unter **Zu verwendender Adapter** einen anderen. Der verwendete Adapter ist mit **In Verwendung** markiert.

@@ -183,4 +183,4 @@ For the adapters and headphones actually used with BlueCaster, with codecs and r
 
 USB Bluetooth 5.0+ adapters generally work best for high-bitrate codecs like LDAC.
 
-When several adapters have WinUSB, BlueCaster uses the first one it finds. Keep WinUSB on only the adapter you use for BlueCaster.
+When several adapters have WinUSB, BlueCaster uses the first one it finds, unless you choose one under **Adapter to use** on the **Adapters** screen. The adapter in use is marked **In use**.

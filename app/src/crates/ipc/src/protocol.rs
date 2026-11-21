@@ -1156,6 +1156,11 @@ pub struct Settings {
     /// Windows driver's (AdapterInfo::firmware_driver)
     #[serde(default)]
     pub realtek_custom_firmware: bool,
+    /// The adapter BlueCaster uses when several are on WinUSB: its
+    /// AdapterInfo::instance_id; empty: automatic (the first one found).
+    /// A change restarts Bluetooth (at once when idle).
+    #[serde(default)]
+    pub adapter_id: String,
     /// auto, off, or Wi-Fi channels such as "6,11"
     pub afh: String,
     pub remote_sink: String,

@@ -124,6 +124,12 @@ bt_chip_pid: number, bt_chip_fw_stem: string,
  */
 realtek_custom_firmware: boolean, 
 /**
+ * The adapter BlueCaster uses when several are on WinUSB: its
+ * AdapterInfo::instance_id; empty: automatic (the first one found).
+ * A change restarts Bluetooth (at once when idle).
+ */
+adapter_id: string, 
+/**
  * auto, off, or Wi-Fi channels such as "6,11"
  */
 afh: string, remote_sink: string, 

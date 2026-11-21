@@ -149,6 +149,16 @@ pub fn realtek_own_driver_firmware(fw_stem: &str, vid: u16, pid: u16) -> Option<
     bt_host::realtek_btnic::own_driver_firmware(fw_stem.strip_suffix(".bin").unwrap_or(fw_stem), vid, pid)
 }
 
+/// The adapter of `id` (Settings::adapter_id, any case) among those on
+/// WinUSB, if no other program has it; None for an empty `id`
+fn chosen_adapter<'a>(winusb: &[&'a Adapter], id: &str) -> Option<&'a Adapter> {
+    let id = id.trim();
+    if id.is_empty() {
+        return None;
+    }
+    winusb.iter().copied().find(|a| a.device.instance_id.eq_ignore_ascii_case(id) && !a.device.in_use())
+}
+
 /// Fills the chipset part of `config` from the settings and the present
 /// adapters
 pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path) {
@@ -186,8 +196,25 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path
         }
         tracing::debug!("adapter: usb selector {sel:?}");
     }
-    let pid =
-        chips::resolve_chip_pid(settings.bt_chip_pid, &settings.bt_chip_fw_stem, winusb.iter().map(|a| a.realtek_pid));
+    // The adapter chosen in the settings, when it is on WinUSB and free: it
+    // is opened first, and only its chip counts for the Realtek setup
+    let chosen = chosen_adapter(&winusb, &settings.adapter_id);
+    if !settings.adapter_id.is_empty() && chosen.is_none() {
+        tracing::warn!(
+            "adapter: the chosen adapter {} is not on WinUSB or not free: the first one found is used",
+            settings.adapter_id
+        );
+    }
+    if let (TransportConfig::Usb(sel), Some(a)) = (&mut config.transport, chosen) {
+        tracing::info!("adapter: {:04X}:{:04X} (chosen) is opened first", a.device.vid, a.device.pid);
+        sel.preferred = Some(a.device.instance_id.clone());
+    }
+    let detected: Vec<&Adapter> = chosen.map_or_else(|| winusb.clone(), |a| vec![a]);
+    let pid = chips::resolve_chip_pid(
+        settings.bt_chip_pid,
+        &settings.bt_chip_fw_stem,
+        detected.iter().map(|a| a.realtek_pid),
+    );
     if pid != 0 {
         let chip_name = chips::realtek_chip_name(pid);
         // The adapter's own VID:PID when it differs from the PID BTstack is
@@ -213,6 +240,7 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path
         // would bring that one up with this chip's setup, and its quick init
         // read as "firmware not loaded". The adapter of this chip goes first.
         if let TransportConfig::Usb(sel) = &mut config.transport
+            && chosen.is_none()
             && winusb.len() > 1
             && let Some(a) = winusb.iter().find(|a| a.realtek_pid == Some(pid) && !a.device.in_use())
         {
@@ -683,6 +711,27 @@ mod tests {
             problem_code: None,
             probe,
         }
+    }
+
+    #[test]
+    fn the_chosen_adapter_is_found_when_free() {
+        let adapter = |d: UsbDevice| Adapter {
+            device: d,
+            realtek_pid: None,
+            vendor: ChipVendor::Intel,
+            display_name: String::new(),
+        };
+        let intel = adapter(device(0x8087, 0x0033, None));
+        let realtek = adapter(device(0x0BDA, 0x8771, None));
+        let busy = adapter(device(0x0B05, 0x190E, Some(Err("open failed (error 5): taken".into()))));
+        let all = [&intel, &realtek, &busy];
+        let found = |id: &str| chosen_adapter(&all, id).map(|a| a.device.pid);
+        assert_eq!(found(""), None);
+        assert_eq!(found(r"usb\vid_0bda&pid_8771\1"), Some(0x8771));
+        assert_eq!(found(r" USB\VID_8087&PID_0033\1 "), Some(0x0033));
+        // Another program has it, or it is not on WinUSB (not in the list)
+        assert_eq!(found(r"USB\VID_0B05&PID_190E\1"), None);
+        assert_eq!(found(r"USB\VID_1234&PID_5678\1"), None);
     }
 
     #[test]

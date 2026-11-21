@@ -431,6 +431,7 @@ fn to_ipc_settings(s: &CoreSettings) -> Settings {
         bt_chip_pid: s.bt_chip_pid,
         bt_chip_fw_stem: s.bt_chip_fw_stem.clone(),
         realtek_custom_firmware: s.realtek_custom_firmware,
+        adapter_id: s.adapter_id.clone(),
         afh: s.afh.clone(),
         remote_sink: s.remote_sink.clone(),
         le_audio_experimental: s.le_audio_experimental,
@@ -541,6 +542,7 @@ fn merge_settings(base: &CoreSettings, s: &Settings) -> CoreSettings {
     c.bt_chip_pid = s.bt_chip_pid;
     c.bt_chip_fw_stem = s.bt_chip_fw_stem.clone();
     c.realtek_custom_firmware = s.realtek_custom_firmware;
+    c.adapter_id = s.adapter_id.trim().to_string();
     c.afh = s.afh.clone();
     c.remote_sink = s.remote_sink.clone();
     c.le_audio_experimental = s.le_audio_experimental;
@@ -1371,11 +1373,13 @@ fn autostart_changed(before: &CoreSettings, after: &CoreSettings) -> bool {
         || (after.start_with_windows && before.start_minimized != after.start_minimized)
 }
 
-/// The chip or firmware setting changed: the stack must load firmware anew
+/// The chip or firmware setting, or the adapter to use, changed: the stack
+/// must start anew
 fn chip_changed(before: &CoreSettings, after: &CoreSettings) -> bool {
     before.bt_chip_pid != after.bt_chip_pid
         || before.bt_chip_fw_stem != after.bt_chip_fw_stem
         || before.realtek_custom_firmware != after.realtek_custom_firmware
+        || !before.adapter_id.eq_ignore_ascii_case(&after.adapter_id)
 }
 
 /// The codec and what it runs with: "LDAC 990 kbps | 96 kHz | 24-bit | ABR"
@@ -5987,6 +5991,7 @@ mod tests {
         assert!(chip_changed(&a, &CoreSettings { bt_chip_pid: 0x8771, ..a.clone() }));
         assert!(chip_changed(&a, &CoreSettings { bt_chip_fw_stem: "rtl8761bu".into(), ..a.clone() }));
         assert!(chip_changed(&a, &CoreSettings { realtek_custom_firmware: true, ..a.clone() }));
+        assert!(chip_changed(&a, &CoreSettings { adapter_id: "USB\\VID_8087&PID_0033\\1".into(), ..a.clone() }));
     }
 
     #[test]
