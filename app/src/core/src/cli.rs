@@ -67,6 +67,7 @@ Usage: bluecaster-core --cli [-d XX:XX:XX:XX:XX:XX] [options]
   -q <quality>          hq (default); sq, mq for LDAC and LHDC V5; mhq for LHDC V5; ll (low latency)
                         for aptX Adaptive (other codecs: hq, their highest bit rate)
   -a                    adaptive bit rate (LDAC, LHDC V5, aptX Adaptive; SBC / SBC XQ: bitpool)
+  --lhdcv5-ll           LHDC V5 low latency, where the device lists it
   --fallback            a codec -c the device does not offer falls back to the
                         best one it offers (as the app does), instead of an error
   --force-codec         a codec -c the device does not offer is asked for anyway
@@ -179,6 +180,8 @@ struct Args {
     codec: Option<CodecKind>,
     quality: Quality,
     abr: bool,
+    /// --lhdcv5-ll: LHDC V5 low latency (issue #543)
+    lhdcv5_low_latency: bool,
     /// --fallback: a codec the device does not offer falls back, as a profile's
     fallback: bool,
     /// --force-codec: a codec the device does not offer is asked for anyway
@@ -287,6 +290,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
         codec: None,
         quality: Quality::High,
         abr: false,
+        lhdcv5_low_latency: false,
         fallback: false,
         force_codec: false,
         unlisted_options: false,
@@ -350,6 +354,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
             }
             "-q" => a.quality = Quality::from_key(&value(&mut it, "-q")?.to_lowercase()),
             "-a" => a.abr = true,
+            "--lhdcv5-ll" => a.lhdcv5_low_latency = true,
             "--fallback" => a.fallback = true,
             "--force-codec" => a.force_codec = true,
             "--unlisted-options" => a.unlisted_options = true,
@@ -813,6 +818,7 @@ pub fn run(args: &[String]) -> i32 {
         auto_order: codec::AutoOrder::default(),
         quality: a.quality,
         abr: a.abr,
+        lhdcv5_low_latency: a.lhdcv5_low_latency,
         sbc_bitpool: a.sbc_bitpool,
         sbcxq_bitpool: a.sbc_bitpool,
         sbc_min_bitpool: 0,

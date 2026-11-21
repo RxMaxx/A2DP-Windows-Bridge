@@ -245,6 +245,8 @@ NEGOTIATION = {
     # asked of an EarFun gave aptX, not aptX Adaptive); aptX HD missing:
     # LDAC above it, not AAC below
     'fallback-lhdcv5-to-ldac': ('lhdcv5', ['--codecs', 'sbc', 'aac', 'ldac'], 'ldac', ['--fallback']),
+    # LHDC V5 low latency asked for (issue #543): the sink lists it (P9 0x40)
+    'lhdcv5-ll': ('lhdcv5', [], 'lhdcv5', ['--lhdcv5-ll']),
     'fallback-aptxhd-to-ldac': ('aptxhd', ['--codecs', 'sbc', 'aac', 'ldac'], 'ldac', ['--fallback']),
     'fallback-opus-to-aptxad': ('opus', APTXAD_SINK, 'aptxad', ['--fallback']),
     # Opus 05: 48 kHz from a 44.1 kHz request; Auto never takes it (AAC here)
@@ -379,12 +381,19 @@ DEV_SETTINGS = {
 }
 QUALITY_ON, QUALITY_OFF = 'Huawei control: 2BA2 010101', 'Huawei control: 2BA2 010100'
 HI_RES_ON, HI_RES_OFF, HI_RES_CODEC = 'OPPO control: 0403 1801', 'OPPO control: 0403 1800', 'OPPO control: 041A 080100'
+LL_ASKED = 'LHDC V5: asking for low latency'
 ENCODED_1000, ENCODED_400 = 'encoder ready: LHDC V5 1000 kbps', 'encoder ready: LHDC V5 400 kbps'
 CTKD_GIVEN, CTKD_ASKING = f'CTKD: {SINK_ADDRESS} gave its LE keys', f'CTKD: asking {SINK_ADDRESS} for its LE keys'
 PAIRED = f'new link key from pairing with {SINK_ADDRESS}'
 # What these cases' logs must, and must not, have: name -> (log, text, whether
 # it is there, or how many times)
 LOG_CHECKS = {
+    # Issue #543: low latency only when asked for; then 10 ms encoding, the
+    # 100 ms send queue limit and the queue guard (ABR off)
+    'lhdcv5': [('bluecaster.log', LL_ASKED, False), ('bluecaster.log', 'LHDC V5: encode interval 20 ms', True)],
+    'lhdcv5-ll': [('bluecaster.log', LL_ASKED, True), ('bluecaster.log', 'LHDC V5: encode interval 10 ms', True),
+                  ('bluecaster.log', 'packets dropped after 100 ms (LHDC V5 low latency)', True),
+                  ('bluecaster.log', 'LHDC V5: queue guard on', True)],
     'sbcxq-abr-hold': [('bluecaster.log', 'encode at send time', True)],
     'ldac-hold': [('bluecaster.log', 'encode at send time', True)],
     'huawei-ldac': [('sink.log', QUALITY_ON, True), ('sink.log', QUALITY_OFF, False),

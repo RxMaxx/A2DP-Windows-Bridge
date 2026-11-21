@@ -757,6 +757,15 @@ fn epatch_project(data: &[u8]) -> Option<u8> {
     patch_project(data)
 }
 
+/// The project ID of a patch in either format BTstack's download reads:
+/// "Realtech" or "RTBTCore" (btstack-sys build.rs patched_realtek)
+fn download_patch_project(data: &[u8]) -> Option<u8> {
+    if !data.starts_with(EPATCH_MAGIC) && !data.starts_with(CORE_MAGIC) {
+        return None;
+    }
+    patch_project(data)
+}
+
 /// The version a "Realtech" patch stores after its signature
 fn epatch_version(data: &[u8]) -> Option<u32> {
     let v = data.get(8..12)?;
@@ -771,6 +780,81 @@ pub fn driver_firmware(fw_stem: &str) -> Option<PathBuf> {
     let (name, project) = driver_firmware_name(fw_stem)?;
     let windows = std::env::var_os("SystemRoot").map(PathBuf::from)?;
     pick_patch(name, &driver_files(&windows, name), project)
+}
+
+/// The firmware of the adapter's own driver package,
+/// the driver-store package whose INF lists this USB VID:PID, when it holds
+/// the chip's patch (either format). Adapters on the same chip get board
+/// tuned firmware from their vendor: TP-Link's UB600 (37AD:0600) driver has
+/// a v2 patch (Bluetooth 6.0) where the generic Realtek one (UB500,
+/// 2357:0604) has v1 (5.4), and each ran clearly worse on the other's
+/// (measured on Realme Buds Air 8 Pro, LHDC V5 1000 kbps). None when no
+/// package names the adapter: the caller falls back to [`driver_firmware`].
+pub fn own_driver_firmware(fw_stem: &str, vid: u16, pid: u16) -> Option<PathBuf> {
+    let (name, project) = driver_firmware_name(fw_stem)?;
+    let windows = std::env::var_os("SystemRoot").map(PathBuf::from)?;
+    let found = own_package_patch(&windows, name, project, vid, pid);
+    match &found {
+        Some(p) => tracing::info!(
+            "realtek: {} of the adapter's own driver package ({}), for {vid:04X}:{pid:04X}",
+            file_name(p),
+            p.parent().map(file_name).unwrap_or_default()
+        ),
+        None => tracing::debug!("realtek: no driver package names {vid:04X}:{pid:04X} with this chip's firmware"),
+    }
+    found
+}
+
+/// The patch for `project` under one of `name`'s installed names in the
+/// driver-store packages of `windows` whose INF lists `vid`:`pid`, the
+/// newest file if several
+fn own_package_patch(windows: &Path, name: &str, project: u8, vid: u16, pid: u16) -> Option<PathBuf> {
+    let id = format!("VID_{vid:04X}&PID_{pid:04X}");
+    let store = windows.join("System32").join("DriverStore").join("FileRepository");
+    let names = installed_names(name);
+    let mut found: Vec<PathBuf> = Vec::new();
+    for entry in std::fs::read_dir(store).ok()?.flatten() {
+        let dir = entry.path();
+        // The package's INF is read only when it holds one of the names
+        let held: Vec<PathBuf> = names.iter().map(|n| dir.join(n)).filter(|p| p.is_file()).collect();
+        if held.is_empty() || !inf_lists(&dir, &id) {
+            continue;
+        }
+        for path in held {
+            let Ok(data) = std::fs::read(&path) else { continue };
+            if download_patch_project(&data) == Some(project) {
+                found.push(path);
+            } else {
+                tracing::debug!(
+                    "realtek: {} of the adapter's package skipped: not this chip's firmware",
+                    file_name(&path)
+                );
+            }
+        }
+    }
+    let modified = |p: &PathBuf| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    found.into_iter().max_by_key(modified)
+}
+
+/// Whether an INF of the package folder `dir` lists the hardware ID part
+/// `id` ("VID_37AD&PID_0600"); INFs come in ANSI or UTF-16
+fn inf_lists(dir: &Path, id: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else { return false };
+    entries.flatten().any(|e| {
+        let path = e.path();
+        path.extension().is_some_and(|x| x.eq_ignore_ascii_case("inf"))
+            && std::fs::read(&path).is_ok_and(|bytes| inf_text(&bytes).to_ascii_uppercase().contains(id))
+    })
+}
+
+fn inf_text(bytes: &[u8]) -> String {
+    match bytes.strip_prefix(&[0xFF, 0xFE]) {
+        Some(utf16) => {
+            let units: Vec<u16> = utf16.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
+            String::from_utf16_lossy(&units)
+        }
+        None => String::from_utf8_lossy(bytes).into_owned(),
+    }
 }
 
 /// Of `found` (newest first), the patch for `project` with the highest
@@ -850,6 +934,56 @@ mod tests {
         assert_eq!(epatch_project(&core), None);
     }
 
+    /// A "RTBTCore" (v2) patch with the same extension records
+    fn epatch_v2(project: u8) -> Vec<u8> {
+        let mut f = epatch(project);
+        f[..8].copy_from_slice(CORE_MAGIC);
+        f
+    }
+
+    #[test]
+    fn both_patch_formats_carry_the_project() {
+        assert_eq!(download_patch_project(&epatch_v2(RTL8761B_PROJECT)), Some(RTL8761B_PROJECT));
+        assert_eq!(download_patch_project(&epatch(RTL8761B_PROJECT)), Some(RTL8761B_PROJECT));
+        assert_eq!(epatch_project(&epatch_v2(RTL8761B_PROJECT)), None, "the generic pick stays v1");
+        assert_eq!(download_patch_project(&container(&[])), None);
+        assert_eq!(download_patch_project(b"RTBTCore"), None);
+    }
+
+    /// The package whose INF names the adapter gives its firmware, in
+    /// either format and INF encoding; a package naming it with another
+    /// chip's patch, or none naming it, gives nothing
+    #[test]
+    fn the_adapters_own_package_wins() {
+        let windows = std::env::temp_dir().join(format!("bc-rtk-own-{}", std::process::id()));
+        let store = windows.join("System32").join("DriverStore").join("FileRepository");
+        let stem = RTL8761B_DRIVER_FILE.strip_suffix(".dat").unwrap();
+        let package = |dir: &str, inf: &[u8], file: &str, data: Vec<u8>| {
+            let d = store.join(dir);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("x.inf"), inf).unwrap();
+            std::fs::write(d.join(file), data).unwrap();
+            d.join(file)
+        };
+        let tplink = package(
+            "rtkbtfilterd.inf_amd64_1",
+            b"[RsBthFilterD]\r\n%RealTKD.DeviceDesc% = RsBthFilterD, USB\\VID_37AD&PID_0600 ;TPLink BT6\r\n",
+            stem,
+            epatch_v2(RTL8761B_PROJECT),
+        );
+        let mut utf16 = vec![0xFF, 0xFE];
+        utf16.extend("%Dev% = RtkFilter, usb\\vid_2357&pid_0604\r\n".encode_utf16().flat_map(u16::to_le_bytes));
+        let generic = package("rtkfilter.inf_amd64_2", &utf16, RTL8761B_DRIVER_FILE, epatch(RTL8761B_PROJECT));
+        package("other.inf_amd64_3", b"USB\\VID_0BDA&PID_8771", stem, epatch(20));
+        let own = |vid, pid| own_package_patch(&windows, RTL8761B_DRIVER_FILE, RTL8761B_PROJECT, vid, pid);
+        let (ub600, ub500, other, none) = (own(0x37AD, 0x0600), own(0x2357, 0x0604), own(0x0BDA, 0x8771), own(1, 2));
+        let _ = std::fs::remove_dir_all(&windows);
+        assert_eq!(ub600, Some(tplink));
+        assert_eq!(ub500, Some(generic));
+        assert_eq!(other, None, "its package holds another chip's patch");
+        assert_eq!(none, None);
+    }
+
     /// Issue #86: a PC whose driver store no longer holds Realtek's package
     /// still has the copies its install made in the Windows folder, without
     /// the extension or as .dll
@@ -903,6 +1037,21 @@ mod tests {
         if let Some(p) = driver_firmware("rtl8761bu_fw") {
             println!("picked {}", p.display());
             assert_eq!(epatch_project(&std::fs::read(p).unwrap()), Some(RTL8761B_PROJECT));
+        }
+    }
+
+    /// What this PC's driver store gives TP-Link's UB600 and UB500 as their
+    /// own firmware. `cargo test -- --ignored --nocapture` shows it.
+    #[test]
+    #[ignore = "reads this PC's driver store"]
+    fn the_own_firmware_of_this_pcs_adapters() {
+        for (vid, pid) in [(0x37AD, 0x0600), (0x2357, 0x0604)] {
+            let picked = own_driver_firmware("rtl8761bu_fw", vid, pid);
+            let size = picked.as_ref().and_then(|p| std::fs::metadata(p).ok()).map(|m| m.len());
+            println!("{vid:04X}:{pid:04X} -> {picked:?} ({size:?} bytes)");
+            if let Some(p) = picked {
+                assert_eq!(download_patch_project(&std::fs::read(p).unwrap()), Some(RTL8761B_PROJECT));
+            }
         }
     }
     use crate::bringup::sim::{self, SimController, command_complete, command_status};
