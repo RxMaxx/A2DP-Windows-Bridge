@@ -512,6 +512,14 @@ pub trait Encoder: Send {
         false
     }
 
+    /// The encoder wants [`Encoder::abr_adjust`] with the
+    /// queue depth although ABR is off (LHDC V5's queue guard under low
+    /// latency). The encode thread then calls it as under ABR; the stream
+    /// info still says ABR off.
+    fn queue_guard_active(&self) -> bool {
+        false
+    }
+
     /// Puts ABR back to where a stream starts (after a reconnect: what the
     /// old link's queue made it do says nothing about the new one)
     fn abr_reset(&mut self) {}

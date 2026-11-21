@@ -960,6 +960,10 @@ const ADAPTER_STOPPED: &str = "the Bluetooth adapter stopped working";
 /// The capture rate a profile's Auto sample rate asks for (issue #86)
 const AUTO_SAMPLE_RATE: u32 = 48000;
 
+/// How long a packet may wait in the send queue with
+/// LHDC V5 low latency (20 packets of 5 ms; normal waits stay under 30 ms)
+const LL_QUEUE_MAX_WAIT_MS: u32 = 100;
+
 /// A new stack (sleep, a stopped adapter): the adapter may take a while to
 /// come back
 const RESTART_ATTEMPTS: u32 = 10;
@@ -1322,7 +1326,8 @@ fn start_pipeline(
     sink: MediaSink,
     host: &BtHost,
 ) -> (Pipeline, CaptureInput) {
-    let abr = encoder.abr_active();
+    // The queue guard takes the queue depth as ABR does
+    let abr = encoder.abr_active() || encoder.queue_guard_active();
     let hold = codec::dev::overrides().encode_at_send;
     if hold {
         tracing::info!("encode at send time: audio waits unencoded while the send queue is backed up (developer mode)");
@@ -2033,10 +2038,20 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
     let mut discontinuities = DiscontinuityLog::default();
     // Developer mode: another limit on how long a packet waits in the send
     // queue (0 = the default)
-    let queue_wait = codec::dev::overrides().queue_max_wait_ms;
+    let dev_queue_wait = codec::dev::overrides().queue_max_wait_ms;
+    // With LHDC V5 low latency a packet waits at most
+    // LL_QUEUE_MAX_WAIT_MS, so a backed-up link costs a short gap instead of
+    // ~300 ms of delay that stays (the queue's default is 350 ms)
+    let queue_wait = if dev_queue_wait == 0 && encoder_config.peer.lhdcv5_low_latency {
+        LL_QUEUE_MAX_WAIT_MS
+    } else {
+        dev_queue_wait
+    };
     host.stats().queue_max_wait_ms.store(queue_wait, std::sync::atomic::Ordering::Relaxed);
-    if queue_wait > 0 {
+    if dev_queue_wait > 0 {
         tracing::info!("send queue: packets dropped after {queue_wait} ms (developer mode)");
+    } else if queue_wait > 0 {
+        tracing::info!("send queue: packets dropped after {queue_wait} ms (LHDC V5 low latency)");
     }
     let mut health = StreamHealth::start(host.stats().clone(), format.sample_rate, active.health());
     // Headset mode (developer mode): the voice link instead of A2DP
