@@ -712,6 +712,7 @@
   "ui.diag.failed_contacts": "Невдалі контакти",
   "ui.diag.capture_gaps": "Пропуски звуку Windows",
   "ui.diag.capture_gaps_value": "%u (втрачено %s)",
+  "ui.diag.source_format": "Формат",
   "ui.radio.channels": "Канали Bluetooth",
   "ui.radio.in_use": "Використовується %d із 79",
   "ui.radio.legend_on": "Використовується",

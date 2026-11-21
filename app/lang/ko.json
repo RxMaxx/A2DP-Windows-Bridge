@@ -712,6 +712,7 @@
   "ui.diag.failed_contacts": "전송 포기 횟수",
   "ui.diag.capture_gaps": "Windows 오디오 끊김",
   "ui.diag.capture_gaps_value": "%u(%s 손실)",
+  "ui.diag.source_format": "형식",
   "ui.radio.channels": "Bluetooth 채널",
   "ui.radio.in_use": "79개 중 %d개 사용 중",
   "ui.radio.legend_on": "사용 중",

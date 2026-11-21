@@ -712,6 +712,7 @@
   "ui.diag.failed_contacts": "Transmisiones abandonadas",
   "ui.diag.capture_gaps": "Cortes de audio de Windows",
   "ui.diag.capture_gaps_value": "%u (%s perdidos)",
+  "ui.diag.source_format": "Formato",
   "ui.radio.channels": "Canales Bluetooth",
   "ui.radio.in_use": "%d de 79 en uso",
   "ui.radio.legend_on": "En uso",

@@ -712,6 +712,7 @@
   "ui.diag.failed_contacts": "Aufgegebene Übertragungen",
   "ui.diag.capture_gaps": "Audio-Aussetzer von Windows",
   "ui.diag.capture_gaps_value": "%u (%s verloren)",
+  "ui.diag.source_format": "Format",
   "ui.radio.channels": "Bluetooth-Kanäle",
   "ui.radio.in_use": "%d von 79 belegt",
   "ui.radio.legend_on": "Belegt",
