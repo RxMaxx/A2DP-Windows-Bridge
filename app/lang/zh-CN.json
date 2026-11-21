@@ -712,6 +712,7 @@
   "ui.diag.failed_contacts": "放弃发送次数",
   "ui.diag.capture_gaps": "Windows 音频中断",
   "ui.diag.capture_gaps_value": "%u（丢失 %s）",
+  "ui.diag.source_format": "格式",
   "ui.radio.channels": "蓝牙信道",
   "ui.radio.in_use": "79 个中 %d 个在用",
   "ui.radio.legend_on": "在用",

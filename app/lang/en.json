@@ -712,6 +712,7 @@
   "ui.diag.failed_contacts": "Failed contacts",
   "ui.diag.capture_gaps": "Windows audio gaps",
   "ui.diag.capture_gaps_value": "%u (%s lost)",
+  "ui.diag.source_format": "Format",
   "ui.radio.channels": "Bluetooth channels",
   "ui.radio.in_use": "%d of 79 in use",
   "ui.radio.legend_on": "In use",

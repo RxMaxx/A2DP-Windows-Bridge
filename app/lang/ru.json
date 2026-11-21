@@ -712,6 +712,7 @@
   "ui.diag.failed_contacts": "Неудачные передачи",
   "ui.diag.capture_gaps": "Разрывы звука Windows",
   "ui.diag.capture_gaps_value": "%u (потеряно %s)",
+  "ui.diag.source_format": "Формат",
   "ui.radio.channels": "Каналы Bluetooth",
   "ui.radio.in_use": "Используется %d из 79",
   "ui.radio.legend_on": "Используется",

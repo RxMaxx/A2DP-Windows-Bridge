@@ -712,6 +712,7 @@
   "ui.diag.failed_contacts": "送信断念の回数",
   "ui.diag.capture_gaps": "Windows の音声の途切れ",
   "ui.diag.capture_gaps_value": "%u（%s 欠落）",
+  "ui.diag.source_format": "形式",
   "ui.radio.channels": "Bluetooth チャネル",
   "ui.radio.in_use": "79 チャネル中 %d を使用中",
   "ui.radio.legend_on": "使用中",
