@@ -534,7 +534,14 @@ pub(crate) fn run_with(args: &[String], running: Option<Running>) -> i32 {
             })
             .expect("spawning the IPC thread");
     }
-    state.check_update_if_due();
+    // Not in service mode: the window looks for updates of the app, and the
+    // set-up tool updates the service. The check also saves the settings
+    // (its date) from the copy in memory, which at this point may still be
+    // the service's own defaults: saved a moment after the user's settings
+    // moved in, they would replace them.
+    if !service_mode {
+        state.check_update_if_due();
+    }
     if let Some(hub) = session_host::hub() {
         // Service mode: the user's data moves in with the first agent
         if service_mode {

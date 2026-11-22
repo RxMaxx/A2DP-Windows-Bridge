@@ -239,6 +239,13 @@ fn a_service_core_waits_for_a_sign_in_then_takes_the_users_data() {
     assert!(!log.contains("session agent: started"), "{log}");
     assert!(service.join("migration_pending.json").is_file());
     assert!(!service.join("migration.json").exists());
+    // The core saved no settings by itself at its start (the automatic
+    // update check would, and that save could replace the user's settings
+    // a moment after they move in)
+    if let Ok(bytes) = std::fs::read(service.join("settings.json")) {
+        let s: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(s["last_update_check"], "", "the service checks for no updates by itself");
+    }
 
     // A sign-in at the console
     std::fs::write(&file, own_session().to_string()).unwrap();
