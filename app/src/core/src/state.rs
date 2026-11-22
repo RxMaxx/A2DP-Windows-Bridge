@@ -455,8 +455,9 @@ fn hifi_cable(devices: &[audio_capture::DeviceInfo]) -> Option<&audio_capture::D
 
 /// Service mode (crate::rules): whether settings.set with `s` changes
 /// anything only an elevated client may change: developer mode and what
-/// it sets, the chip (the adapter to use too), its firmware and radio
-/// settings, the receiver host
+/// it sets, the chip, its firmware and radio settings, the receiver host.
+/// Not the adapter to use (or the Auracast adapter): a choice among the
+/// adapters an administrator already gave to BlueCaster.
 pub(crate) fn admin_settings_change(base: &CoreSettings, s: &Settings) -> bool {
     let m = merge_settings(base, s);
     m.debug_mode != base.debug_mode
@@ -467,8 +468,6 @@ pub(crate) fn admin_settings_change(base: &CoreSettings, s: &Settings) -> bool {
         || m.bt_chip_pid != base.bt_chip_pid
         || m.bt_chip_fw_stem != base.bt_chip_fw_stem
         || m.realtek_custom_firmware != base.realtek_custom_firmware
-        || !m.adapter_id.eq_ignore_ascii_case(&base.adapter_id)
-        || !m.auracast_adapter_id.eq_ignore_ascii_case(&base.auracast_adapter_id)
         || m.afh != base.afh
         || m.remote_sink != base.remote_sink
 }
