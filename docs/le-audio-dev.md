@@ -682,17 +682,23 @@ it.
   It runs, but the receiver always takes the left (first) subgroup. Left
   as it is for now: other receivers may let one pick.
 - Adapter (`Settings::auracast_adapter_id`, the Auracast tab's **Adapter**,
-  shown once two adapters have WinUSB): the adapter broadcasts go on, for
-  one that only broadcasts (an nRF5340 DK) or does more BIGs than the one
-  in use. Empty, **Use the current adapter**: the adapter everything else
-  uses. A process holds one BTstack, so the two never run at once:
-  `run_broadcast` holds `Inner::broadcast_wanted` while it runs,
-  `adapter::adapter_for` then names the Auracast adapter, and `ensure_host`
-  restarts the stack when the running one was started for another adapter
-  (`Inner::host_adapter`): on it for a broadcast, back on
-  `Settings::adapter_id` for the next scan or connection. Developer mode off:
-  not used. The list names each adapter with its MAC address, as two can
-  share a name ("Bluetooth Controller").
+  shown once two adapters have WinUSB): the adapter broadcasts go on.
+  Adapters differ here: some cannot broadcast (on the Intel AX211 the
+  broadcast setup timed out), and some only broadcast, with no classic
+  Bluetooth, but run more BIGs than the others (an nRF5340 DK: four; the
+  ASUS BT600: two). So the adapter for everything else and the one for
+  Auracast are chosen apart. Empty, **Use the current adapter**: the
+  adapter everything else uses. A process holds one BTstack, so the two
+  never run at once: `run_broadcast` holds `Inner::broadcast_wanted` while
+  it runs, `adapter::adapter_for` then names the Auracast adapter, and
+  `ensure_host` restarts the stack when the running one was started for
+  another adapter (`Inner::host_adapter`): on it for a broadcast, back on
+  `Settings::adapter_id` for the next scan or connection. A broadcast set
+  up again after its adapter stopped working waits until that adapter is
+  back (`Inner::wanted_adapter_present`): a stack started meanwhile would
+  open the first other adapter found. Developer mode off: not used. The
+  list names each adapter with its MAC address, as two can share a name
+  ("Bluetooth Controller").
 
 BTstack 1.8.1 pitfalls found along the way:
 - `HCI_EVENT_BIS_CAN_SEND_NOW` is emitted only 4 bytes long, so the BIS handle
