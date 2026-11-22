@@ -49,7 +49,8 @@ pub fn access(m: &Method) -> Access {
         | Method::StreamStartCustom { .. }
         // Developer mode only, and developer mode needs an elevated client
         | Method::StreamStartBroadcast { .. }
-        | Method::StreamSetVolume { .. } => Open,
+        | Method::StreamSetVolume { .. }
+        | Method::StreamVolumeStep { .. } => Open,
         Method::DeviceScan { .. }
         | Method::DeviceScanStop
         | Method::DeviceWindowsPaired
@@ -67,6 +68,11 @@ pub fn access(m: &Method) -> Access {
         // A .wav microphone output makes the core write that file
         Method::ProfileSave { .. } => Depends,
         Method::ProfileDelete { .. } | Method::MediaEqPreview { .. } | Method::ProfileSetActive { .. } => Open,
+        // For tools: a switch of a saved profile, by its name. No path, no
+        // device, nothing an ordinary client could not set with the window
+        Method::ProfileSetHeadsetMic { .. } | Method::ProfileSetMicMuted { .. } | Method::ProfileSetMediaEq { .. } => {
+            Open
+        }
         // Developer mode and what it sets, the chip and firmware settings
         Method::SettingsSet { .. } => Depends,
         Method::AdapterList
