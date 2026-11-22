@@ -44,6 +44,22 @@ bluecaster_decode --le-audio on both sides:
     --mic-output <out>/le-<case>/mic.wav)
 Outputs go to tools/emu/out/le-<case>/.
 
+    python tools/emu/run_test.py --auracast [case ...]
+
+runs the Auracast cases instead (le_audio_tests/auracast.py: stereo, mono,
+encrypted, split and the matrix layouts): emu_le_audio_sink.py --layout
+auracast with one broadcast sink per broadcast, bluecaster-core.exe --cli
+--auracast with the test tone. Checked from both logs (the BIS audio is
+not decoded):
+  - each broadcast's name, Broadcast_ID, announced quality and BASE
+    (subgroups, LC3 configuration, BIS locations, labels), one presentation
+    delay for all
+  - the BIG asked of the controller for each (BIS, max SDU, RTN)
+  - every BIS delivered SDUs of its length for the whole duration, without
+    a sequence gap and none too late; left and right differ, and BIS with
+    the same audio and configuration carry the same SDU
+Outputs go to tools/emu/out/auracast-<case>/.
+
     python tools/emu/run_test.py --scan [case ...]
 
 runs the device scan cases instead (eir, name-request): emu_sink.py answers
@@ -127,6 +143,7 @@ import time
 import wave
 
 import le_audio_tests
+import le_audio_tests.auracast
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -1049,6 +1066,68 @@ def main_le(args):
     sys.exit(0 if passed == len(results) else 1)
 
 
+def run_auracast_case(args, case, port):
+    out = os.path.join(args.out, 'auracast-' + case.name)
+    shutil.rmtree(out, ignore_errors=True)
+    os.makedirs(out)
+    failures = []
+    port = free_port(port)
+    follow = [b.suffix for b in case.broadcasts if b.suffix]
+    sink = start_sink(port, os.path.join(out, 'sink.pklg'), os.path.join(out, 'sink.log'), 'emu_le_audio_sink.py',
+                      ['--layout', 'auracast', '--log-level', 'INFO']
+                      + (['--follow'] + follow if follow else [])
+                      + (['--broadcast-code', case.code] if case.code else []))
+    duration = max(args.duration, 5)   # the SDU compared across the BIS is 3 s in
+    try:
+        # Its own settings folder: the mixer's defaults, and LE Audio on in
+        # developer mode (a broadcast goes through the service, which asks)
+        env = dict(os.environ, BLUECASTER_CONFIG_DIR=os.path.join(out, 'config'))
+        os.makedirs(env['BLUECASTER_CONFIG_DIR'])
+        with open(os.path.join(env['BLUECASTER_CONFIG_DIR'], 'settings.json'), 'w', encoding='utf-8') as f:
+            json.dump({'debug_mode': True, 'le_audio_experimental': True}, f)
+        for knob in ('BLUECASTER_AURACAST_RTN', 'BLUECASTER_AURACAST_LATENCY_MS'):
+            env.pop(knob, None)
+        cmd = [args.bluecaster, '--cli', '--hci-tcp', f'127.0.0.1:{port}', '--auracast', le_audio_tests.auracast.NAME,
+               '--test-tone', '--duration', str(duration),
+               '--hci-capture', os.path.join(out, 'bluecaster.pklg')] + case.bluecaster_args
+        if case.code:
+            cmd += ['--auracast-code', case.code]
+        with open(os.path.join(out, 'bluecaster.log'), 'w', encoding='utf-8', errors='replace') as log:
+            try:
+                rc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, env=env,
+                                    timeout=duration + 120).returncode
+            except subprocess.TimeoutExpired:
+                rc = 'timeout'
+        if rc != 0:
+            failures.append(f'BlueCaster exited with {rc} (see bluecaster.log)')
+        time.sleep(0.5)   # the sinks log the end of their BIG
+    finally:
+        sink.terminate()
+        sink.wait(10)
+    more, detail = le_audio_tests.auracast.check(case, read_text(os.path.join(out, 'sink.log')),
+                                                 read_text(os.path.join(out, 'bluecaster.log')), duration)
+    return failures + more, detail
+
+
+def main_auracast(args):
+    names = [c.name for c in le_audio_tests.auracast.CASES]
+    wanted = args.auracast or names
+    unknown = [n for n in wanted if n not in names]
+    if unknown:
+        sys.exit(f'Unknown Auracast case(s) {unknown}; known: {names}')
+    results = []
+    for index, case in enumerate(c for c in le_audio_tests.auracast.CASES if c.name in wanted):
+        print(f'--- Auracast {case.name} ...', flush=True)
+        failures, detail = run_auracast_case(args, case, args.base_port + 200 + index)
+        results.append((case.name, failures))
+        print(f'    {"PASS" if not failures else "FAIL"}  {detail}')
+        for failure in failures:
+            print(f'      - {failure}')
+    passed = sum(1 for _, f in results if not f)
+    print(f'\n{passed}/{len(results)} Auracast cases passed. Details: {args.out}')
+    sys.exit(0 if passed == len(results) else 1)
+
+
 # Device scan cases (--scan): name -> (emu_sink.py arguments, where the name
 # comes from, how soon it must be known after the inquiry started). The sink
 # first answers 1 s into an inquiry (emu_sink.py INQUIRY_FIRST_ANSWER).
@@ -1908,6 +1987,8 @@ def main():
                         help='codecs and negotiation cases (%(default)s)')
     parser.add_argument('--le-audio', nargs='*', metavar='CASE',
                         help='run the LE Audio cases instead (default: all of them)')
+    parser.add_argument('--auracast', nargs='*', metavar='CASE',
+                        help='run the Auracast cases instead (default: all of them)')
     parser.add_argument('--scan', nargs='*', metavar='CASE',
                         help=f'run the device scan cases instead ({", ".join(SCAN_CASES)}; default: all of them)')
     parser.add_argument('--link', nargs='*', metavar='CASE',
@@ -1934,12 +2015,15 @@ def main():
                        (args.bluecaster, 'build BlueCaster'), (args.decoder, 'build bluecaster_decode')):
         voice_decodes = args.voice is not None and any(c.endswith('-roundtrip') for c in args.voice or VOICE_CASES)
         if path == args.decoder and (args.scan is not None or args.link is not None or args.le_pairing is not None
+                                     or args.auracast is not None
                                      or (args.voice is not None and not voice_decodes)):
             continue  # a scan streams nothing, a link or voice case decodes nothing (but a round trip)
         if not os.path.exists(path):
             sys.exit(f'Missing {path} ({hint})')
     if args.le_audio is not None:
         main_le(args)
+    if args.auracast is not None:
+        main_auracast(args)
     if args.scan is not None:
         main_scan(args)
     if args.link is not None:

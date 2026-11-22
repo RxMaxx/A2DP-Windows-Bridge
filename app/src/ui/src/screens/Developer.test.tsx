@@ -454,6 +454,39 @@ describe("chip tools", () => {
 });
 
 describe("Auracast tab", () => {
+  it("takes a matrix's rates from the front and rear rows, not Quality", async () => {
+    const { core, calls } = await open();
+    await core.request("settings.set", {
+      settings: { ...core.state.snap!.settings, developer_mode: true },
+    });
+    fireEvent.click(
+      await screen.findByRole("tab", { name: t("ui.dev.auracast") }),
+    );
+    const start = await screen.findByRole("button", {
+      name: t("receiver.start"),
+    });
+    // Quality at 24 kHz, then the matrix: front 48 kHz (its own), rear 24 kHz
+    fireEvent.click(
+      screen.getByRole("radio", { name: t("ui.dev.auracast_sq") }),
+    );
+    fireEvent.click(
+      screen.getByRole("radio", { name: t("ui.dev.auracast_matrix") }),
+    );
+    const rates = await screen.findAllByRole("radio", {
+      name: t("ui.dev.auracast_24"),
+    });
+    expect(rates).toHaveLength(2);
+    fireEvent.click(rates[1]!);
+    expect(
+      screen.getByRole("radio", { name: t("ui.dev.auracast_sq") }),
+    ).toBeDisabled();
+    fireEvent.click(start);
+    await screen.findByText(t("status.broadcasting"));
+    expect(
+      calls.find((c) => c.method === "stream.start_broadcast")!.params,
+    ).toMatchObject({ quality: "hq", rear_quality: "sq", layout: "matrix_stereo_stereo" });
+  });
+
   it("chooses the adapter for broadcasts, by name and MAC address", async () => {
     const { core, calls } = await open("adapters");
     await core.request("settings.set", {
@@ -531,8 +564,9 @@ describe("Auracast tab", () => {
       name: "Living room",
       code: "secret",
       quality: "sq",
+      rear_quality: null,
       mono: true,
-      split: false,
+      layout: null,
       source: "tone",
     });
     expect(screen.getByText(/1 ch over 1 BIS, 24_2_2/)).toBeInTheDocument();
@@ -544,6 +578,41 @@ describe("Auracast tab", () => {
     ).toBeEnabled();
     expect(calls.some((c) => c.method === "stream.stop")).toBe(true);
     expect(screen.queryByText(t("status.broadcasting"))).toBeNull();
+  });
+
+  it("keeps a broadcast whose adapter stopped working while it starts again", async () => {
+    const { core } = await open();
+    await core.request("settings.set", {
+      settings: { ...core.state.snap!.settings, developer_mode: true },
+    });
+    fireEvent.click(
+      await screen.findByRole("tab", { name: t("ui.dev.auracast") }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: t("receiver.start") }),
+    );
+    await screen.findByText(t("status.broadcasting"));
+
+    // The core's state while it sets the broadcast up on a new stack
+    const fake = mock as unknown as {
+      setStream(state: string, key: string, args?: string[]): void;
+    };
+    fake.setStream("reconnecting", "status.reconnect_attempt", ["1", "5"]);
+    expect(
+      await screen.findByText(t("status.reconnect_attempt", "1", "5")),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: t("receiver.stop") }),
+    ).toBeEnabled();
+    expect(screen.getByLabelText(t("ui.dev.auracast_name"))).toBeDisabled();
+
+    fake.setStream("streaming", "status.broadcasting");
+    expect(
+      await screen.findByText(t("status.broadcasting")),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: t("receiver.stop") }),
+    ).toBeEnabled();
   });
 
   it("shows why a broadcast did not start", async () => {
