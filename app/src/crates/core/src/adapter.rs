@@ -223,10 +223,9 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path
     // otherwise send the Intel bootloader commands to the chosen one)
     let chosen = chosen_adapter(&winusb, &settings.adapter_id);
     if !settings.adapter_id.is_empty() && chosen.is_none() {
-        tracing::warn!(
-            "adapter: the chosen adapter {} is not on WinUSB or not free: the first one found is used",
-            settings.adapter_id
-        );
+        // Not its instance ID: that ends in the adapter's serial number or
+        // address, and logs are sent to others
+        tracing::warn!("adapter: the chosen adapter is not on WinUSB or not free: the first one found is used");
     }
     if let (TransportConfig::Usb(sel), Some(a)) = (&mut config.transport, chosen) {
         tracing::info!("adapter: {:04X}:{:04X} (chosen) is opened first", a.device.vid, a.device.pid);

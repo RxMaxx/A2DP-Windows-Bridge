@@ -489,6 +489,8 @@ pub(crate) struct BroadcastGuard(Arc<Inner>);
 impl Drop for BroadcastGuard {
     fn drop(&mut self) {
         self.0.broadcast.store(false, Ordering::Release);
+        self.0.broadcast_adapter.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.0.leave_broadcast_adapter();
     }
 }
 
@@ -534,6 +536,10 @@ pub(crate) struct Inner {
     /// The adapter the running stack was started for (adapter::adapter_for;
     /// empty: automatic)
     host_adapter: Mutex<String>,
+    /// The adapter the running broadcast's stack opened (its instance ID):
+    /// a broadcast set up again goes on the same one, also when none is
+    /// chosen; empty: no broadcast, or none opened yet
+    broadcast_adapter: Mutex<String>,
     /// A device scan runs
     scanning: AtomicBool,
     /// The LE Audio stream being sent (le_stream)
@@ -724,18 +730,71 @@ impl Inner {
         crate::adapter::adapter_for(&s, self.broadcast.load(Ordering::Acquire)).to_string()
     }
 
-    /// The adapter the next stack opens first is there (always, when none
-    /// is chosen)
+    /// The adapter a broadcast set up again goes on: the chosen one, else
+    /// the one its stack opened before (empty: none opened yet)
+    fn broadcast_adapter(&self) -> String {
+        let wanted = self.wanted_adapter();
+        if wanted.is_empty() {
+            self.broadcast_adapter.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        } else {
+            wanted
+        }
+    }
+
+    /// The adapter the broadcast's next stack opens first is there (always,
+    /// when none is chosen and none was opened yet, or with a virtual
+    /// controller)
     pub(crate) fn wanted_adapter_present(&self) -> bool {
-        crate::adapter::chosen_present(&self.wanted_adapter())
+        self.opts.hci_tcp.is_some() || crate::adapter::chosen_present(&self.broadcast_adapter())
+    }
+
+    /// The Auracast adapter is set and not there: a broadcast would go on
+    /// the first other adapter found
+    pub(crate) fn auracast_adapter_missing(&self) -> bool {
+        if self.opts.hci_tcp.is_some() {
+            return false;
+        }
+        let id = {
+            let s = self.settings.lock().unwrap_or_else(|e| e.into_inner());
+            if s.debug_mode { s.auracast_adapter_id.trim().to_string() } else { String::new() }
+        };
+        !id.is_empty() && !crate::adapter::chosen_present(&id)
+    }
+
+    /// The broadcast's stack is up: the adapter it opened is the one a
+    /// set-up after a loss waits for and opens again
+    pub(crate) fn note_broadcast_adapter(&self) {
+        if self.opts.hci_tcp.is_none()
+            && let Some(id) = hci_transport::usb::last_opened_instance()
+        {
+            *self.broadcast_adapter.lock().unwrap_or_else(|e| e.into_inner()) = id;
+        }
     }
 
     /// A broadcast session wants the stack, until the guard drops: the
     /// next stack started or checked (ensure_host) is the Auracast
     /// adapter's
     pub(crate) fn broadcast_wanted(self: &Arc<Self>) -> BroadcastGuard {
+        self.broadcast_adapter.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.broadcast.store(true, Ordering::Release);
         BroadcastGuard(self.clone())
+    }
+
+    /// The broadcast ended on an adapter of its own: that stack is shut
+    /// down, so the Auracast adapter is free and not shown as in use; the
+    /// next scan or connection starts one on the adapter to use
+    fn leave_broadcast_adapter(&self) {
+        let mut slot = self.host.lock().unwrap_or_else(|e| e.into_inner());
+        let same =
+            self.host_adapter.lock().unwrap_or_else(|e| e.into_inner()).eq_ignore_ascii_case(&self.wanted_adapter());
+        if same {
+            return;
+        }
+        if let Some(h) = slot.take() {
+            tracing::info!("Auracast: the broadcast ended, leaving the Auracast adapter");
+            h.shutdown();
+            self.adapter_changed(false);
+        }
     }
 
     fn host_config(&self, le_on: bool) -> HostConfig {
@@ -743,6 +802,11 @@ impl Inner {
         // The Auracast adapter for a broadcast: configure opens it first
         s.adapter_id = self.wanted_adapter();
         *self.host_adapter.lock().unwrap_or_else(|e| e.into_inner()) = s.adapter_id.clone();
+        // A broadcast set up again with no adapter chosen: the one it ran on
+        // before, not the first one found (host_adapter stays "automatic")
+        if self.broadcast.load(Ordering::Acquire) {
+            s.adapter_id = self.broadcast_adapter();
+        }
         let transport = match &self.opts.hci_tcp {
             Some(addr) => TransportConfig::Tcp(addr.clone()),
             // bt-host adds the adapters it knows to `known`
@@ -1423,6 +1487,7 @@ impl Service {
             le_active: AtomicBool::new(false),
             broadcast: AtomicBool::new(false),
             host_adapter: Mutex::new(String::new()),
+            broadcast_adapter: Mutex::new(String::new()),
             scanning: AtomicBool::new(false),
             le_stream: Mutex::new(None),
             le_support: Mutex::new(None),
@@ -2415,6 +2480,33 @@ mod tests {
         };
         let (tx, _rx) = std::sync::mpsc::channel();
         Service::new(opts, tx)
+    }
+
+    #[test]
+    fn a_broadcast_set_up_again_goes_on_the_adapter_it_ran_on() {
+        const OPENED: &str = r"USB\VID_1234&PID_5678\NOT-THERE";
+        const AURACAST: &str = r"USB\VID_1234&PID_5678\NOT-THERE-EITHER";
+        let s = service();
+        let inner = &s.inner;
+        // Nothing chosen, none opened yet: automatic, nothing to wait for
+        assert_eq!(inner.broadcast_adapter(), "");
+        assert!(inner.wanted_adapter_present());
+        assert!(!inner.auracast_adapter_missing());
+        let guard = inner.broadcast_wanted();
+        // The adapter the stack opened is the one to wait for
+        *inner.broadcast_adapter.lock().unwrap() = OPENED.into();
+        assert_eq!(inner.broadcast_adapter(), OPENED);
+        assert!(!inner.wanted_adapter_present());
+        // The Auracast adapter comes first, in developer mode only
+        inner.settings.lock().unwrap().auracast_adapter_id = AURACAST.into();
+        assert!(!inner.auracast_adapter_missing());
+        assert_eq!(inner.broadcast_adapter(), OPENED);
+        inner.settings.lock().unwrap().debug_mode = true;
+        assert!(inner.auracast_adapter_missing());
+        assert_eq!(inner.broadcast_adapter(), AURACAST);
+        // The session ended: the next broadcast starts anew
+        drop(guard);
+        assert_eq!(*inner.broadcast_adapter.lock().unwrap(), "");
     }
 
     #[test]

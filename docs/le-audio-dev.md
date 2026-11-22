@@ -693,10 +693,16 @@ it.
   it runs, `adapter::adapter_for` then names the Auracast adapter, and
   `ensure_host` restarts the stack when the running one was started for
   another adapter (`Inner::host_adapter`): on it for a broadcast, back on
-  `Settings::adapter_id` for the next scan or connection. A broadcast set
-  up again after its adapter stopped working waits until that adapter is
-  back (`Inner::wanted_adapter_present`): a stack started meanwhile would
-  open the first other adapter found. Developer mode off: not used. The
+  `Settings::adapter_id` for the next scan or connection. When a broadcast
+  on its own adapter ends, BlueCaster shuts that stack down, which frees
+  the Auracast adapter. A broadcast does not start while the Auracast
+  adapter is missing (`Inner::auracast_adapter_missing`): the first other
+  adapter found might not support broadcasting. A broadcast set up again
+  after its adapter stopped working waits until that adapter is back
+  (`Inner::wanted_adapter_present`) and opens the same adapter, even when
+  none is chosen (`Inner::broadcast_adapter`): a stack started in the
+  meantime would open the first other adapter found. Developer mode off:
+  not used. The
   list names each adapter with its MAC address, as two can share a name
   ("Bluetooth Controller").
 

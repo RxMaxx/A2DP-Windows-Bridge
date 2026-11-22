@@ -900,6 +900,8 @@ const BROADCAST_ATTEMPTS: u32 = 5;
 const ADAPTER_LOST: &str = "the adapter stopped working";
 /// ... and did not come back for the attempts
 const ADAPTER_NOT_BACK: &str = "the adapter stopped working and did not come back";
+/// ... when the adapter chosen for Auracast is not there at the start
+const AURACAST_ADAPTER_MISSING: &str = "the adapter chosen for Auracast is not connected";
 
 /// How one broadcast on one stack ended
 #[derive(Debug)]
@@ -944,6 +946,12 @@ fn run_broadcast(inner: &Arc<Inner>, req: StreamRequest) {
     // The Auracast adapter, when one is set, for as long as this session
     // runs (Settings::auracast_adapter_id)
     let _auracast_adapter = inner.broadcast_wanted();
+    // Not on the first other adapter found: the Auracast adapter was chosen
+    // because that one may not broadcast at all
+    if inner.auracast_adapter_missing() {
+        tracing::warn!("Auracast: the Auracast adapter is not on WinUSB: the broadcast does not start");
+        return inner.notify(StreamState::Error, Msg::with("error.auracast", &[&AURACAST_ADAPTER_MISSING]));
+    }
     // A source switched in place (stream.start_broadcast's choice changed
     // while it runs) was asked for before this one started: not again
     inner.take_source_change();
@@ -1024,6 +1032,7 @@ fn broadcast_once(
         Ok(h) => h,
         Err(m) => return BroadcastEnd::NotStarted(m),
     };
+    inner.note_broadcast_adapter();
     let until = Instant::now() + READY_WAIT;
     while !host.le_ready() && Instant::now() < until && !stopped() {
         inner.wait_tick(Duration::from_millis(100));
