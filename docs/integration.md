@@ -186,6 +186,8 @@ Available when `welcome.features` contains `"media_button"`. Every client receiv
 
 Available when `welcome.features` contains `"tool_controls"`. Each method changes one setting, so a tool never has to send a whole profile.
 
+**Experimental until BlueCaster 3.1.** The method names and parameters may still change based on feedback. An incompatible change replaces `"tool_controls"` with a new feature name, so a tool can tell which version the core supports.
+
 - `name` is the name of a saved profile. Leave it out to use the profile that is streaming, or the active profile when nothing is streaming. An unknown name returns `profile.not_found`.
 - The change is saved to the profile and applied to the stream, just like a change made in the BlueCaster window. Every client receives a `profiles` event.
 - Sending the current value changes nothing.
