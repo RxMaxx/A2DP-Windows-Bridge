@@ -1013,8 +1013,10 @@ impl<'a> LeCtx<'a> {
     }
 
     /// le_find: a saved RPA of a bonded device is looked for by its identity
-    pub(crate) fn start_find(&mut self, want: LeAddr) {
-        self.lookup_rpa(want, false);
+    pub(crate) fn start_find(&mut self, wants: &[LeAddr]) {
+        for &want in wants {
+            self.lookup_rpa(want, false);
+        }
         self.start_scan();
     }
 

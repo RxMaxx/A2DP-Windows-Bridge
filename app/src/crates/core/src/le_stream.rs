@@ -525,7 +525,8 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
     let connect_and_stream = || -> Result<LeStreamStarted, Msg> {
         inner.notify(StreamState::Connecting, Msg::new("status.connecting_device"));
         let t = Instant::now();
-        let ids = connect_devices(&host, &devices, &req.device_name, &stopped)?;
+        let others = other_set_members(inner, &host, req.device, &devices);
+        let ids = connect_devices(&host, &devices, &others, &req.device_name, &stopped)?;
         tracing::debug!("le stream: connected {ids:?} in {} ms, starting the stream", t.elapsed().as_millis());
         let t = Instant::now();
         let mut asked = request.clone();
@@ -547,7 +548,7 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
                 ids
             } else {
                 host.le_disconnect_all();
-                connect_devices(&host, &devices, &req.device_name, &stopped)?
+                connect_devices(&host, &devices, &others, &req.device_name, &stopped)?
             };
             r = host.le_start_stream(ids, asked, &le_silence_set);
         }
@@ -705,7 +706,10 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
             lost_for_good = true;
             break;
         }
-        let off = device_turned_off(inner, &host, &devices);
+        // Either earbud of a set may be the one the session connected
+        let mut members = devices.clone();
+        members.extend(other_set_members(inner, &host, req.device, &devices));
+        let off = device_turned_off(inner, &host, &members);
         if !off {
             tracing::warn!("LE Audio stream lost, reconnecting");
             inner.notify(StreamState::Reconnecting, Msg::new("status.connection_lost"));
@@ -726,7 +730,7 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
                 switch_default_again = true;
             }
             output_mute.tick(false);
-            if !wait_for_device(inner, &host, req.device) {
+            if !wait_for_device(inner, &host, &members) {
                 lost_for_good = true;
                 break;
             }
@@ -1210,9 +1214,18 @@ fn device_turned_off(inner: &Inner, host: &BtHost, devices: &[[u8; 6]]) -> bool 
     }
 }
 
-/// The headphones were turned off: waits until they advertise again (true).
-/// False when the session ends instead (stopped, sleep, a stopped adapter).
-fn wait_for_device(inner: &Inner, host: &BtHost, device: [u8; 6]) -> bool {
+/// The other members of `device`'s coordinated set (the other earbud), not
+/// in `devices` already: either one may be the earbud out of its case
+fn other_set_members(inner: &Inner, host: &BtHost, device: [u8; 6], devices: &[[u8; 6]]) -> Vec<[u8; 6]> {
+    let sets = inner.known_le_sets(Some(host));
+    let Some(group) = sets.group_of(&bt_host::addr_str(&device)) else { return Vec::new() };
+    group.iter().filter_map(|a| bt_host::parse_addr(a)).filter(|a| !devices.contains(a)).collect()
+}
+
+/// The headphones were turned off: waits until one of `devices` (the
+/// earbuds of a set) advertises again (true). False when the session ends
+/// instead (stopped, sleep, a stopped adapter).
+fn wait_for_device(inner: &Inner, host: &BtHost, devices: &[[u8; 6]]) -> bool {
     inner.waiting_for_device();
     let t = Instant::now();
     let back = loop {
@@ -1224,7 +1237,7 @@ fn wait_for_device(inner: &Inner, host: &BtHost, device: [u8; 6]) -> bool {
         {
             break false;
         }
-        if host.le_find(device, OFF_FIND).is_some() {
+        if host.le_find_any(devices, OFF_FIND).is_some() {
             break true;
         }
         inner.wait_tick(Duration::from_millis(200));
@@ -1235,19 +1248,36 @@ fn wait_for_device(inner: &Inner, host: &BtHost, device: [u8; 6]) -> bool {
 }
 
 /// Finds (address type, name, current RPA) and connects each device in
-/// order; the first one's name is the profile's when it has one
+/// order; the first one's name is the profile's when it has one. In place
+/// of the first device, one of `others` (the rest of its coordinated set)
+/// that shows up first is connected: the earbud out of its case. CSIP then
+/// connects the rest of the set.
 fn connect_devices(
     host: &BtHost,
     devices: &[[u8; 6]],
+    others: &[[u8; 6]],
     first_name: &str,
     stopped: &dyn Fn() -> bool,
 ) -> Result<Vec<LeDeviceId>, Msg> {
     let mut ids = Vec::with_capacity(devices.len());
-    for (i, &addr) in devices.iter().enumerate() {
+    for (i, &asked) in devices.iter().enumerate() {
+        let mut addr = asked;
         let mut target = LeAddr { addr, addr_type: LeAddr::PUBLIC };
         let mut name = if i == 0 { first_name.to_string() } else { String::new() };
         let t = Instant::now();
-        if let Some(found) = host.le_find(addr, FIND_TIMEOUT) {
+        let mut look_for = vec![asked];
+        if i == 0 {
+            look_for.extend_from_slice(others);
+        }
+        if let Some((which, found)) = host.le_find_any(&look_for, FIND_TIMEOUT) {
+            if which > 0 {
+                addr = look_for[which];
+                tracing::info!(
+                    "LE Audio: {} is not around, connecting {} of its coordinated set",
+                    bt_host::addr_str(&asked),
+                    bt_host::addr_str(&addr)
+                );
+            }
             tracing::debug!(
                 "le connect: {} found in {} ms as {} \"{}\" rssi {}",
                 bt_host::addr_str(&addr),

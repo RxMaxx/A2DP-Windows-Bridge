@@ -129,22 +129,37 @@ impl BtHost {
     /// the result's `addr` is the address it advertises now (connect with
     /// that). None on timeout / cancel.
     pub fn le_find(&self, addr: [u8; 6], timeout: Duration) -> Option<LeScanResult> {
-        if !self.le_ready() {
+        self.le_find_any(&[addr], timeout).map(|(_, r)| r)
+    }
+
+    /// [`BtHost::le_find`] for the first of several devices to show up (the
+    /// members of a coordinated set: whichever earbud is out of its case):
+    /// its index in `addrs` and what was found. None on timeout / cancel or
+    /// when `addrs` is empty.
+    pub fn le_find_any(&self, addrs: &[[u8; 6]], timeout: Duration) -> Option<(usize, LeScanResult)> {
+        if !self.le_ready() || addrs.is_empty() {
             return None;
         }
         self.le_fresh_operation();
-        let want = LeAddr { addr, addr_type: LeAddr::RANDOM };
-        self.le_run(RUN_TIMEOUT, move |ctx| ctx.start_find(want));
+        let wants: Vec<LeAddr> = addrs.iter().map(|&addr| LeAddr { addr, addr_type: LeAddr::RANDOM }).collect();
+        let w = wants.clone();
+        self.le_run(RUN_TIMEOUT, move |ctx| ctx.start_find(&w));
         let end = Instant::now() + timeout;
         let mut found = None;
-        tracing::debug!("LE Audio: find {want} for {} ms", timeout.as_millis());
+        let shown = wants.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
+        tracing::debug!("LE Audio: find {shown} for {} ms", timeout.as_millis());
         while found.is_none() && Instant::now() < end && !self.le_cancelled() {
             std::thread::sleep(FIND_POLL);
-            found = self.le_run(RUN_TIMEOUT, move |ctx| ctx.find_match(want)).flatten();
+            let w = wants.clone();
+            found = self
+                .le_run(RUN_TIMEOUT, move |ctx| {
+                    w.iter().enumerate().find_map(|(i, &want)| Some((i, ctx.find_match(want)?)))
+                })
+                .flatten();
         }
         tracing::debug!(
-            "LE Audio: find {want}: {}",
-            found.as_ref().map_or("not found".to_string(), |r| format!("{} (type {})", r.addr, r.addr.addr_type))
+            "LE Audio: find {shown}: {}",
+            found.as_ref().map_or("not found".to_string(), |(_, r)| format!("{} (type {})", r.addr, r.addr.addr_type))
         );
         self.le_run(RUN_TIMEOUT, |ctx| {
             ctx.stop_scan();
