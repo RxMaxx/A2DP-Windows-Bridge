@@ -492,6 +492,10 @@ impl Settings {
         let text = serde_json::to_string_pretty(&s).map_err(std::io::Error::other)?;
         let path = Settings::path(dir);
         let tmp = path.with_extension("json.tmp");
+        // One save at a time: saves from several threads share the
+        // temporary file, and one rename found it already moved (NotFound)
+        static SAVE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _one = SAVE.lock().unwrap_or_else(|e| e.into_inner());
         std::fs::write(&tmp, text)?;
         let r = std::fs::rename(&tmp, &path);
         tracing::debug!("settings: saved {}: {r:?}", path.display());
@@ -794,6 +798,21 @@ mod tests {
         std::fs::write(Settings::path(&dir), "{}").unwrap();
         assert_eq!(Settings::load(&dir).theme, "system");
         assert_eq!(Settings::default().theme, "system");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saves_at_the_same_time_all_succeed() {
+        let dir = std::env::temp_dir().join(format!("bluecaster-save-race-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let dir = dir.clone();
+                std::thread::spawn(move || (0..20).all(|_| Settings::default().save(&dir).is_ok()))
+            })
+            .collect();
+        assert!(threads.into_iter().all(|t| t.join().unwrap()));
+        assert!(!Settings::path(&dir).with_extension("json.tmp").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
