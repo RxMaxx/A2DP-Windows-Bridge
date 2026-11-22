@@ -2707,6 +2707,7 @@ impl CoreState {
     /// one ([`merge_le_set_entries`]), published
     fn merge_le_sets(&self) {
         let dir = self.config_dir();
+        let _tx = self.service.settings_tx();
         let mut settings = self.service.settings();
         let (merged, list, volumes) = merge_le_set_entries(&dir, &self.service.known_le_sets(), &mut settings);
         if let Some(list) = list {
@@ -2778,6 +2779,7 @@ impl CoreState {
             self.service.forget_device(m, le_audio);
             crate::pairing::forget_services(&dir, m, le_audio);
         }
+        let _tx = self.service.settings_tx();
         let mut settings = self.service.settings();
         let mut volume = false;
         for m in &members {
@@ -2901,6 +2903,7 @@ impl CoreState {
         }
         if flags_changed {
             // As they are now: the settings may have been saved meanwhile
+            let _tx = self.service.settings_tx();
             let mut s = self.service.settings();
             s.awaiting_vb_cable = vb_missing;
             s.awaiting_hifi_cable = hifi_missing;
@@ -2934,6 +2937,7 @@ impl CoreState {
     /// hid.enable (after the confirmation) and hid.disable: the setting
     /// saved and applied as settings.set does
     fn set_hid_host(&self, on: bool) -> Result<Value, ErrorInfo> {
+        let _tx = self.service.settings_tx();
         let mut s = self.service.settings();
         if s.hid_host != on {
             s.hid_host = on;
@@ -2943,6 +2947,7 @@ impl CoreState {
     }
 
     fn set_active_profile(&self, name: Option<String>) {
+        let tx = self.service.settings_tx();
         let mut s = self.service.settings();
         if let Some(n) = &name
             && s.last_profile != *n
@@ -2951,6 +2956,7 @@ impl CoreState {
             let _ = s.save(&self.config_dir());
             self.service.set_settings(s);
         }
+        drop(tx);
         let (_, snap) = self.snapshot();
         self.publish(Event::Profiles { profiles: snap.profiles, active_profile: name });
     }
@@ -3486,6 +3492,7 @@ impl CoreState {
     /// The reports shown were seen: only newer ones are shown from now on
     fn crashes_seen(&self) {
         let Some(newest) = self.with_snapshot(|s| s.crashes.first().map(|c| c.name.clone())) else { return };
+        let _tx = self.service.settings_tx();
         let mut s = self.service.settings();
         crate::crashes::mark_seen(&mut s, &newest);
         if let Err(e) = s.save(&self.config_dir()) {
@@ -3498,6 +3505,7 @@ impl CoreState {
     /// The UI hid its window to the tray (app.hidden_to_tray): v1's "still
     /// running in the tray" balloon, once
     pub fn hidden_to_tray(&self) {
+        let _tx = self.service.settings_tx();
         let mut s = self.service.settings();
         if s.other.get(TRAY_HINT_SHOWN).and_then(Value::as_bool) == Some(true) {
             return;
@@ -3937,7 +3945,13 @@ impl CoreState {
                     let developer_toggled = base.debug_mode != merged.debug_mode;
                     let sync_toggled =
                         base.volume_sync != merged.volume_sync || base.mutes_output() != merged.mutes_output();
-                    me.save_settings(merged)?;
+                    {
+                        // Merged again into the settings as they are now:
+                        // another change may have been saved since `base`
+                        let _tx = me.service.settings_tx();
+                        let merged = merge_settings(&me.service.settings(), &settings);
+                        me.save_settings(merged)?;
+                    }
                     if chip {
                         me.reload_adapter();
                     }
@@ -4442,6 +4456,7 @@ impl CoreState {
                     // Ends a previous connection first (bounded by its
                     // connect and discovery timeouts)
                     me.receiver.start(&target);
+                    let _tx = me.service.settings_tx();
                     let mut s = me.service.settings();
                     if s.remote_sink != target {
                         s.remote_sink = target;
@@ -4653,6 +4668,7 @@ impl CoreState {
     /// The automatic check: at most once a day (recorded before asking, as v1)
     pub fn check_update_if_due(self: &Arc<Self>) {
         use bluecaster_core::update;
+        let tx = self.service.settings_tx();
         let mut s = self.service.settings();
         let today = update::today();
         if !update::automatic_check_due(&s, &today) {
@@ -4661,6 +4677,7 @@ impl CoreState {
         s.last_update_check = today;
         let _ = s.save(&self.config_dir());
         self.service.set_settings(s);
+        drop(tx);
         let me = self.clone();
         std::thread::spawn(move || {
             // A failure is in the update state

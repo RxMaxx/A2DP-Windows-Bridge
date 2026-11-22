@@ -109,8 +109,19 @@ fn the_users_data_moves_into_the_service_folder_once() {
     assert!(sddl.starts_with("D:P") && !sddl.contains(";;;BU)") && !sddl.contains(";;;WD)"), "{sddl}");
     // The settings, with the keyboard and mouse feature off
     let s: serde_json::Value = serde_json::from_slice(&std::fs::read(service.join("settings.json")).unwrap()).unwrap();
-    assert_eq!(s["language"], "de");
-    assert_eq!(s["hid_host"], false);
+    // On a failure: what the core did and what the two folders hold
+    let told = || {
+        format!(
+            "service settings: {s}
+user settings: {}
+core log:
+{}",
+            std::fs::read_to_string(user.join("settings.json")).unwrap_or_default(),
+            log_text(&service)
+        )
+    };
+    assert_eq!(s["language"], "de", "{}", told());
+    assert_eq!(s["hid_host"], false, "{}", told());
     assert_eq!(std::fs::read_to_string(service.join("devices").join("devices.txt")).unwrap().lines().count(), 1);
     // The keyboard list never moves by itself
     assert!(!service.join("devices").join("hid_devices.txt").exists());

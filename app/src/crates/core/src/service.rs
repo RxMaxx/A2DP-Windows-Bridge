@@ -539,9 +539,56 @@ fn le_config(le_on: bool, cli: Option<&LeCliOptions>, opts: &ServiceOptions) -> 
     })
 }
 
+/// The lock behind [`Service::settings_tx`]: one thread at a time, which
+/// may enter again
+#[derive(Default)]
+pub(crate) struct SettingsTx {
+    owner: Mutex<Option<(std::thread::ThreadId, usize)>>,
+    free: Condvar,
+}
+
+impl SettingsTx {
+    pub(crate) fn enter(&self) -> SettingsTxGuard<'_> {
+        let me = std::thread::current().id();
+        let mut owner = self.owner.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            match owner.as_mut() {
+                None => {
+                    *owner = Some((me, 1));
+                    break;
+                }
+                Some((id, depth)) if *id == me => {
+                    *depth += 1;
+                    break;
+                }
+                Some(_) => owner = self.free.wait(owner).unwrap_or_else(|e| e.into_inner()),
+            }
+        }
+        SettingsTxGuard(self)
+    }
+}
+
+/// See [`Service::settings_tx`]
+pub struct SettingsTxGuard<'a>(&'a SettingsTx);
+
+impl Drop for SettingsTxGuard<'_> {
+    fn drop(&mut self) {
+        let mut owner = self.0.owner.lock().unwrap_or_else(|e| e.into_inner());
+        match owner.as_mut() {
+            Some((_, depth)) if *depth > 1 => *depth -= 1,
+            _ => {
+                *owner = None;
+                self.0.free.notify_one();
+            }
+        }
+    }
+}
+
 pub(crate) struct Inner {
     opts: ServiceOptions,
     pub settings: Mutex<Settings>,
+    /// One change of the saved settings at a time ([`Service::settings_tx`])
+    settings_tx: SettingsTx,
     events: Mutex<Sender<ServiceEvent>>,
     pub(crate) host: Mutex<Option<Arc<BtHost>>>,
     stats: Arc<LinkStats>,
@@ -1218,6 +1265,7 @@ impl Inner {
     /// settings when it changes)
     pub fn remember_volume(&self, addr: &str, volume: Option<u8>) {
         let Some(v) = volume else { return };
+        let _tx = self.settings_tx.enter();
         let mut s = self.settings.lock().unwrap_or_else(|e| e.into_inner());
         let key = addr.to_uppercase();
         if s.saved_volumes.get(&key) == Some(&(v as i32)) {
@@ -1438,6 +1486,7 @@ impl Service {
         let inner = Arc::new(Inner {
             opts,
             settings: Mutex::new(settings),
+            settings_tx: SettingsTx::default(),
             events: Mutex::new(events),
             host: Mutex::new(None),
             stats: Arc::new(LinkStats::default()),
@@ -1984,6 +2033,16 @@ impl Service {
         true
     }
 
+    /// Held while the saved settings change: read them ([`Service::settings`]),
+    /// change the copy, save it and apply it ([`Service::set_settings`]) under
+    /// one guard. Without it, a copy read before another change is saved
+    /// after it and takes that change back (the user's settings moved into
+    /// the service's folder were replaced by the defaults this way). The
+    /// same thread may take it again.
+    pub fn settings_tx(&self) -> SettingsTxGuard<'_> {
+        self.inner.settings_tx.enter()
+    }
+
     pub fn settings(&self) -> Settings {
         self.inner.settings.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
@@ -2407,6 +2466,28 @@ fn link_is_fresh(age: Option<Duration>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_thread_at_a_time_changes_the_saved_settings() {
+        let tx = Arc::new(SettingsTx::default());
+        let outer = tx.enter();
+        // The same thread again: no deadlock
+        let inner = tx.enter();
+        let (t2, entered) = (tx.clone(), Arc::new(AtomicBool::new(false)));
+        let seen = entered.clone();
+        let other = std::thread::spawn(move || {
+            let _g = t2.enter();
+            seen.store(true, Ordering::Release);
+        });
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!entered.load(Ordering::Acquire), "another thread waits");
+        drop(inner);
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(!entered.load(Ordering::Acquire), "still held once");
+        drop(outer);
+        other.join().unwrap();
+        assert!(entered.load(Ordering::Acquire));
+    }
 
     #[test]
     fn afh_blend_runs_only_in_developer_mode() {

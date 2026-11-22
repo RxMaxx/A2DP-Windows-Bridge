@@ -122,9 +122,11 @@ fn migrate_user_data(root: &std::path::Path) -> bool {
 fn migrate_on_agent(state: &Weak<CoreState>, root: &std::path::Path) {
     static RUNNING: Mutex<()> = Mutex::new(());
     let _one = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
-    if migrate_user_data(root)
-        && let Some(s) = state.upgrade()
-    {
+    // No other change of the settings between the files written and read
+    // again: one saved in between would put the old settings back
+    let Some(s) = state.upgrade() else { return };
+    let _tx = s.service.settings_tx();
+    if migrate_user_data(root) {
         s.reload_from_disk();
     }
 }
