@@ -177,6 +177,13 @@ export function createCore(transport: Transport) {
       case "hid_passkey":
         setState("snap", "hid_passkey", ev.value === null ? null : reconcile(ev.value));
         break;
+      case "hid_check":
+        setState("snap", "hid_checks", reconcile(ev.value.checks));
+        setState("snap", "hid_rolled_back", ev.value.rolled_back === null ? null : reconcile(ev.value.rolled_back));
+        break;
+      case "hid_health":
+        setState("snap", "hid_health", ev.value === null ? null : reconcile(ev.value));
+        break;
       default:
         // An event kind of a newer core: the next snapshot has it
         break;

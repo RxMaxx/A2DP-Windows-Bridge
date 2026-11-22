@@ -1,5 +1,9 @@
-//! `bluecaster-core.exe --service`: the core as a Windows service, and
-//! `--install-service` / `--uninstall-service`, which create and remove it.
+//! `bluecaster-core.exe --service`: the core as a Windows service.
+//! Installing, updating and removing it is the set-up tool's
+//! (`--service-setup`, crate::service_setup), which copies the service's
+//! files into their own folder under Program Files first; stage 4's
+//! `--install-service` / `--uninstall-service` run its `install` and
+//! `remove`.
 //!
 //! The service's body is the headless core in service mode
 //! (`--headless --service-data %ProgramData%\BlueCaster`, the folder from
@@ -60,18 +64,12 @@ use win_sys::service::{Control, InstallConfig, ServiceContext};
 
 /// The service control manager starts the core with this
 pub const SERVICE_ARG: &str = "--service";
-/// Creates the service (needs an administrator)
+/// Stage 4's name for `--service-setup install` (needs an administrator)
 pub const INSTALL_ARG: &str = "--install-service";
-/// Removes the service (needs an administrator)
+/// Stage 4's name for `--service-setup remove` (needs an administrator)
 pub const UNINSTALL_ARG: &str = "--uninstall-service";
 
-/// Exit codes of `--install-service` / `--uninstall-service`
-pub const EXIT_OK: i32 = 0;
 pub const EXIT_FAILED: i32 = 1;
-/// Not run by an administrator (ERROR_ACCESS_DENIED's number)
-pub const EXIT_NOT_ELEVATED: i32 = 5;
-/// `--uninstall-service`: no such service (ERROR_SERVICE_DOES_NOT_EXIST)
-pub const EXIT_NOT_INSTALLED: i32 = 1060;
 /// `--service` outside the service control manager
 pub const EXIT_NOT_A_SERVICE: i32 = 1063;
 
@@ -88,7 +86,8 @@ pub const REQUIRED_PRIVILEGES: &[&str] =
 pub const DESCRIPTION: &str =
     "Connects Bluetooth headphones, keyboards and mice through BlueCaster, even before you sign in.";
 
-/// The service as `--install-service` creates it for the program `exe`
+/// The service as the set-up tool registers it for the program `exe` (the
+/// service folder's core)
 pub fn install_config(exe: &Path) -> InstallConfig {
     InstallConfig {
         name: ipc::access::SERVICE_NAME.into(),
@@ -112,13 +111,17 @@ pub fn core_args(data_dir: &Path) -> Vec<String> {
     vec![crate::headless::HEADLESS_ARG.into(), crate::headless::SERVICE_DATA_ARG.into(), data_dir.display().to_string()]
 }
 
-/// `--service`, `--install-service`, `--uninstall-service`: the exit code;
-/// None for any other first argument
+/// `--service`, `--service-setup ...`, `--install-service`,
+/// `--uninstall-service`: the exit code; None for any other first argument
 pub fn dispatch(args: &[String]) -> Option<i32> {
     match args.first().map(String::as_str) {
         Some(SERVICE_ARG) => Some(run_service()),
-        Some(INSTALL_ARG) => Some(install_command()),
-        Some(UNINSTALL_ARG) => Some(uninstall_command()),
+        Some(crate::service_setup::SETUP_ARG) => Some(crate::service_setup::run(&args[1..])),
+        Some(INSTALL_ARG | UNINSTALL_ARG) => {
+            let action = if args[0] == INSTALL_ARG { "install" } else { "remove" };
+            let rest = std::iter::once(action.to_string()).chain(args[1..].iter().cloned());
+            Some(crate::service_setup::run(&rest.collect::<Vec<_>>()))
+        }
         _ => None,
     }
 }
@@ -231,57 +234,6 @@ fn controls(ctx: &ServiceContext, done: &AtomicBool) {
         if last_progress.elapsed() >= Duration::from_secs(1) {
             ctx.progress();
             last_progress = std::time::Instant::now();
-        }
-    }
-}
-
-fn install_command() -> i32 {
-    win_sys::console::attach_parent();
-    if !win_sys::elevation::is_elevated() {
-        eprintln!(
-            "{INSTALL_ARG} requires administrator rights. Open the command prompt as an administrator and try again."
-        );
-        return EXIT_NOT_ELEVATED;
-    }
-    let exe = match std::env::current_exe() {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("{INSTALL_ARG}: {e}");
-            return EXIT_FAILED;
-        }
-    };
-    match win_sys::service::install(&install_config(&exe)) {
-        Ok(()) => {
-            println!("The BlueCaster service was installed.");
-            EXIT_OK
-        }
-        Err(e) => {
-            eprintln!("{INSTALL_ARG}: {e}");
-            EXIT_FAILED
-        }
-    }
-}
-
-fn uninstall_command() -> i32 {
-    win_sys::console::attach_parent();
-    if !win_sys::elevation::is_elevated() {
-        eprintln!(
-            "{UNINSTALL_ARG} requires administrator rights. Open the command prompt as an administrator and try again."
-        );
-        return EXIT_NOT_ELEVATED;
-    }
-    match win_sys::service::uninstall(ipc::access::SERVICE_NAME, Duration::from_secs(30)) {
-        Ok(true) => {
-            println!("The BlueCaster service was uninstalled.");
-            EXIT_OK
-        }
-        Ok(false) => {
-            eprintln!("The BlueCaster service is not installed.");
-            EXIT_NOT_INSTALLED
-        }
-        Err(e) => {
-            eprintln!("{UNINSTALL_ARG}: {e}");
-            EXIT_FAILED
         }
     }
 }

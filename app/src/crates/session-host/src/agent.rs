@@ -182,14 +182,37 @@ fn server_is_ours(pipe: &NamedPipeClient) -> Result<(), &'static str> {
     use std::os::windows::io::AsHandle;
     let server = win_sys::pipe_peer::server_process(pipe.as_handle()).map_err(|_| "the server is not known")?;
     let own_session = win_sys::session_launch::own_session();
-    if !matches!(server.session_id, Some(0)) && server.session_id != own_session {
+    let own = std::env::current_exe().map_err(|_| "this program is not known")?;
+    let service_core = win_sys::service_files::service_core().ok();
+    let test_instance = !ipc::instance_suffix().is_empty();
+    server_check(server.session_id, server.image.as_deref(), own_session, &own, service_core.as_deref(), test_instance)
+}
+
+/// [`server_is_ours`] from what the pipe says. A server in session 0 (the
+/// real service, unless this is a test instance) must also be the service
+/// folder's core: an agent started from the user's folder does not serve
+/// the service.
+fn server_check(
+    server_session: Option<u32>,
+    server_image: Option<&std::path::Path>,
+    own_session: Option<u32>,
+    own: &std::path::Path,
+    service_core: Option<&std::path::Path>,
+    test_instance: bool,
+) -> Result<(), &'static str> {
+    use win_sys::service_files::{required_core, same_path};
+    let in_session_0 = matches!(server_session, Some(0));
+    if !in_session_0 && server_session != own_session {
         return Err("the server runs in another session");
     }
-    let own = std::env::current_exe().map_err(|_| "this program is not known")?;
-    match server.image {
-        Some(p) if p.as_os_str().eq_ignore_ascii_case(own.as_os_str()) => Ok(()),
-        _ => Err("the server is another program"),
+    if !server_image.is_some_and(|p| same_path(p, own)) {
+        return Err("the server is another program");
     }
+    let required = required_core(own, service_core, in_session_0 && !test_instance)?;
+    if !same_path(required, own) {
+        return Err("the service does not run from the service folder");
+    }
+    Ok(())
 }
 
 fn open(name: &str, service: bool) -> std::io::Result<NamedPipeClient> {
@@ -356,6 +379,25 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for LogForwardLayer {
 mod tests {
     use super::*;
     use tracing_subscriber::layer::SubscriberExt;
+
+    #[test]
+    fn the_agent_serves_only_the_service_folders_core() {
+        use std::path::Path;
+        let svc = Path::new(r"C:\Program Files\BlueCaster Service\bluecaster-core.exe");
+        let user = Path::new(r"C:\Users\u\AppData\Local\BlueCaster\bluecaster-core.exe");
+        // The real service and its agent, both from the service folder
+        assert_eq!(server_check(Some(0), Some(svc), Some(1), svc, Some(svc), false), Ok(()));
+        // An agent from the user's folder, a server from the service folder
+        assert!(server_check(Some(0), Some(svc), Some(1), user, Some(svc), false).is_err());
+        // Both from the user's folder (the stage 4 install): not the service
+        assert!(server_check(Some(0), Some(user), Some(1), user, Some(svc), false).is_err());
+        // A test instance in session 0 keeps its own program
+        assert_eq!(server_check(Some(0), Some(user), Some(1), user, Some(svc), true), Ok(()));
+        // A core run by hand in the agent's own session
+        assert_eq!(server_check(Some(1), Some(user), Some(1), user, Some(svc), false), Ok(()));
+        assert!(server_check(Some(2), Some(user), Some(1), user, Some(svc), false).is_err());
+        assert!(server_check(Some(1), None, Some(1), user, Some(svc), false).is_err());
+    }
 
     /// What the forward layer sends for lines logged in the agent (the only
     /// test that sets the log target)

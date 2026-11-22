@@ -15,6 +15,8 @@ import { Icon } from "./Icon";
 export const HID_WAIT_SECONDS = 10;
 
 const RISKS = ["ui.dev.hid_risk_close", "ui.dev.hid_risk_signin", "ui.dev.hid_risk_admin", "ui.dev.hid_risk_games"];
+// Through the service they also work on the sign-in screen and as administrator
+const RISKS_SERVICE = ["ui.dev.hid_risk_service", "ui.dev.hid_risk_sas", "ui.dev.hid_risk_games"];
 
 export function HidEnableDialog(props: { open: boolean; onClose: (enabled: boolean) => void }) {
   const app = useApp();
@@ -26,6 +28,7 @@ export function HidEnableDialog(props: { open: boolean; onClose: (enabled: boole
   const [left, setLeft] = createSignal(HID_WAIT_SECONDS);
   const [error, setError] = createSignal<string | null>(null);
   const [busy, setBusy] = createSignal(false);
+  const service = () => !!app.core.state.snap?.service_mode;
 
   const fetchCode = async () => {
     setCode(null);
@@ -100,9 +103,9 @@ export function HidEnableDialog(props: { open: boolean; onClose: (enabled: boole
       onCancel={() => props.onClose(false)}
     >
       <div class="hid-enable">
-        <p class="hid-lead">{t("ui.dev.hid_enable_lead")}</p>
+        <p class="hid-lead">{t(service() ? "ui.dev.hid_enable_lead_service" : "ui.dev.hid_enable_lead")}</p>
         <ul class="hid-risks">
-          <For each={RISKS}>{(k) => <li>{t(k)}</li>}</For>
+          <For each={service() ? RISKS_SERVICE : RISKS}>{(k) => <li>{t(k)}</li>}</For>
         </ul>
         <label class="check-item">
           <input type="checkbox" checked={otherInput()} onChange={(e) => setOtherInput(e.currentTarget.checked)} />

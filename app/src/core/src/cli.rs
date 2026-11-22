@@ -160,6 +160,12 @@ Keyboards and mice (experimental):
   --hid-leds <mask>     without --hid-inject: the keyboard lights to send (bit
                         0 Num Lock, 1 Caps Lock, 2 Scroll Lock) instead of
                         none
+  --hid-confirm <seconds>
+                        with --hid-connect: keep the device only if its input
+                        arrives within this many seconds after it is ready
+                        (as the app's 30 s check); otherwise it is removed.
+                        Prints 'hid check waiting', then 'hid check
+                        confirmed' or 'hid check removed <reason>'
 
 Development / testing:
   --hci-tcp <host:port> H4 over TCP to a virtual controller (tools/emu)
@@ -290,6 +296,8 @@ struct HidArgs {
     /// --hid-helper-record: test switch of debug builds, the input goes
     /// through a real input helper that records it instead of injecting
     helper_record: bool,
+    /// --hid-confirm: the countdown for --hid-connect's device
+    confirm: Option<u64>,
 }
 
 /// LE Audio (experimental) options (v1 LeAudioCliOptions)
@@ -572,6 +580,12 @@ fn parse(args: &[String]) -> Result<Args, String> {
             "--hid-connect" => a.hid.connect = Some(value(&mut it, "--hid-connect")?),
             "--hid-inject" => a.hid.inject = true,
             "--hid-helper-record" => a.hid.helper_record = true,
+            "--hid-confirm" => {
+                let v = value(&mut it, "--hid-confirm")?;
+                a.hid.confirm = Some(
+                    v.parse().ok().filter(|&s| (1..=600).contains(&s)).ok_or("--hid-confirm takes 1 to 600 seconds")?,
+                );
+            }
             "--hid-leds" => {
                 let v = value(&mut it, "--hid-leds")?;
                 a.hid.leds = Some(v.parse().ok().filter(|&m| m <= 7).ok_or("--hid-leds takes a mask from 0 to 7")?);
@@ -590,6 +604,9 @@ fn parse(args: &[String]) -> Result<Args, String> {
     }
     if a.hid.test.is_none() && (hid_options || a.hid.leds.is_some()) {
         return Err("--hid-device, --hid-le-device, --hid-connect, --hid-inject and --hid-leds need --hid-test".into());
+    }
+    if a.hid.confirm.is_some() && a.hid.connect.is_none() {
+        return Err("--hid-confirm needs --hid-connect".into());
     }
     if a.hid.test.is_some() && a.hid.scan.is_some() {
         return Err("--hid-test and --hid-scan cannot be used together".into());
@@ -1109,7 +1126,9 @@ fn stream_session(
             // Over TCP there is no USB adapter to tell
             Ok(ServiceEvent::Adapter(_)) => {}
             // Keyboards and mice have their own mode (--hid-test)
-            Ok(ServiceEvent::HidDevices | ServiceEvent::HidPasskey) => {}
+            Ok(
+                ServiceEvent::HidDevices | ServiceEvent::HidPasskey | ServiceEvent::HidCheck | ServiceEvent::HidHealth,
+            ) => {}
             // --ipc: the clients get the button
             Ok(ServiceEvent::Button(b)) => {
                 outln!("Headphone button: {:?} {}", b.button, if b.pressed { "pressed" } else { "released" });
@@ -1281,6 +1300,9 @@ fn hid_test(a: &Args, service: &Service, secs: u64, running: &AtomicBool) -> i32
         eoutln!("Bluetooth started without keyboards and mice");
         return 1;
     }
+    if let Some(secs) = a.hid.confirm {
+        service.set_hid_confirm_window(Duration::from_secs(secs));
+    }
     if let Some(address) = a.hid.connect.as_deref().and_then(parse_device_address) {
         // As the app adds one: the list (here the command line's) decides
         // classic or LE, and its pairing may show a number
@@ -1319,11 +1341,36 @@ fn hid_test(a: &Args, service: &Service, secs: u64, running: &AtomicBool) -> i32
             shown = now;
         }
     };
+    // --hid-confirm: the device's check, as it changes (states only)
+    let mut check_state = if a.hid.confirm.is_some() { "connecting" } else { "" };
+    let mut show_check = || {
+        if check_state.is_empty() || check_state == "done" {
+            return;
+        }
+        let now = match service.hid_checks().first() {
+            Some(c) if c.waiting => "waiting",
+            Some(_) => "connecting",
+            None => "done",
+        };
+        if now == check_state {
+            return;
+        }
+        match now {
+            "waiting" => outln!("hid check waiting"),
+            "done" => match service.hid_rolled_back() {
+                Some(r) => outln!("hid check removed {}", r.reason.as_str()),
+                None => outln!("hid check confirmed"),
+            },
+            _ => {}
+        }
+        check_state = now;
+    };
     let start = Instant::now();
     for second in 1..=secs {
         let at = start + Duration::from_secs(second);
         while Instant::now() < at && running.load(Ordering::Acquire) {
             show_passkey();
+            show_check();
             std::thread::sleep(Duration::from_millis(20));
         }
         if !running.load(Ordering::Acquire) {
@@ -2063,6 +2110,18 @@ mod tests {
         assert!(parse(&args("--cli --hid-le-device 00:A2:D0:00:00:05")).is_err());
         assert_eq!(parse(&args("--cli --hid-scan 6")).unwrap().hid.scan, Some(6));
         assert!(parse(&args("--cli --hid-scan 6 --hid-test 5")).is_err());
+        let a = parse(&args(
+            "--cli --hid-test 5 --hid-device 00:A2:D0:00:00:03 --hid-connect 00:A2:D0:00:00:03 --hid-confirm 4",
+        ))
+        .unwrap();
+        assert_eq!(a.hid.confirm, Some(4));
+        assert!(parse(&args("--cli --hid-test 5 --hid-device 00:A2:D0:00:00:03 --hid-confirm 4")).is_err());
+        assert!(
+            parse(&args(
+                "--cli --hid-test 5 --hid-device 00:A2:D0:00:00:03 --hid-connect 00:A2:D0:00:00:03 --hid-confirm 0"
+            ))
+            .is_err()
+        );
     }
 
     #[test]

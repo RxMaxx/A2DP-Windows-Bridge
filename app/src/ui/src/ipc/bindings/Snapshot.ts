@@ -3,8 +3,11 @@ import type { AdapterState } from "./AdapterState";
 import type { CaptureState } from "./CaptureState";
 import type { CrashReport } from "./CrashReport";
 import type { Device } from "./Device";
+import type { HidCheck } from "./HidCheck";
 import type { HidDevice } from "./HidDevice";
+import type { HidHealth } from "./HidHealth";
 import type { HidPasskey } from "./HidPasskey";
+import type { HidRolledBack } from "./HidRolledBack";
 import type { Profile } from "./Profile";
 import type { Settings } from "./Settings";
 import type { StreamStatus } from "./StreamStatus";
@@ -76,6 +79,21 @@ hid_candidates: Array<Device>,
  * while its pairing shows one
  */
 hid_passkey: HidPasskey | null, 
+/**
+ * The keyboards and mice being added: each stays only once its input
+ * reaches Windows
+ */
+hid_checks: Array<HidCheck>, 
+/**
+ * The keyboard or mouse removed again last because no input arrived,
+ * until the user adds one again or dismisses the notice
+ */
+hid_rolled_back: HidRolledBack | null, 
+/**
+ * The last self-test of the path that passes keyboard and mouse input
+ * to Windows; None: none ran yet
+ */
+hid_health: HidHealth | null, 
 /**
  * The core runs as a Windows service: its data folder is protected.
  * `config_dir` and `log_dir` are empty, results name files in the

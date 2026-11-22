@@ -2,6 +2,7 @@
 //! executable, with its test switch: it writes what it would release to a
 //! file instead of sending it to Windows. Nothing here injects input.
 
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -9,11 +10,14 @@ use std::time::{Duration, Instant};
 use win_sys::hid_guard::{Guard, HeldSection, HeldSet};
 use win_sys::input_inject::{Inject, MouseButton};
 
+/// Console programs started from a test get no terminal window
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const EXE: &str = env!("CARGO_BIN_EXE_bluecaster-core");
 
 /// A process that waits about a minute: the "core" the guard watches
 fn dummy_core() -> Child {
     Command::new("ping")
+        .creation_flags(CREATE_NO_WINDOW)
         .args(["-n", "60", "127.0.0.1"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())

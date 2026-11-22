@@ -1249,6 +1249,18 @@ pub struct Snapshot {
     /// while its pairing shows one
     #[serde(default)]
     pub hid_passkey: Option<HidPasskey>,
+    /// The keyboards and mice being added: each stays only once its input
+    /// reaches Windows
+    #[serde(default)]
+    pub hid_checks: Vec<HidCheck>,
+    /// The keyboard or mouse removed again last because no input arrived,
+    /// until the user adds one again or dismisses the notice
+    #[serde(default)]
+    pub hid_rolled_back: Option<HidRolledBack>,
+    /// The last self-test of the path that passes keyboard and mouse input
+    /// to Windows; None: none ran yet
+    #[serde(default)]
+    pub hid_health: Option<HidHealth>,
     /// The core runs as a Windows service: its data folder is protected.
     /// `config_dir` and `log_dir` are empty, results name files in the
     /// user's folder (handed over through the session agent), and
@@ -1826,6 +1838,14 @@ pub enum Event {
     /// Pairing the keyboard being added shows a number to type on it, or
     /// no longer does (state, hid_passkey)
     HidPasskey(Option<HidPasskey>),
+    /// A keyboard or mouse being added started or ended its countdown, or
+    /// was removed again (state, hid_checks and hid_rolled_back)
+    HidCheck {
+        checks: Vec<HidCheck>,
+        rolled_back: Option<HidRolledBack>,
+    },
+    /// The self-test has a new result (state, hid_health)
+    HidHealth(Option<HidHealth>),
     /// The core is shutting down
     Bye,
     /// Service mode: the user chose Exit (app.close, the tray). The UI
@@ -2232,6 +2252,16 @@ pub enum Method {
     /// Disconnects one, takes it off the list and forgets its pairing -> null
     #[serde(rename = "hid.remove")]
     HidRemove { address: String },
+    /// Removes a keyboard or mouse being added (one of Snapshot.hid_checks)
+    /// now, as its countdown would -> null. Does nothing for a device that
+    /// is not under check (its countdown may have just ended). There is no
+    /// request that confirms a device: only its input reaching Windows does.
+    #[serde(rename = "hid.check_cancel")]
+    HidCheckCancel { address: String },
+    /// The notice of a device removed again (Snapshot.hid_rolled_back)
+    /// goes away -> null
+    #[serde(rename = "hid.check_dismiss")]
+    HidCheckDismiss,
     /// -> UpdateState; error update.failed (update.error) when the check
     /// failed
     #[serde(rename = "app.check_update")]
@@ -2766,6 +2796,54 @@ pub struct HidStatus {
     pub counts: Option<HidCounts>,
 }
 
+/// A keyboard or mouse being added, until its input reaches Windows
+/// (Snapshot.hid_checks)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+
+pub struct HidCheck {
+    /// "XX:XX:XX:XX:XX:XX"
+    pub address: String,
+    pub name: String,
+    /// From its report descriptor: "keyboard", "mouse", "both", or "" while
+    /// not known
+    pub kind: String,
+    /// The countdown runs; false: the device is not ready for input yet
+    /// (connecting, pairing)
+    pub waiting: bool,
+    /// Milliseconds left of the countdown when this was sent
+    pub remaining_ms: u32,
+    /// The countdown's length in milliseconds
+    pub window_ms: u32,
+}
+
+/// A keyboard or mouse removed again because its input did not reach
+/// Windows (Snapshot.hid_rolled_back)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+
+pub struct HidRolledBack {
+    pub address: String,
+    pub name: String,
+    /// As hid.add's `le`, for adding it again
+    #[serde(default)]
+    pub le: Option<u8>,
+    /// "no_input": connected, but no input arrived in time;
+    /// "disconnected": it went away during the countdown; "not_connected":
+    /// it never got ready; "cancelled": hid.check_cancel
+    pub reason: String,
+}
+
+/// The self-test of the path to Windows (Snapshot.hid_health)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+
+pub struct HidHealth {
+    /// "ok", "not_tested" (no input goes to Windows) or "failed"
+    pub state: String,
+    /// With "failed": "helper" (the input helper did not start),
+    /// "refused" (Windows refused the test input) or "timeout"
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
 /// A number to type on a keyboard being added, then Enter (Snapshot.hid_passkey)
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 
@@ -3084,6 +3162,9 @@ mod tests {
             hid_devices: Vec::new(),
             hid_candidates: Vec::new(),
             hid_passkey: None,
+            hid_checks: Vec::new(),
+            hid_rolled_back: None,
+            hid_health: None,
             service_mode: false,
         })
         .unwrap();
@@ -3151,6 +3232,32 @@ mod tests {
         assert_eq!(
             m(serde_json::json!({"method": "hid.add", "params": {"address": "A", "name": "K", "le": 1}})),
             Method::HidAdd { address: "A".into(), name: "K".into(), le: Some(1) }
+        );
+        assert_eq!(
+            m(serde_json::json!({"method": "hid.check_cancel", "params": {"address": "A"}})),
+            Method::HidCheckCancel { address: "A".into() }
+        );
+        assert_eq!(m(serde_json::json!({"method": "hid.check_dismiss"})), Method::HidCheckDismiss);
+        let check = HidCheck {
+            address: "A".into(),
+            name: "K".into(),
+            kind: "keyboard".into(),
+            waiting: true,
+            remaining_ms: 1000,
+            window_ms: 30000,
+        };
+        assert_eq!(
+            serde_json::to_value(Event::HidCheck { checks: vec![check], rolled_back: None }).unwrap(),
+            serde_json::json!({"kind": "hid_check", "value": {"checks": [{"address": "A", "name": "K",
+                "kind": "keyboard", "waiting": true, "remaining_ms": 1000, "window_ms": 30000}], "rolled_back": null}})
+        );
+        assert_eq!(
+            serde_json::to_value(Event::HidHealth(Some(HidHealth {
+                state: "failed".into(),
+                reason: Some("refused".into())
+            })))
+            .unwrap(),
+            serde_json::json!({"kind": "hid_health", "value": {"state": "failed", "reason": "refused"}})
         );
         let e = Event::HidDevices(vec![HidDevice { address: "A".into(), name: "K".into(), connected: true, le: true }]);
         assert_eq!(

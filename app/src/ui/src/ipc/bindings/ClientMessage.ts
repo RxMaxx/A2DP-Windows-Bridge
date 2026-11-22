@@ -20,4 +20,4 @@ lhdcv5_low_latency?: boolean | null, codec_fallback?: boolean | null, } } | { "m
  * A Bluetooth LE device: its address type (Device.hid_le); None
  * for a classic one
  */
-le: number | null, } } | { "method": "hid.connect", "params": { address: string, } } | { "method": "hid.remove", "params": { address: string, } } | { "method": "app.check_update" } | { "method": "app.hidden_to_tray" } | { "method": "app.quit" } | { "method": "app.quit_for_update" } | { "method": "app.close" } | { "method": "app.run_as_admin", "params": { call: Method, } });
+le: number | null, } } | { "method": "hid.connect", "params": { address: string, } } | { "method": "hid.remove", "params": { address: string, } } | { "method": "hid.check_cancel", "params": { address: string, } } | { "method": "hid.check_dismiss" } | { "method": "app.check_update" } | { "method": "app.hidden_to_tray" } | { "method": "app.quit" } | { "method": "app.quit_for_update" } | { "method": "app.close" } | { "method": "app.run_as_admin", "params": { call: Method, } });

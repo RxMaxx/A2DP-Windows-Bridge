@@ -6,10 +6,10 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/te
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../app/App";
 import { t } from "../i18n";
-import { MOCK_PASSKEY_KEYBOARD, MockCore } from "../ipc/mock";
+import { MOCK_PASSKEY_KEYBOARD, MockCore, type MockScenario } from "../ipc/mock";
 import { createCore, type Core } from "../ipc/store";
 import { HID_WAIT_SECONDS } from "./HidEnableDialog";
-import { hidCandidates } from "./HidHost";
+import { hidCandidates, hidCheckHint } from "./HidHost";
 
 let mock: MockCore | null = null;
 
@@ -25,13 +25,16 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function developerScreen(): Promise<{ core: Core; calls: string[]; params: Map<string, unknown> }> {
+async function developerScreen(
+  scenario: MockScenario = "normal",
+): Promise<{ core: Core; calls: string[]; params: Map<string, unknown> }> {
   location.hash = "#/developer";
   const calls: string[] = [];
   // Each method's latest parameters
   const params = new Map<string, unknown>();
   const m = new MockCore({
     speed: 0,
+    scenario,
     onCall: (method, p) => {
       calls.push(method);
       params.set(method, p);
@@ -120,6 +123,39 @@ describe("turning on keyboards and mice", () => {
     expect(core.state.snap!.settings.hid_host).toBe(false);
     // The typed code is cleared: the new one has to be typed
     expect(within(dialog).getByRole("textbox", { name: t("ui.dev.hid_code_input") })).toHaveValue("");
+  });
+
+  it("lists the app's risks without the service", async () => {
+    await developerScreen();
+    const dialog = await openDialog();
+    expect(within(dialog).getByText(t("ui.dev.hid_enable_lead"))).toBeInTheDocument();
+    const risks = within(dialog)
+      .getAllByRole("listitem")
+      .map((li) => li.textContent);
+    expect(risks).toEqual(
+      ["ui.dev.hid_risk_close", "ui.dev.hid_risk_signin", "ui.dev.hid_risk_admin", "ui.dev.hid_risk_games"].map((k) =>
+        t(k),
+      ),
+    );
+    expect(screen.getByText(t("ui.dev.hid_toggle_hint"))).toBeInTheDocument();
+  });
+
+  it("lists the service's risks in service mode, with the same steps", async () => {
+    const { core } = await developerScreen("service");
+    expect(core.state.snap!.service_mode).toBe(true);
+    const dialog = await openDialog();
+    expect(within(dialog).getByText(t("ui.dev.hid_enable_lead_service"))).toBeInTheDocument();
+    expect(within(dialog).getByText(t("ui.dev.hid_risk_service"))).toBeInTheDocument();
+    expect(within(dialog).getByText(t("ui.dev.hid_risk_sas"))).toBeInTheDocument();
+    expect(within(dialog).getByText(t("ui.dev.hid_risk_games"))).toBeInTheDocument();
+    expect(within(dialog).queryByText(t("ui.dev.hid_risk_signin"))).toBeNull();
+    expect(within(dialog).queryByText(t("ui.dev.hid_risk_admin"))).toBeNull();
+    expect(within(dialog).queryByText(t("ui.dev.hid_risk_close"))).toBeNull();
+    // Both statements and the code are still asked for
+    within(dialog).getByRole("checkbox", { name: t("ui.dev.hid_confirm_other") });
+    within(dialog).getByRole("checkbox", { name: t("ui.dev.hid_confirm_risk") });
+    within(dialog).getByRole("textbox", { name: t("ui.dev.hid_code_input") });
+    expect(screen.getByText(t("ui.dev.hid_toggle_hint_service"))).toBeInTheDocument();
   });
 
   it("leaves it off when cancelled", async () => {
@@ -254,5 +290,103 @@ describe("pairing with a number", () => {
     expect(shown.mock.calls.map((c) => c[0]?.passkey ?? null)).toEqual([expect.stringMatching(/^\d{6}$/), null]);
     expect(core.state.snap!.hid_passkey).toBeNull();
     expect(core.state.snap!.hid_devices.find((d) => d.address === MOCK_PASSKEY_KEYBOARD)?.connected).toBe(true);
+  });
+});
+
+describe("the check of a device being added", () => {
+  const MOUSE = "AA:BB:CC:DD:EE:02";
+
+  async function adding(outcome: "manual" | "input" = "manual") {
+    const r = await developerScreen();
+    const code = ((await mock!.call("hid.code")) as { code: string }).code;
+    await mock!.call("hid.enable", { code, other_input_at_hand: true, risk_understood: true });
+    await screen.findByRole("button", { name: t("connection.scan") });
+    mock!.hidCheckOutcome = outcome;
+    await mock!.call("hid.add", { address: MOUSE, name: "Desk mouse", le: 1 });
+    return { ...r, block: await screen.findByTestId("hid-check") };
+  }
+
+  it("asks for input with a countdown and keeps the device once its input arrives", async () => {
+    const { core, block } = await adding();
+    expect(within(block).getByText("Desk mouse")).toBeInTheDocument();
+    expect(within(block).getByText(t("ui.dev.hid_check_mouse"))).toBeInTheDocument();
+    expect(within(block).getByTestId("hid-check-left")).toHaveTextContent(t("ui.dev.hid_check_left", 30));
+    vi.advanceTimersByTime(5000);
+    await waitFor(() =>
+      expect(within(block).getByTestId("hid-check-left")).toHaveTextContent(t("ui.dev.hid_check_left", 25)),
+    );
+    mock!.hidInput(MOUSE);
+    await waitFor(() => expect(screen.queryByTestId("hid-check")).toBeNull());
+    expect(core.state.snap!.hid_devices.some((d) => d.address === MOUSE)).toBe(true);
+    expect(screen.queryByTestId("hid-rolled-back")).toBeNull();
+  });
+
+  it("says so when the countdown removed the device, and Try again adds it again", async () => {
+    const { core, params } = await adding();
+    mock!.hidCheckTimeout(MOUSE);
+    const notice = await screen.findByTestId("hid-rolled-back");
+    expect(notice).toHaveTextContent(t("ui.dev.hid_rolled_back", "Desk mouse"));
+    expect(screen.queryByTestId("hid-check")).toBeNull();
+    expect(core.state.snap!.hid_devices.some((d) => d.address === MOUSE)).toBe(false);
+    params.delete("hid.add");
+    mock!.hidCheckOutcome = "manual";
+    fireEvent.click(within(notice).getByRole("button", { name: t("ui.fix.retry") }));
+    await waitFor(() => expect(params.get("hid.add")).toEqual({ address: MOUSE, name: "Desk mouse", le: 1 }));
+    await screen.findByTestId("hid-check");
+    await waitFor(() => expect(screen.queryByTestId("hid-rolled-back")).toBeNull());
+  });
+
+  it("Close dismisses the notice in the core", async () => {
+    const { calls } = await adding();
+    mock!.hidCheckTimeout(MOUSE);
+    const notice = await screen.findByTestId("hid-rolled-back");
+    fireEvent.click(within(notice).getByRole("button", { name: t("modal.close") }));
+    await waitFor(() => expect(screen.queryByTestId("hid-rolled-back")).toBeNull());
+    expect(calls).toContain("hid.check_dismiss");
+  });
+
+  it("Remove ends the countdown at once, without a notice", async () => {
+    const { core, calls, block } = await adding();
+    fireEvent.click(within(block).getByRole("button", { name: t("ui.device.forget") }));
+    await waitFor(() => expect(screen.queryByTestId("hid-check")).toBeNull());
+    expect(calls).toContain("hid.check_cancel");
+    expect(core.state.snap!.hid_devices.some((d) => d.address === MOUSE)).toBe(false);
+    expect(screen.queryByTestId("hid-rolled-back")).toBeNull();
+  });
+
+  it("a keyboard is asked for a key, an unknown device for a key or button", () => {
+    expect(hidCheckHint("keyboard")).toBe(t("ui.dev.hid_check_keyboard"));
+    expect(hidCheckHint("both")).toBe(t("ui.dev.hid_check_any"));
+    expect(hidCheckHint("")).toBe(t("ui.dev.hid_check_any"));
+  });
+});
+
+describe("the self-test of the input path", () => {
+  it("a failure at turning on turns the feature off again and says why", async () => {
+    await developerScreen();
+    mock!.hidSelfTestFails = "refused";
+    const dialog = await openDialog();
+    tickBoth(dialog);
+    typeCode(dialog, within(dialog).getByTestId("hid-code").textContent!);
+    vi.advanceTimersByTime(HID_WAIT_SECONDS * 1000);
+    await waitFor(() => expect(turnOn(dialog)).toBeEnabled());
+    fireEvent.click(turnOn(dialog));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(t("ui.dev.hid_test_off_refused"));
+    expect(screen.getByRole("switch", { name: t("ui.dev.hid_toggle") })).not.toBeChecked();
+    expect(screen.queryByText(t("ui.dev.hid_banner_title"))).toBeNull();
+  });
+
+  it("a failure at a later start only warns in the banner", async () => {
+    const { core } = await developerScreen();
+    const code = ((await mock!.call("hid.code")) as { code: string }).code;
+    await mock!.call("hid.enable", { code, other_input_at_hand: true, risk_understood: true });
+    await screen.findByText(t("ui.dev.hid_banner_title"));
+    expect(screen.queryByTestId("hid-test-failed")).toBeNull();
+    mock!.setHidHealth({ state: "failed", reason: "helper" });
+    expect(await screen.findByTestId("hid-test-failed")).toHaveTextContent(t("ui.dev.hid_banner_test_failed"));
+    // Still on
+    expect(core.state.snap!.settings.hid_host).toBe(true);
+    mock!.setHidHealth({ state: "ok", reason: null });
+    await waitFor(() => expect(screen.queryByTestId("hid-test-failed")).toBeNull());
   });
 });

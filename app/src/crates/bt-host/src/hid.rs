@@ -26,7 +26,7 @@ use std::sync::mpsc::Sender;
 use btstack_sys::Stack;
 use btstack_sys::consts::*;
 use hid_input::sink::{DryRunSink, InputSink, LocalSink};
-use hid_input::{Decoder, InputEvent};
+use hid_input::{Decoder, InputEvent, InputKind};
 use win_sys::hid_guard::HeldSection;
 
 use crate::HostEvent;
@@ -84,6 +84,11 @@ pub enum HidEvent {
     /// [`crate::BtHost::hid_connect`] did not get its channels (HCI or
     /// L2CAP status)
     ConnectFailed([u8; 6], u8),
+    /// A device connected and is ready for input: its report descriptor is
+    /// read (or known from before) and, over LE, its input reports are
+    /// subscribed to. `kind` from the descriptor; all false when none is
+    /// usable. Sent once per connection.
+    Ready([u8; 6], InputKind),
     /// Pairing the device the user adds: the user types this number on it
     /// ([`crate::BtHost::hid_pairing_begin`])
     Passkey([u8; 6], Passkey),
@@ -100,6 +105,16 @@ pub enum HidEvent {
 }
 
 pub use hid_input::sink::HidCounters;
+
+/// The sink a stack with `config` passes input to: the one given, else
+/// [`LocalSink`] (with the guard's section), or [`DryRunSink`] in dry run
+pub fn sink_for(config: &HidConfig) -> Arc<dyn InputSink> {
+    match (&config.sink, config.dry_run) {
+        (Some(sink), _) => sink.clone(),
+        (None, true) => Arc::new(DryRunSink::default()),
+        (None, false) => Arc::new(LocalSink::new(config.held.clone())),
+    }
+}
 
 /// The file of a device's report descriptor in `dir`: "<address>.bin", and
 /// "<address>-<n>.bin" for the further HID services of an LE device that has
@@ -236,6 +251,7 @@ pub(crate) struct HidEngine {
 impl HidEngine {
     pub fn new(config: Option<&HidConfig>, counters: Arc<HidCounters>, events: Sender<HostEvent>) -> SharedHid {
         let c = config.cloned().unwrap_or_default();
+        let sink = sink_for(&c);
         Rc::new(RefCell::new(HidEngine {
             dry_run: c.dry_run,
             classic: c.devices,
@@ -247,11 +263,7 @@ impl HidEngine {
             pairing: Pairing::default(),
             leds: if c.dry_run { c.leds.map(|m| m & hid_input::leds::ALL) } else { None },
             leds_from_windows: !c.dry_run,
-            sink: match (c.sink, c.dry_run) {
-                (Some(sink), _) => sink,
-                (None, true) => Arc::new(DryRunSink),
-                (None, false) => Arc::new(LocalSink::new(c.held)),
-            },
+            sink,
         }))
     }
 
@@ -328,6 +340,20 @@ impl HidEngine {
         let _ = self.events.send(HostEvent::Hid(HidEvent::Disconnected(addr)));
     }
 
+    /// A device is ready for input (see [`HidEvent::Ready`])
+    pub fn on_ready(&self, addr: [u8; 6], kind: InputKind) {
+        tracing::info!(
+            "hid: ready for input ({})",
+            match (kind.keyboard, kind.pointer) {
+                (true, true) => "keys and pointer",
+                (true, false) => "keys",
+                (false, true) => "pointer",
+                (false, false) => "no usable report",
+            }
+        );
+        let _ = self.events.send(HostEvent::Hid(HidEvent::Ready(addr, kind)));
+    }
+
     pub fn on_connect_failed(&self, addr: [u8; 6], status: u8) {
         let _ = self.events.send(HostEvent::Hid(HidEvent::ConnectFailed(addr, status)));
     }
@@ -339,8 +365,14 @@ impl HidEngine {
         self.sink.release_all();
     }
 
-    /// An input report: decoded and passed on, or counted as undecoded
-    pub fn input(&self, decoder: Option<&mut Decoder>, report: impl FnOnce(&mut Decoder) -> Vec<InputEvent>) {
+    /// An input report of `from`: decoded and passed on, or counted as
+    /// undecoded
+    pub fn input(
+        &self,
+        from: [u8; 6],
+        decoder: Option<&mut Decoder>,
+        report: impl FnOnce(&mut Decoder) -> Vec<InputEvent>,
+    ) {
         self.counters.reports.fetch_add(1, Ordering::Relaxed);
         let Some(decoder) = decoder else {
             self.counters.undecoded.fetch_add(1, Ordering::Relaxed);
@@ -348,7 +380,7 @@ impl HidEngine {
         };
         let events = report(decoder);
         if !events.is_empty() {
-            self.pass(&events);
+            self.pass(Some(from), &events);
         }
     }
 
@@ -357,7 +389,7 @@ impl HidEngine {
         let events = decoder.map(|d| d.release_all()).unwrap_or_default();
         if !events.is_empty() {
             tracing::debug!("hid: releasing {} held key(s) or button(s)", events.len());
-            self.pass(&events);
+            self.pass(None, &events);
         }
     }
 
@@ -365,12 +397,13 @@ impl HidEngine {
         self.counters.refused.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Windows gets the events through the sink (or they are only counted)
-    pub fn pass(&self, events: &[InputEvent]) {
+    /// Windows gets the events through the sink (or they are only counted);
+    /// `from`: the device whose report they were (None: a release)
+    pub fn pass(&self, from: Option<[u8; 6]>, events: &[InputEvent]) {
         self.counters.events.fetch_add(events.len() as u64, Ordering::Relaxed);
         let injects = hid_input::inject::to_injects(events);
         if !injects.is_empty() {
-            self.sink.pass(&injects, &self.counters);
+            self.sink.pass(from, &injects, &self.counters);
         }
     }
 
@@ -439,6 +472,24 @@ struct Link {
     addr: [u8; 6],
     opened: bool,
     decoder: DeviceDecoder,
+    /// HidEvent::Ready went out for this connection
+    ready: bool,
+}
+
+impl Link {
+    fn new(addr: [u8; 6]) -> Link {
+        Link { addr, opened: false, decoder: DeviceDecoder::default(), ready: false }
+    }
+
+    /// Ready for input once its channels are open and its descriptor is
+    /// known (or turned out to be unusable): told once
+    fn ready_now(&mut self, engine: &HidEngine, descriptor_done: bool) {
+        if self.ready || !self.opened || (self.decoder.decoder.is_none() && !descriptor_done) {
+            return;
+        }
+        self.ready = true;
+        engine.on_ready(self.addr, self.decoder.decoder.as_ref().map(Decoder::kind).unwrap_or_default());
+    }
 }
 
 /// Classic Bluetooth keyboards and mice (BTstack's hid_host)
@@ -529,7 +580,7 @@ impl HidHost {
             return Ok(());
         }
         let cid = stack.hid_host_connect(&addr)?;
-        self.links.insert(cid, Link { addr, opened: false, decoder: DeviceDecoder::default() });
+        self.links.insert(cid, Link::new(addr));
         Ok(())
     }
 
@@ -578,7 +629,7 @@ impl HidHost {
                 );
                 let status = stack.hid_host_accept(cid, known);
                 if known && status == 0 {
-                    self.links.insert(cid, Link { addr, opened: false, decoder: DeviceDecoder::default() });
+                    self.links.insert(cid, Link::new(addr));
                 } else if status != 0 {
                     tracing::warn!("hid: answering the device failed (0x{status:02X})");
                 }
@@ -597,8 +648,7 @@ impl HidHost {
                     return;
                 }
                 let engine = self.engine.clone();
-                let link =
-                    self.links.entry(cid).or_insert(Link { addr, opened: false, decoder: DeviceDecoder::default() });
+                let link = self.links.entry(cid).or_insert_with(|| Link::new(addr));
                 link.opened = true;
                 // The descriptor can be there before the channels are; else
                 // the one kept from the last connection decodes until it is
@@ -615,6 +665,9 @@ impl HidHost {
                     if usable { "known" } else { "not read yet" }
                 );
                 engine.borrow_mut().on_connected(addr);
+                if let Some(link) = self.links.get_mut(&cid) {
+                    link.ready_now(&engine.borrow(), false);
+                }
                 self.sync_leds(stack);
             }
             HID_SUBEVENT_DESCRIPTOR_AVAILABLE => {
@@ -633,6 +686,7 @@ impl HidHost {
                             "not usable: input of this device is dropped"
                         }
                     );
+                    link.ready_now(&engine.borrow(), true);
                 }
                 self.sync_leds(stack);
             }
@@ -660,7 +714,7 @@ impl HidHost {
             self.engine.borrow().counters().reports.fetch_add(1, Ordering::Relaxed);
             return;
         };
-        self.engine.borrow().input(link.decoder.decoder.as_mut(), |d| d.decode(data));
+        self.engine.borrow().input(link.addr, link.decoder.decoder.as_mut(), |d| d.decode(data));
     }
 }
 
@@ -690,7 +744,7 @@ mod tests {
         assert!(engine.borrow().stored(&a, 0).decoder.is_some());
         assert!(descriptor_file(&dir, &a, 1).exists());
         // A key held, then the same descriptor again: the decoder stays
-        engine.borrow().input(d.decoder.as_mut(), |d| d.decode(&[0, 0, 4, 0, 0, 0, 0, 0]));
+        engine.borrow().input(a, d.decoder.as_mut(), |d| d.decode(&[0, 0, 4, 0, 0, 0, 0, 0]));
         engine.borrow().learn(&a, 0, &mut d, &keyboard);
         assert!(d.decoder.as_ref().is_some_and(|d| d.any_held()));
         // Garbage in the file is not used
@@ -745,6 +799,54 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The engine tells the sink whose input a batch is: only that
+    /// device's delivery is recorded; releases and undecoded reports are
+    /// nobody's
+    #[test]
+    fn delivery_is_tracked_per_device() {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let config = HidConfig { dry_run: true, ..HidConfig::default() };
+        let sink = sink_for(&config);
+        let config = HidConfig { sink: Some(sink.clone()), ..config };
+        let engine = HidEngine::new(Some(&config), Arc::default(), tx);
+        let (a, b) = ([0, 1, 2, 3, 4, 5], [0, 1, 2, 3, 4, 6]);
+        let mut d = Decoder::boot_keyboard();
+        engine.borrow().input(b, None, |d| d.decode(&[0, 0, 4, 0, 0, 0, 0, 0]));
+        assert_eq!(sink.delivered(&b), None, "undecoded");
+        engine.borrow().input(a, Some(&mut d), |d| d.decode(&[0, 0, 4, 0, 0, 0, 0, 0]));
+        assert!(sink.delivered(&a).is_some());
+        assert_eq!(sink.delivered(&b), None);
+        engine.borrow().release(Some(&mut d));
+        assert_eq!(sink.delivered(&b), None);
+        // A report with no change passes nothing
+        let before = sink.delivered(&a);
+        engine.borrow().input(a, Some(&mut d), |d| d.decode(&[0, 0, 0, 0, 0, 0, 0, 0]));
+        assert_eq!(sink.delivered(&a), before);
+    }
+
+    #[test]
+    fn a_link_is_ready_once_with_the_kind_of_its_descriptor() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let engine = HidEngine::new(Some(&HidConfig { dry_run: true, ..HidConfig::default() }), Arc::default(), tx);
+        let a = [0, 1, 2, 3, 4, 5];
+        let mut link = Link::new(a);
+        // Not open yet, then open without a descriptor: not ready
+        link.ready_now(&engine.borrow(), true);
+        link.opened = true;
+        link.ready_now(&engine.borrow(), false);
+        assert!(rx.try_recv().is_err());
+        link.decoder.decoder = Some(Decoder::boot_mouse());
+        link.ready_now(&engine.borrow(), false);
+        link.ready_now(&engine.borrow(), true);
+        let ready: Vec<_> = rx.try_iter().collect();
+        assert!(matches!(&ready[..], [HostEvent::Hid(HidEvent::Ready(x, k))] if *x == a && k.pointer && !k.keyboard));
+        // An unusable descriptor: ready, as neither
+        let mut bad = Link::new(a);
+        bad.opened = true;
+        bad.ready_now(&engine.borrow(), true);
+        assert!(matches!(rx.try_recv(), Ok(HostEvent::Hid(HidEvent::Ready(_, k))) if k == InputKind::default()));
+    }
+
     #[test]
     fn dry_run_lights_come_from_the_test_hook_and_no_keys_are_kept() {
         let (tx, _rx) = std::sync::mpsc::channel();
@@ -756,7 +858,7 @@ mod tests {
         // Windows' lock keys are never read in dry run
         assert!(!engine.borrow_mut().poll_leds());
         assert_eq!(engine.borrow().leds(), Some(0x05));
-        engine.borrow().pass(&[InputEvent::Key { usage: 0x04, down: true }]);
+        engine.borrow().pass(Some([1; 6]), &[InputEvent::Key { usage: 0x04, down: true }]);
         assert!(section.load().is_empty());
         engine.borrow().leds_sent(2);
         assert_eq!(engine.borrow().counters().leds.load(Ordering::Relaxed), 2);

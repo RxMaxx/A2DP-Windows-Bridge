@@ -605,6 +605,109 @@ pub fn uninstall(name: &str, wait: Duration) -> io::Result<bool> {
     Ok(true)
 }
 
+// --- Control (the service set-up tool) ----------------------------------------
+
+const ERROR_SERVICE_DOES_NOT_EXIST: i32 = 1060;
+const ERROR_SERVICE_NOT_ACTIVE: i32 = 1062;
+const ERROR_SERVICE_ALREADY_RUNNING: i32 = 1056;
+const DELETE: u32 = 0x0001_0000;
+
+/// Opens the service `name` with `access`; None when there is none
+fn open_service(name: &str, access: u32) -> io::Result<Option<Sc>> {
+    // SAFETY: local manager, default database.
+    let scm = Sc(unsafe { OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_CONNECT) }.map_err(io_err)?);
+    let n = wide(name);
+    // SAFETY: NUL-terminated name. The manager's handle may close once the
+    // service's is open.
+    match unsafe { OpenServiceW(scm.0, PCWSTR(n.as_ptr()), access) } {
+        Ok(h) => Ok(Some(Sc(h))),
+        Err(e) if (e.code().0 & 0xFFFF) == ERROR_SERVICE_DOES_NOT_EXIST => Ok(None),
+        Err(e) => Err(io_err(e)),
+    }
+}
+
+/// Whether the service `name` exists (needs no administrator)
+pub fn exists(name: &str) -> io::Result<bool> {
+    Ok(open_service(name, SERVICE_QUERY_STATUS)?.is_some())
+}
+
+/// Starts the service `name` (already running: fine). Needs an
+/// administrator. Does not wait for it to report running.
+pub fn start(name: &str) -> io::Result<()> {
+    use windows::Win32::System::Services::{SERVICE_START, StartServiceW};
+    let service = open_service(name, SERVICE_START)?.ok_or_else(|| io::Error::from_raw_os_error(1060))?;
+    // SAFETY: an open handle with SERVICE_START; no arguments.
+    match unsafe { StartServiceW(service.0, None) } {
+        Ok(()) => Ok(()),
+        Err(e) if (e.code().0 & 0xFFFF) == ERROR_SERVICE_ALREADY_RUNNING => Ok(()),
+        Err(e) => Err(io_err(e)),
+    }
+}
+
+/// Stops the service `name` and waits up to `wait` until it reports
+/// stopped. Ok(false): there is no such service. Needs an administrator.
+pub fn stop(name: &str, wait: Duration) -> io::Result<bool> {
+    let Some(service) = open_service(name, SERVICE_STOP | SERVICE_QUERY_STATUS)? else { return Ok(false) };
+    let mut status = SERVICE_STATUS::default();
+    // SAFETY: an open service handle with SERVICE_STOP; valid out pointer.
+    match unsafe { ControlService(service.0, SERVICE_CONTROL_STOP, &mut status) } {
+        Ok(()) => {}
+        Err(e) if (e.code().0 & 0xFFFF) == ERROR_SERVICE_NOT_ACTIVE => {}
+        Err(e) => return Err(io_err(e)),
+    }
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        // SAFETY: an open handle with SERVICE_QUERY_STATUS; valid out pointer.
+        unsafe { QueryServiceStatus(service.0, &mut status) }.map_err(io_err)?;
+        if status.dwCurrentState == SERVICE_STOPPED {
+            return Ok(true);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "the service did not stop"));
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+/// Changes only the service's program and arguments (lpBinaryPathName).
+/// Needs an administrator.
+pub fn set_command_line(name: &str, command_line: &str) -> io::Result<()> {
+    use windows::Win32::System::Services::{
+        ChangeServiceConfigW, ENUM_SERVICE_TYPE, SERVICE_CHANGE_CONFIG, SERVICE_ERROR, SERVICE_NO_CHANGE,
+        SERVICE_START_TYPE,
+    };
+    let service = open_service(name, SERVICE_CHANGE_CONFIG)?.ok_or_else(|| io::Error::from_raw_os_error(1060))?;
+    let path = wide(command_line);
+    // SAFETY: an open handle with SERVICE_CHANGE_CONFIG; SERVICE_NO_CHANGE
+    // and null strings leave everything else as it is.
+    unsafe {
+        ChangeServiceConfigW(
+            service.0,
+            ENUM_SERVICE_TYPE(SERVICE_NO_CHANGE),
+            SERVICE_START_TYPE(SERVICE_NO_CHANGE),
+            SERVICE_ERROR(SERVICE_NO_CHANGE),
+            PCWSTR(path.as_ptr()),
+            PCWSTR::null(),
+            None,
+            PCWSTR::null(),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            PCWSTR::null(),
+        )
+    }
+    .map_err(io_err)
+}
+
+/// Marks the service `name` for deletion (it goes once every handle to it
+/// is closed). Ok(false): there is no such service. Needs an
+/// administrator.
+pub fn delete(name: &str) -> io::Result<bool> {
+    let Some(service) = open_service(name, DELETE)? else { return Ok(false) };
+    // SAFETY: an open handle with DELETE.
+    unsafe { DeleteService(service.0) }.map_err(io_err)?;
+    Ok(true)
+}
+
 // --- Folders ----------------------------------------------------------------
 
 /// %ProgramData% from the known-folder API (FOLDERID_ProgramData), never
@@ -730,6 +833,14 @@ mod tests {
         .unwrap_err();
         assert_eq!(e.raw_os_error(), Some(NOT_A_SERVICE));
         assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    /// Read-only, and only a name no service has: the real service is
+    /// never touched by a test
+    #[test]
+    fn a_service_that_does_not_exist_does_not_exist() {
+        let name = format!("BlueCaster-test-none-{}", std::process::id());
+        assert!(!exists(&name).unwrap());
     }
 
     #[test]

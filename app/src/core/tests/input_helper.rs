@@ -8,6 +8,7 @@
 
 use std::io::BufRead;
 use std::os::windows::io::{AsHandle, OwnedHandle};
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
@@ -20,6 +21,8 @@ use input_helper::protocol::{self, ToCore, ToHelper};
 use input_helper::{HelperConfig, HelperSink, HidCounters, InputSink, SessionLauncher};
 use win_sys::input_inject::{Inject, MouseButton};
 
+/// Console programs started from a test get no terminal window
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const EXE: &str = env!("CARGO_BIN_EXE_bluecaster-core");
 
 /// The record pipe: its write end inheritable (each helper started from
@@ -100,7 +103,7 @@ fn a_typed_sequence_arrives_in_order() {
     sent.push(Inject::Wheel(-240));
     sent.push(Inject::Button { button: MouseButton::Right, up: true });
     for chunk in sent.chunks(7) {
-        sink.pass(chunk, &c);
+        sink.pass(None, chunk, &c);
     }
     let lines = record.wait("all inputs recorded", |l| l.len() >= sent.len());
     let expect: Vec<String> = sent.iter().map(input_helper::engine::record_line).collect();
@@ -111,7 +114,7 @@ fn a_typed_sequence_arrives_in_order() {
     wait_for("lock keys reported", || sink.lock_keys().is_some());
     assert!(sink.lock_keys().unwrap() <= 7);
     // A held key at the stop: released, then the helper exits
-    sink.pass(&[key(0x2A, false)], &c);
+    sink.pass(None, &[key(0x2A, false)], &c);
     record.wait("the key recorded", |l| l.len() == sent.len() + 1);
     sink.stop();
     let lines = record.wait("the stop", |l| l.last().is_some_and(|x| x.starts_with("exit")));
@@ -125,22 +128,55 @@ fn a_typed_sequence_arrives_in_order() {
 fn a_killed_helpers_replacement_releases_its_keys() {
     let record = Record::new();
     let sink = sink(&record);
+    let tested = Arc::new(Mutex::new(Vec::new()));
+    let t = tested.clone();
+    sink.on_tested(Box::new(move |r| t.lock().unwrap().push(r)));
     let c = Arc::new(HidCounters::default());
-    sink.pass(&[key(0x2A, false), key(0x1E, false), Inject::Button { button: MouseButton::Left, up: false }], &c);
+    sink.pass(None, &[key(0x2A, false), key(0x1E, false), Inject::Button { button: MouseButton::Left, up: false }], &c);
     record.wait("the downs", |l| l.len() == 3);
     let first = sink.helper_pid().unwrap();
-    let killed = Command::new("taskkill").args(["/F", "/PID", &first.to_string()]).stdout(Stdio::null()).status();
+    let killed = Command::new("taskkill")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args(["/F", "/PID", &first.to_string()])
+        .stdout(Stdio::null())
+        .status();
     assert!(killed.unwrap().success());
     wait_for("a new helper", || sink.connected() && sink.helper_pid().is_some_and(|p| p != first));
-    let lines = record.wait("the releases", |l| l.len() >= 6);
+    // The new helper tests itself (its zero move) after the releases
+    let lines = record.wait("the releases and the self-test", |l| l.len() >= 7);
     // Keys, then the modifier, then the button
-    assert_eq!(lines[3..], ["key 0x1e up", "key 0x2a up", "button Left up"]);
+    assert_eq!(lines[3..7], ["key 0x1e up", "key 0x2a up", "button Left up", "move 0 0"]);
+    wait_for("the self-test result", || !tested.lock().unwrap().is_empty());
+    assert_eq!(*tested.lock().unwrap(), [input_helper::client::SelfTest::Passed { windows_saw: None }]);
     // Input while no helper ran was dropped and counted, not queued for
     // the next one; input now goes to the new helper
-    sink.pass(&[key(0x30, false), key(0x30, true)], &c);
-    record.wait("input to the new helper", |l| l.len() == 8);
+    sink.pass(None, &[key(0x30, false), key(0x30, true)], &c);
+    record.wait("input to the new helper", |l| l.len() == 9);
     sink.stop();
     assert_eq!(sink.started(), 2);
+}
+
+/// What counts as delivered through the helper: a batch of that device
+/// the helper confirmed; the self-test injects one zero move and passes
+#[test]
+fn delivery_is_per_device_and_the_self_test_goes_through_the_helper() {
+    let record = Record::new();
+    let sink = sink(&record);
+    let c = Arc::new(HidCounters::default());
+    let (a, b) = ([0, 1, 2, 3, 4, 5], [0, 1, 2, 3, 4, 6]);
+    sink.pass(None, &[key(0x2A, false), key(0x2A, true)], &c);
+    sink.pass(Some(a), &[key(0x1E, false), key(0x1E, true)], &c);
+    record.wait("the inputs", |l| l.len() == 4);
+    wait_for("A delivered", || sink.delivered(&a).is_some());
+    // Record mode never asks Windows
+    assert_eq!(sink.delivered(&a).unwrap().windows_saw, None);
+    assert_eq!(sink.delivered(&b), None);
+    let result = sink.self_test(Duration::from_secs(5));
+    assert_eq!(result, input_helper::client::SelfTest::Passed { windows_saw: None });
+    assert_eq!(record.lines()[4..], ["move 0 0"]);
+    // The test input is nobody's delivery
+    assert_eq!(sink.delivered(&b), None);
+    sink.stop();
 }
 
 /// This test binary run again as a fake core (only with BC_FAKE_CORE set):
@@ -155,7 +191,7 @@ fn fake_core() {
     sink.start();
     wait_for("the helper connects", || sink.connected());
     let c = Arc::new(HidCounters::default());
-    sink.pass(&[key(0x1D, false), key(0x20, false)], &c);
+    sink.pass(None, &[key(0x1D, false), key(0x20, false)], &c);
     println!("helper pid {}", sink.helper_pid().unwrap());
     std::thread::sleep(Duration::from_secs(60));
 }
@@ -194,7 +230,11 @@ fn the_helper_releases_and_exits_when_its_core_dies() {
 }
 
 fn process_runs(pid: u32) -> bool {
-    let out = Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH"]).output().unwrap();
+    let out = Command::new("tasklist")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+        .output()
+        .unwrap();
     String::from_utf8_lossy(&out.stdout).contains(&pid.to_string())
 }
 
@@ -224,6 +264,7 @@ fn a_process_other_than_its_parent_cannot_feed_the_helper() {
     rt.block_on(async {
         let server = win_sys::pipe::create_server(&name, true).unwrap();
         let mut cmd = Command::new("cmd")
+            .creation_flags(CREATE_NO_WINDOW)
             .args(["/c", EXE, input_helper::HELPER_ARG, &name])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -277,7 +318,7 @@ fn the_core_takes_only_the_process_it_started() {
     let until = Instant::now() + Duration::from_secs(3);
     while Instant::now() < until {
         assert!(!sink.connected());
-        sink.pass(&[key(0x1E, false), key(0x1E, true)], &c);
+        sink.pass(None, &[key(0x1E, false), key(0x1E, true)], &c);
         std::thread::sleep(Duration::from_millis(50));
     }
     sink.stop();

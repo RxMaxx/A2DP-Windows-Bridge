@@ -145,12 +145,14 @@ pub struct ClientInfo {
 /// 0), and its program is the core's own program, beside the core under
 /// the same name. An agent started by anyone else is refused.
 ///
-/// The program check is only as strong as the folder: once the core is
-/// installed under Program Files (stage 5), only an administrator can put
-/// another program there, so a client whose image is that path runs our
-/// code. While the core runs from a folder the user can write (the
-/// per-user install, a test build), software running as the user can
-/// replace or plant that file and pass the check. Neither stops code
+/// The program check is only as strong as the folder. The real service
+/// runs from the service folder under Program Files, and the core makes
+/// that its agent program (`check.exe`) only after checking that it is
+/// that folder's core (bluecaster-core-exe's agent.rs): only an
+/// administrator can put another program there, so a client whose image
+/// is that path runs our code. A core run from a folder the user can
+/// write (a test instance, a core run by hand) gets the check against its
+/// own program, which software running as the user can replace or plant. Neither stops code
 /// injected into a genuine agent process of the same user; the pid check
 /// at least makes sure the process is one the hub started, with the
 /// token it chose, from the program file it named.

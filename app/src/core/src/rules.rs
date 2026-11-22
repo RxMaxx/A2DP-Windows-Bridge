@@ -4,7 +4,10 @@
 //! request; without service mode nothing here runs.
 //!
 //! An elevated caller is one whose token is elevated and whose program is
-//! ours: the core's program or the UI beside it. A normal client that
+//! ours ([`elevated_programs`]): for the real service only the service
+//! folder's core (the elevated helper runs from there), never a program in
+//! the user's folder, which software running as the user can replace; for
+//! a test instance the core and the UI beside the core. A normal client that
 //! gets ipc.needs_admin asks [`run_as_admin`]: the core starts its
 //! elevated helper through the agent (`bluecaster-core.exe --request
 //! <call> --ticket <t>`, a UAC prompt), the helper sends that call with
@@ -12,7 +15,7 @@
 //! A ticket admits exactly the call it was made for, once.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -32,17 +35,36 @@ pub(crate) struct Caller {
     pub ticket: Option<String>,
 }
 
-/// The programs whose elevated processes count as BlueCaster's: the core
-/// (this program) and the UI beside it
-fn ours(image: Option<&Path>, core_exe: &Path) -> bool {
+/// The programs whose elevated processes count as BlueCaster's. The real
+/// service (`real_service`): only the service folder's core
+/// (`service_core`; none known: nobody). Otherwise (a test instance, a
+/// core run by hand): the core (`core_exe`, this program) and the UI
+/// beside it.
+pub(crate) fn elevated_programs(core_exe: &Path, service_core: Option<&Path>, real_service: bool) -> Vec<PathBuf> {
+    if real_service {
+        service_core.map(Path::to_path_buf).into_iter().collect()
+    } else {
+        vec![core_exe.to_path_buf(), core_exe.with_file_name(win_sys::service_files::UI_EXE)]
+    }
+}
+
+/// [`elevated_programs`] of this process: the real service is a core in
+/// session 0 that is not a test instance (crate::agent::real_service)
+pub(crate) fn own_elevated_programs() -> Vec<PathBuf> {
+    let Ok(exe) = std::env::current_exe() else { return Vec::new() };
+    let service = ipc::service_state::service_core();
+    let session = win_sys::pipe::process_session_id(std::process::id()).unwrap_or(0);
+    elevated_programs(&exe, service.as_deref(), crate::agent::real_service(session))
+}
+
+fn ours(image: Option<&Path>, programs: &[PathBuf]) -> bool {
     let Some(image) = image else { return false };
-    let ui = core_exe.with_file_name("bluecaster.exe");
-    [core_exe, ui.as_path()].iter().any(|p| p.as_os_str().eq_ignore_ascii_case(image.as_os_str()))
+    programs.iter().any(|p| win_sys::service_files::same_path(p, image))
 }
 
 impl Caller {
-    pub(crate) fn of(id: &win_sys::pipe_peer::ClientIdentity, core_exe: &Path, ticket: Option<&str>) -> Caller {
-        let elevated = id.elevated && ours(id.image.as_deref(), core_exe);
+    pub(crate) fn of(id: &win_sys::pipe_peer::ClientIdentity, programs: &[PathBuf], ticket: Option<&str>) -> Caller {
+        let elevated = id.elevated && ours(id.image.as_deref(), programs);
         Caller { elevated, ticket: ticket.filter(|_| elevated).map(str::to_owned) }
     }
 }
@@ -276,6 +298,8 @@ mod tests {
             Method::StreamStop,
             Method::HidDisable,
             Method::HidStatus,
+            Method::HidCheckCancel { address: addr() },
+            Method::HidCheckDismiss,
             Method::HidConnect { address: "aa:bb:cc:dd:ee:01".into() },
             Method::DiagInfo(None),
             Method::DiagCaptureStop,
@@ -382,7 +406,9 @@ mod tests {
 
     #[test]
     fn an_elevated_caller_runs_our_program() {
-        let core = Path::new(r"C:\Program Files\BlueCaster\bluecaster-core.exe");
+        // A test instance (or a core run by hand): the core and the UI
+        // beside the core
+        let core = &elevated_programs(Path::new(r"C:\Program Files\BlueCaster\bluecaster-core.exe"), None, false);
         let id = |elevated: bool, image: &str| win_sys::pipe_peer::ClientIdentity {
             pid: 1,
             session_id: 1,
@@ -401,6 +427,42 @@ mod tests {
             Caller::of(&id(true, r"C:\Program Files\BlueCaster\bluecaster.exe"), core, Some("ab")).ticket.as_deref(),
             Some("ab")
         );
+    }
+
+    /// The real service: only the service folder's core is an elevated
+    /// caller. An elevated UI, or an elevated core, from the user's
+    /// per-user installation is not: software running as the user could
+    /// have replaced those files.
+    #[test]
+    fn the_real_service_admits_only_the_service_folders_core() {
+        let user_core = Path::new(r"C:\Users\u\AppData\Local\BlueCaster\bluecaster-core.exe");
+        let svc = Path::new(r"C:\Program Files\BlueCaster Service\bluecaster-core.exe");
+        // The service itself runs from the service folder
+        let programs = elevated_programs(svc, Some(svc), true);
+        assert_eq!(programs, [svc.to_path_buf()]);
+        let id = |elevated: bool, image: &str| win_sys::pipe_peer::ClientIdentity {
+            pid: 1,
+            session_id: 1,
+            user_sid: "S-1-5-21-1".into(),
+            elevated,
+            integrity: win_sys::pipe_peer::INTEGRITY_HIGH,
+            image: Some(image.into()),
+        };
+        let svc_text = svc.to_str().unwrap();
+        assert!(Caller::of(&id(true, svc_text), &programs, None).elevated);
+        assert!(Caller::of(&id(true, &svc_text.to_lowercase()), &programs, Some("ab")).ticket.is_some());
+        assert!(!Caller::of(&id(false, svc_text), &programs, None).elevated);
+        let user_ui = r"C:\Users\u\AppData\Local\BlueCaster\bluecaster.exe";
+        assert!(!Caller::of(&id(true, user_ui), &programs, None).elevated, "elevated UI from the user's folder");
+        assert!(!Caller::of(&id(true, user_core.to_str().unwrap()), &programs, Some("ab")).elevated);
+        // A UI copied into the service folder would not count either
+        let svc_ui = r"C:\Program Files\BlueCaster Service\bluecaster.exe";
+        assert!(!Caller::of(&id(true, svc_ui), &programs, None).elevated);
+        // Even a service started some other way, from the user's folder
+        let odd = elevated_programs(user_core, Some(svc), true);
+        assert!(!Caller::of(&id(true, user_core.to_str().unwrap()), &odd, None).elevated);
+        // Program Files not known: nobody is elevated
+        assert!(elevated_programs(svc, None, true).is_empty());
     }
 
     #[test]

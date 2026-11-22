@@ -114,14 +114,21 @@ export function Settings() {
       </Section>
 
       <Section title={t("ui.settings.startup")}>
-        <Toggle label={t("settings.start_with_windows")} checked={s().start_with_windows} onChange={(v) => set({ start_with_windows: v })} />
+        {/* The service add-on starts with Windows whatever this says: on
+            and not changeable while connected to it */}
+        <Toggle
+          label={t("settings.start_with_windows")}
+          checked={s().start_with_windows || snap().service_mode}
+          disabled={snap().service_mode}
+          onChange={(v) => set({ start_with_windows: v })}
+        />
         {/* At logon: on starts BlueCaster with --background (only the tray
             icon), off opens the window; it applies only with Windows */}
         <Toggle
           label={t("ui.settings.start_minimized")}
           hint={t("ui.settings.start_minimized_logon")}
           checked={s().start_minimized}
-          disabled={!s().start_with_windows}
+          disabled={!s().start_with_windows || snap().service_mode}
           onChange={(v) => set({ start_minimized: v })}
         />
         <Toggle label={t("settings.minimize_to_tray")} checked={s().minimize_to_tray} onChange={(v) => set({ minimize_to_tray: v })} />
@@ -191,7 +198,6 @@ export function Settings() {
                 <Match when={phase().state === "unavailable" && phase()}>
                   {(p) => {
                     const reason = (p() as Extract<UpdatePhase, { state: "unavailable" }>).reason;
-                    // "service": the core runs as a Windows service, which this build cannot update
                     return <div class="hint">{t(reason === "portable" ? "ui.update.portable" : "ui.update.unsigned")}</div>;
                   }}
                 </Match>

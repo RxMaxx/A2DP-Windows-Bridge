@@ -225,7 +225,13 @@ mod tests {
 
     #[test]
     fn find_and_watch_a_child() {
-        let mut child = std::process::Command::new("cmd").args(["/C", "ping -n 3 127.0.0.1 >NUL"]).spawn().unwrap();
+        // CREATE_NO_WINDOW: no terminal window pops up on the desktop
+        let mut child = std::os::windows::process::CommandExt::creation_flags(
+            std::process::Command::new("cmd").args(["/C", "ping -n 3 127.0.0.1 >NUL"]),
+            0x0800_0000,
+        )
+        .spawn()
+        .unwrap();
         let pid = child.id();
         // cmd.exe runs elsewhere too; ours is one of the candidates
         assert!(find_process("CMD.EXE").is_some());

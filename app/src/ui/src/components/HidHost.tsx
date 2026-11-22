@@ -2,15 +2,21 @@
 // issue #413): the Developer section with its switch and devices, the
 // question before turning it off, and the banner over every screen while
 // it is on. Turning it on goes through HidEnableDialog.
+//
+// A device being added stays only once its input reaches Windows: the
+// core counts down (Snapshot.hid_checks) and removes it when no input
+// arrives in time, also with this window closed. The UI only shows the
+// countdown and offers Remove; nothing here can confirm a device.
 
-import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import { useApp } from "../app/context";
 import { t } from "../i18n";
-import type { Device, HidCounts, HidDevice, HidPasskey, Settings } from "../ipc/types";
+import type { Device, HidCheck, HidCounts, HidDevice, HidPasskey, HidRolledBack, Settings } from "../ipc/types";
 import { Banner, Button, Dialog, Section, Toggle } from "./controls";
 import { SCAN_SECONDS } from "./DevicePicker";
 import { HidEnableDialog } from "./HidEnableDialog";
 import { Icon } from "./Icon";
+import { ServiceRow } from "./ServiceAddon";
 
 /** How often the counts are read while the section is on screen */
 const COUNTS_EVERY_MS = 2000;
@@ -63,6 +69,11 @@ export function HidOffDialog(props: { open: boolean; onClose: () => void }) {
   );
 }
 
+/** The self-test of the path to Windows failed (at a start: a warning only) */
+export function hidTestFailed(snap: { hid_health?: { state: string } | null } | null | undefined): boolean {
+  return snap?.hid_health?.state === "failed";
+}
+
 /** While it is on: over every screen, not dismissable */
 export function HidNotice() {
   const app = useApp();
@@ -74,7 +85,11 @@ export function HidNotice() {
         title={t("ui.dev.hid_banner_title")}
         actions={<Button onClick={() => setAsking(true)}>{t("ui.dev.hid_off_confirm")}</Button>}
       >
-        {t("ui.dev.hid_banner_text")}
+        {t(app.core.state.snap?.service_mode ? "ui.dev.hid_banner_text_service" : "ui.dev.hid_banner_text")}
+        <Show when={hidTestFailed(app.core.state.snap)}>
+          {" "}
+          <strong data-testid="hid-test-failed">{t("ui.dev.hid_banner_test_failed")}</strong>
+        </Show>
       </Banner>
       <HidOffDialog open={asking()} onClose={() => setAsking(false)} />
     </Show>
@@ -92,11 +107,12 @@ export function HidSection() {
     <Section title={t("ui.dev.hid_section")}>
       <Toggle
         label={t("ui.dev.hid_toggle")}
-        hint={t("ui.dev.hid_toggle_hint")}
+        hint={t(snap().service_mode ? "ui.dev.hid_toggle_hint_service" : "ui.dev.hid_toggle_hint")}
         checked={on()}
         controlled
         onChange={(v) => (v ? setEnabling(true) : setDisabling(true))}
       />
+      <ServiceRow />
       <Show when={on()}>
         <HidDevices />
       </Show>
@@ -120,6 +136,61 @@ export function HidPasskeyBlock(props: { passkey: HidPasskey; added: readonly Hi
         {props.passkey.passkey}
       </span>
       <span>{t("ui.dev.hid_passkey_hint")}</span>
+    </div>
+  );
+}
+
+/** What the user does with the new device: from its report descriptor */
+export function hidCheckHint(kind: string): string {
+  if (kind === "keyboard") return t("ui.dev.hid_check_keyboard");
+  if (kind === "mouse") return t("ui.dev.hid_check_mouse");
+  return t("ui.dev.hid_check_any");
+}
+
+/** A device being added: the instruction and the core's countdown */
+export function HidCheckBlock(props: { check: HidCheck; busy: boolean; onRemove: () => void }) {
+  const [now, setNow] = createSignal(Date.now());
+  // The deadline as of when the core last sent this check
+  const deadline = createMemo(() => Date.now() + props.check.remaining_ms);
+  const timer = setInterval(() => setNow(Date.now()), 250);
+  onCleanup(() => clearInterval(timer));
+  const left = () => Math.max(0, Math.ceil((deadline() - now()) / 1000));
+  return (
+    <div class="hid-passkey hid-check" role="status" data-testid="hid-check">
+      <span class="device-name-text">{props.check.name || props.check.address}</span>
+      <Show when={props.check.waiting} fallback={<span>{t("status.connecting")}</span>}>
+        <span>{hidCheckHint(props.check.kind)}</span>
+        <span class="muted" data-testid="hid-check-left">
+          {t("ui.dev.hid_check_left", left())}
+        </span>
+      </Show>
+      <span class="hid-device-actions">
+        <Button kind="subtle" busy={props.busy} onClick={() => props.onRemove()}>
+          {t("ui.device.forget")}
+        </Button>
+      </span>
+    </div>
+  );
+}
+
+/** A device removed again: one sentence, Try again and Close */
+export function HidRolledBackBlock(props: {
+  rolledBack: HidRolledBack;
+  busy: boolean;
+  onRetry: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div class="hid-passkey hid-rolled-back" role="alert" data-testid="hid-rolled-back">
+      <span>{t("ui.dev.hid_rolled_back", props.rolledBack.name || props.rolledBack.address)}</span>
+      <span class="hid-device-actions">
+        <Button busy={props.busy} onClick={() => props.onRetry()}>
+          {t("ui.fix.retry")}
+        </Button>
+        <Button kind="subtle" disabled={props.busy} onClick={() => props.onClose()}>
+          {t("modal.close")}
+        </Button>
+      </span>
     </div>
   );
 }
@@ -152,13 +223,21 @@ function HidDevices() {
   };
   const candidates = () => hidCandidates(snap().devices, snap().hid_candidates ?? [], added());
 
-  const add = async (d: Device) => {
-    setWorking(d.address);
+  const addAddress = async (address: string, name: string, le: number | null) => {
+    setWorking(address);
     // Pairing needs the radio: a scan still running ends first
     if (scanning()) await app.core.request("device.scan_stop").catch(() => undefined);
-    await app.run(() => app.core.request("hid.add", { address: d.address, name: d.name || d.address, le: d.hid_le }));
+    await app.run(() => app.core.request("hid.add", { address, name, le }));
     setWorking(null);
   };
+  const add = (d: Device) => addAddress(d.address, d.name || d.address, d.hid_le);
+  const retry = (r: HidRolledBack) => addAddress(r.address, r.name || r.address, r.le);
+  const cancelCheck = async (c: HidCheck) => {
+    setWorking(c.address);
+    await app.run(() => app.core.request("hid.check_cancel", { address: c.address }));
+    setWorking(null);
+  };
+  const dismiss = () => void app.run(() => app.core.request("hid.check_dismiss"));
   const connect = async (d: HidDevice) => {
     setWorking(d.address);
     await app.run(() => app.core.request("hid.connect", { address: d.address }));
@@ -176,6 +255,21 @@ function HidDevices() {
   return (
     <div class="hid-devices">
       <Show when={snap().hid_passkey}>{(p) => <HidPasskeyBlock passkey={p()} added={added()} />}</Show>
+      <For each={snap().hid_checks ?? []}>
+        {(c) => (
+          <HidCheckBlock check={c} busy={working() === c.address} onRemove={() => void cancelCheck(c)} />
+        )}
+      </For>
+      <Show when={snap().hid_rolled_back}>
+        {(r) => (
+          <HidRolledBackBlock
+            rolledBack={r()}
+            busy={working() === r().address}
+            onRetry={() => void retry(r())}
+            onClose={dismiss}
+          />
+        )}
+      </Show>
       <Show when={added().length > 0} fallback={<p class="hint">{t("ui.dev.hid_devices_empty")}</p>}>
         <ul class="hid-list">
           <For each={added()}>

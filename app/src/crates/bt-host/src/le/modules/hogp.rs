@@ -72,6 +72,18 @@ struct Device {
     /// Set up from the kept report handles when the link was encrypted,
     /// before its services were read
     early: bool,
+    /// HidEvent::Ready went out for this connection
+    ready: bool,
+}
+
+impl Device {
+    /// What its HID services' descriptors carry
+    fn kind(&self) -> hid_input::InputKind {
+        self.instances.iter().filter_map(|i| i.decoder.decoder.as_ref()).map(|d| d.kind()).fold(
+            hid_input::InputKind::default(),
+            |a, b| hid_input::InputKind { keyboard: a.keyboard || b.keyboard, pointer: a.pointer || b.pointer },
+        )
+    }
 }
 
 pub struct HogpModule {
@@ -133,7 +145,8 @@ impl HogpModule {
         else {
             return;
         };
-        hid.borrow().input(inst.decoder.decoder.as_mut(), |decoder| decoder.decode_with_id(id, value));
+        let from = d.addr;
+        hid.borrow().input(from, inst.decoder.decoder.as_mut(), |decoder| decoder.decode_with_id(id, value));
     }
 
     /// Listens to these input handles on the device's link (each once)
@@ -304,7 +317,21 @@ impl HogpModule {
                 })),
             );
         }
+        HogpModule::ready_when_subscribed(ctx, dev, con);
         HogpModule::sync_leds(ctx);
+    }
+
+    /// Ready for input once every HID service's reports are subscribed to:
+    /// told once per connection
+    fn ready_when_subscribed(ctx: &mut LeCtx<'_>, dev: LeDeviceId, con: u16) {
+        let Some(m) = ctx.module_mut::<HogpModule>() else { return };
+        let Some(d) = m.devices.get_mut(&dev.0).filter(|d| d.con == con) else { return };
+        if d.ready || d.instances.iter().any(|i| i.found.is_none()) {
+            return;
+        }
+        d.ready = true;
+        let (addr, kind) = (d.addr, d.kind());
+        m.hid.borrow().on_ready(addr, kind);
     }
 }
 
@@ -350,8 +377,12 @@ impl LeModule for HogpModule {
             "hid: an LE keyboard or mouse is connected again, its {} kept input report(s) are listened to",
             listened.len()
         );
-        self.devices.insert(dev.0, Device { addr, con, instances, listened, early: true });
+        // Its notifications are still on from the last connection: ready
+        let device = Device { addr, con, instances, listened, early: true, ready: true };
+        let kind = device.kind();
+        self.devices.insert(dev.0, device);
         self.hid.borrow_mut().on_connected(addr);
+        self.hid.borrow().on_ready(addr, kind);
     }
 
     fn on_gatt_ready(&mut self, ctx: &mut LeCtx<'_>, dev: LeDeviceId) {
@@ -384,7 +415,10 @@ impl LeModule for HogpModule {
                 let instances: Vec<Instance> = (0..services.len())
                     .map(|i| Instance { decoder: self.hid.borrow().stored(&addr, i), ..Instance::default() })
                     .collect();
-                self.devices.insert(dev.0, Device { addr, con, instances, listened: HashSet::new(), early: false });
+                self.devices.insert(
+                    dev.0,
+                    Device { addr, con, instances, listened: HashSet::new(), early: false, ready: false },
+                );
                 info!(
                     "hid: an LE keyboard or mouse is connected ({} HID service(s)), reading its reports",
                     services.len()

@@ -188,6 +188,13 @@ list, which the background connection uses):
   - hid-le-passkey: the keyboard asks for MITM: BlueCaster shows a number,
     the device types it, pairing and input as hid-le-connect (which, without
     MITM, still pairs with Just Works and shows no number)
+and the check of a device being added (--hid-confirm, a short countdown
+instead of the app's 30 s):
+  - hid-confirm, hid-le-confirm: the device sends its script within the
+    countdown: "hid check confirmed", and it stays connected
+  - hid-confirm-silent, hid-le-confirm-silent: the device connects and sends
+    nothing: "hid check removed no_input" after the countdown, and
+    BlueCaster closes its link
 Outputs go to tools/emu/out/hid-<case>/.
 """
 
@@ -2717,8 +2724,98 @@ def run_hid_le_case(args, case, port):
     return failures, detail
 
 
+# The check of a device being added: case -> (LE, sends its script).
+# BlueCaster connects it as the app adds one, with a countdown of
+# HID_CONFIRM_SECONDS from when it is ready.
+HID_CONFIRM_CASES = {
+    'hid-confirm': (False, True),
+    'hid-confirm-silent': (False, False),
+    'hid-le-confirm': (True, True),
+    'hid-le-confirm-silent': (True, False),
+}
+HID_CONFIRM_SECONDS = 4
+
+
+def run_hid_confirm_case(args, case, port):
+    """bluecaster-core --cli --hid-test --hid-connect --hid-confirm against
+    emu_hid.py or emu_hid_le.py, the device with or without its script"""
+    le, types = HID_CONFIRM_CASES[case]
+    out = os.path.join(args.out, case)
+    shutil.rmtree(out, ignore_errors=True)
+    os.makedirs(out)
+    failures = []
+    device_args = []
+    if not types:
+        empty = os.path.join(out, 'no-reports.txt')
+        with open(empty, 'w', encoding='ascii') as f:
+            f.write('# no input at all\n')
+        device_args = ['--reports', empty]
+    address = HID_LE_ADDRESS if le else HID_ADDRESS
+    listed = ['--hid-le-device' if le else '--hid-device', address]
+    mode = ['--hid-test', str(HID_LE_SECONDS if le else HID_SECONDS)] + listed + [
+        '--hid-connect', address, '--hid-confirm', str(HID_CONFIRM_SECONDS)]
+    if le:
+        rc, text, emu_text = run_core(args, out, port, mode, device_args, HID_LE_SECONDS)
+    else:
+        port = free_port(port)
+        emu_log = os.path.join(out, 'hid.log')
+        emu = start_sink(port, os.path.join(out, 'hid.pklg'), emu_log, script='emu_hid.py',
+                         extra=['--address', HID_ADDRESS] + device_args)
+        try:
+            env = dict(os.environ, BLUECASTER_CONFIG_DIR=os.path.join(out, 'config'), BLUECASTER_LOG='debug')
+            rc, text = run_cli([args.bluecaster, '--cli', '--hci-tcp', f'127.0.0.1:{port}',
+                                '--hci-capture', os.path.join(out, 'bluecaster.pklg')] + mode,
+                               env, HID_SECONDS + 60)
+            with open(os.path.join(out, 'bluecaster.log'), 'w', encoding='utf-8') as f:
+                f.write(text)
+        finally:
+            emu.terminate()
+            emu.wait(10)
+        emu_text = read_text(emu_log)
+    if rc != 0:
+        failures.append(f'BlueCaster exited with {rc} (see bluecaster.log)')
+    lines = text.splitlines()
+    final = next((parse_hid_line(line) for line in lines if line.startswith('hid final:')), None)
+    if final is None:
+        return failures + ['no "hid final:" line (see bluecaster.log)'], 'no counts'
+    checks = [line.strip() for line in lines if line.startswith('hid check ')]
+    detail = f'{" / ".join(checks) or "no check lines"}; ' + ' '.join(f'{k}={v}' for k, v in final.items())
+    if 'hid check waiting' not in checks:
+        failures.append('no "hid check waiting": the countdown never started')
+    if types:
+        if checks[-1:] != ['hid check confirmed']:
+            failures.append(f'expected "hid check confirmed" last, got {checks}')
+        expect = dict(connected=1, reports=HID_SCRIPT_REPORTS, events=HID_SCRIPT_EVENTS)
+        # Still connected until the test ends (the link goes down at exit)
+        after = lines[next((i for i, line in enumerate(lines) if line == 'hid check confirmed'), len(lines)):]
+        if any(parse_hid_line(line).get('connected') != 1 for line in after if line.startswith('hid: t=')):
+            failures.append('a confirmed device was disconnected during the test')
+    else:
+        if checks[-1:] != ['hid check removed no_input']:
+            failures.append(f'expected "hid check removed no_input" last, got {checks}')
+        expect = dict(connected=0, reports=0, events=0)
+        if 'hid: link down' not in emu_text:
+            failures.append('the device was not disconnected after the countdown (see hid.log)')
+        if 'the new device is removed again (no_input)' not in text:
+            failures.append('no log line of the removal')
+        # Not before the countdown ran out: the removal comes after a count
+        # line of at least HID_CONFIRM_SECONDS
+        removed_at = next((i for i, line in enumerate(lines) if line.startswith('hid check removed')), None)
+        seconds = [int(m.group(1)) for line in lines[:removed_at or 0] if (m := re.match(r'hid: t=(\d+)', line))]
+        if removed_at is not None and max(seconds, default=0) < HID_CONFIRM_SECONDS:
+            failures.append(f'removed after {max(seconds, default=0)} s, before the {HID_CONFIRM_SECONDS} s countdown')
+    for key, value in expect.items():
+        if final.get(key) != value:
+            failures.append(f'{key}={final.get(key)}, expected {value}')
+    for line in lines:
+        if re.search(r'\bhid\b|keyboards? (and|or) m', line, re.I) and address in line.upper():
+            failures.append(f'an address in a HID line: {line.strip()[:120]}')
+            break
+    return failures, detail
+
+
 def main_hid(args):
-    known = list(HID_CASES) + list(HID_LE_CASES)
+    known = list(HID_CASES) + list(HID_LE_CASES) + list(HID_CONFIRM_CASES)
     wanted = args.hid or known
     unknown = [n for n in wanted if n not in known]
     if unknown:
@@ -2726,7 +2823,8 @@ def main_hid(args):
     results = []
     for index, case in enumerate(wanted):
         print(f'--- {case} ...', flush=True)
-        run = run_hid_le_case if case in HID_LE_CASES else run_hid_case
+        run = (run_hid_confirm_case if case in HID_CONFIRM_CASES
+               else run_hid_le_case if case in HID_LE_CASES else run_hid_case)
         failures, detail = run(args, case, args.base_port + 600 + 2 * index)
         # The recording helper exists in debug builds only: with the whole
         # suite on a release build these cases are skipped, asked for by
@@ -2760,7 +2858,8 @@ def main():
                         help=f'run the dual-mode pairing cases instead ({", ".join(LE_PAIRING_CASES)}; '
                              'default: all of them)')
     parser.add_argument('--hid', nargs='*', metavar='CASE',
-                        help=f'run the keyboard and mouse cases instead ({", ".join(list(HID_CASES) + list(HID_LE_CASES))}; '
+                        help='run the keyboard and mouse cases instead '
+                             f'({", ".join(list(HID_CASES) + list(HID_LE_CASES) + list(HID_CONFIRM_CASES))}; '
                              'default: all of them)')
     parser.add_argument('--duration', type=int, default=5, help='seconds of streaming per codec')
     parser.add_argument('--max-packet', type=int, help='passed to BlueCaster --max-packet (default: its own)')

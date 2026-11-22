@@ -25,6 +25,6 @@ pub mod keymap;
 pub mod leds;
 pub mod sink;
 
-pub use decode::{Decoder, InputEvent};
+pub use decode::{Decoder, InputEvent, InputKind};
 pub use descriptor::{DescriptorError, ReportDescriptor};
 pub use leds::LedOutput;

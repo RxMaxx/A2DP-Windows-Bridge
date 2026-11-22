@@ -4,6 +4,7 @@
 //! Each test uses its own instance (BLUECASTER_INSTANCE), so its own pipe.
 //! Only processes these tests start are ended.
 
+use std::os::windows::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -15,6 +16,8 @@ use session_host::devices::DevicesHost;
 use session_host::render::{RenderHost, RenderTarget};
 use session_host::{Hub, HubConfig, LaunchConfig, RemoteHost};
 
+/// Console programs started from a test get no terminal window
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const EXE: &str = env!("CARGO_BIN_EXE_bluecaster-core");
 const WAIT: Duration = Duration::from_secs(10);
 
@@ -48,6 +51,7 @@ fn end(mut child: Child) {
 /// Ends a process the hub started (it is this test's)
 fn kill_pid(pid: u32) {
     let status = Command::new("taskkill")
+        .creation_flags(CREATE_NO_WINDOW)
         .args(["/PID", &pid.to_string(), "/F"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -569,6 +573,7 @@ fn volume_and_the_process_watch_go_through_the_agent_read_only() {
     assert!(!host.process_exited(std::process::id()));
     // A process watched until it exits: the agent's event
     let mut child = Command::new("cmd")
+        .creation_flags(CREATE_NO_WINDOW)
         .args(["/c", "ping", "-n", "30", "127.0.0.1"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -589,6 +594,7 @@ fn volume_and_the_process_watch_go_through_the_agent_read_only() {
     }
     // Killed: a new agent gets the watches again
     let mut other = Command::new("cmd")
+        .creation_flags(CREATE_NO_WINDOW)
         .args(["/c", "ping", "-n", "30", "127.0.0.1"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())

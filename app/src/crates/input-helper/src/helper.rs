@@ -119,11 +119,43 @@ async fn connect(name: &str) -> std::io::Result<tokio::net::windows::named_pipe:
     }
 }
 
+/// Whether the parent that serves the pipe runs the right program. A
+/// parent in session 0 (the service): it and this helper both run the
+/// service folder's core, so a helper started from the user's folder is
+/// never fed by the service, and a service registered with another
+/// program feeds no helper. Any other parent (a core run by hand, the
+/// tests' fake core): only the parent check (its process id) applies.
+fn parent_program_ok(
+    server_image: Option<&std::path::Path>,
+    server_session: Option<u32>,
+    own: Option<&std::path::Path>,
+    service_core: Option<&std::path::Path>,
+) -> bool {
+    use win_sys::service_files::same_path;
+    if server_session != Some(0) {
+        return true;
+    }
+    match (server_image, own, service_core) {
+        (Some(image), Some(own), Some(core)) => same_path(image, core) && same_path(own, core),
+        _ => false,
+    }
+}
+
 async fn serve(name: &str, parent: win_sys::input_desktop::ParentProcess, record: Option<std::fs::File>) -> i32 {
     let Ok(pipe) = connect(name).await else { return EXIT_REFUSED };
-    // Only the process that started this one may feed it
+    // Only the process that started this one may feed it; the service
+    // only when both run the service folder's core
+    let own = std::env::current_exe().ok();
+    let service_core = win_sys::service_files::service_core().ok();
     match win_sys::pipe_peer::server_process(pipe.as_handle()) {
-        Ok(server) if server.pid == parent.pid() => {}
+        Ok(server)
+            if server.pid == parent.pid()
+                && parent_program_ok(
+                    server.image.as_deref(),
+                    server.session_id,
+                    own.as_deref(),
+                    service_core.as_deref(),
+                ) => {}
         _ => return EXIT_REFUSED,
     }
     let (mut rd, mut wr) = tokio::io::split(pipe);
@@ -220,6 +252,24 @@ mod tests {
 
     fn a(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn only_its_own_program_may_be_the_parent() {
+        use std::path::Path;
+        let svc = Path::new(r"C:\Program Files\BlueCaster Service\bluecaster-core.exe");
+        let user = Path::new(r"C:\Users\u\AppData\Local\BlueCaster\bluecaster-core.exe");
+        // The service and its helper, both from the service folder
+        assert!(parent_program_ok(Some(svc), Some(0), Some(svc), Some(svc)));
+        // A service registered with the user's folder's core
+        assert!(!parent_program_ok(Some(user), Some(0), Some(user), Some(svc)));
+        // A helper from the user's folder, the service from its folder
+        assert!(!parent_program_ok(Some(svc), Some(0), Some(user), Some(svc)));
+        assert!(!parent_program_ok(Some(svc), Some(0), Some(svc), None));
+        assert!(!parent_program_ok(None, Some(0), Some(svc), Some(svc)));
+        // A core run by hand, or a test's fake core: the process id alone
+        assert!(parent_program_ok(Some(user), Some(1), Some(user), Some(svc)));
+        assert!(parent_program_ok(None, Some(1), Some(user), None));
     }
 
     #[test]

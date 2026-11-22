@@ -124,6 +124,9 @@ pub fn access(m: &Method) -> Access {
         Method::HidConnect { .. } => Depends,
         // Forgets the pairing; adding it back needs an administrator
         Method::HidRemove { .. } => Admin,
+        // Only removes a device being added (the way out, as hid.disable);
+        // nothing confirms a device but its input reaching Windows
+        Method::HidCheckCancel { .. } | Method::HidCheckDismiss => Open,
         Method::AppCheckUpdate | Method::AppHiddenToTray => Open,
         // Windows starts and stops a service; the UI's Exit closes the UI
         Method::AppQuit | Method::AppQuitForUpdate => NotInService,
@@ -153,9 +156,11 @@ pub fn split_client_name(client: &str) -> (&str, Option<&str>) {
 }
 
 /// Whether the process serving the service-mode pipe is the core a client
-/// expects: its program is `expected` (the core beside the client's own
-/// program), and, for the real service (not a test instance), it runs in
-/// session 0, where only services run: no program the user starts gets
+/// expects: its program is `expected` (for the real service the service
+/// folder's core, never the one beside the client: see
+/// [`crate::service_state::expected_core`]), and, for the real service
+/// (not a test instance), it runs in session 0, where only services run:
+/// no program the user starts gets
 /// there. A fixed pipe name can be taken by any process that comes first,
 /// so a client checks this before it trusts what the server sends.
 pub fn server_trusted(
@@ -298,6 +303,8 @@ mod tests {
         assert_eq!(access(&enable), Access::Admin);
         assert_eq!(access(&Method::AppClose), Access::Open);
         assert_eq!(access(&Method::HidDisable), Access::Open);
+        assert_eq!(access(&Method::HidCheckCancel { address: String::new() }), Access::Open);
+        assert_eq!(access(&Method::HidCheckDismiss), Access::Open);
         assert_eq!(access(&Method::AppQuit), Access::NotInService);
         assert_eq!(access(&Method::HidConnect { address: String::new() }), Access::Depends);
     }

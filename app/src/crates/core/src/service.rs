@@ -470,6 +470,12 @@ pub enum ServiceEvent {
     /// The number to type on a keyboard being added appeared or went away
     /// ([`Service::hid_passkey`])
     HidPasskey,
+    /// A device being added started or ended its countdown, or one was
+    /// removed again ([`Service::hid_checks`], [`Service::hid_rolled_back`])
+    HidCheck,
+    /// The self-test of the path to Windows has a new result
+    /// ([`Service::hid_health`])
+    HidHealth,
 }
 
 /// Headset mode switched for the running classic stream
@@ -625,6 +631,11 @@ impl Inner {
 
     pub(crate) fn send_event(&self, e: ServiceEvent) {
         let _ = self.events.lock().unwrap_or_else(|e| e.into_inner()).send(e);
+    }
+
+    /// A sender of service events, for threads of their own
+    pub(crate) fn event_sender(&self) -> Sender<ServiceEvent> {
+        self.events.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn stop_requested(&self) -> bool {
@@ -1491,7 +1502,10 @@ impl Service {
         pipeline::set_thread_priority_hook(|| pro_audio("encode thread"));
         hci_transport::set_acl_out_priority_hook(|| pro_audio("USB ACL writer"));
         bt_host::set_runloop_priority_hook(|| pro_audio("BTstack thread"));
-        // Keyboards and mice (experimental): their stack runs from the start
+        // Keyboards and mice (experimental): devices added and not confirmed
+        // before the last exit are removed, then their stack runs from the
+        // start
+        inner.hid_remove_unconfirmed();
         inner.hid_keep();
         Service {
             inner,

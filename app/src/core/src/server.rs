@@ -117,12 +117,21 @@ fn service_caller(
     ticket: Option<&str>,
 ) -> Result<crate::rules::Caller, &'static str> {
     let id = id.map_err(|_| "the client is not known")?;
-    let exe = std::env::current_exe().map_err(|_| "the core's program is not known")?;
-    let caller = crate::rules::Caller::of(&id, &exe, ticket);
+    let programs = crate::rules::own_elevated_programs();
+    let caller = crate::rules::Caller::of(&id, &programs, ticket);
     if id.session_id == 0 && !caller.elevated {
         return Err("not an interactive session");
     }
     Ok(caller)
+}
+
+/// Service mode's version rule for a hello `name`: BlueCaster's own UI
+/// ("bluecaster-ui/<version>") must be the service's `own` version. Other
+/// clients (the elevated helper runs from the service folder itself, pipe
+/// clients of other authors) are not asked.
+fn ui_version_reject(name: &str, own: &str) -> Option<&'static str> {
+    let version = name.strip_prefix("bluecaster-ui/")?;
+    ipc::service_state::version_reject(own, version)
 }
 
 async fn session(state: Arc<CoreState>, mut pipe: NamedPipeServer, service: bool) -> Result<(), ipc::FrameError> {
@@ -156,6 +165,16 @@ async fn session(state: Arc<CoreState>, mut pipe: NamedPipeServer, service: bool
         Some(Ok(c)) => Some(c),
         None => None,
     };
+    // Service mode: the app and the service are one version; another
+    // version is told which side needs the update (the UI reads it from the
+    // reason, ipc::service_state::version_reject_code)
+    if caller.is_some()
+        && let Some(why) = ui_version_reject(name, env!("CARGO_PKG_VERSION"))
+    {
+        tracing::info!("IPC: a client was refused: {why}");
+        write_frame(&mut wr, &ServerMessage::Reject { reason: why.to_string() }).await?;
+        return Ok(());
+    }
     let client = name.to_string();
     match &caller {
         Some(c) => tracing::info!("IPC: {client} connected (elevated {})", c.elevated),
@@ -390,6 +409,18 @@ fn set_subscribed(count: &AtomicUsize, current: &mut bool, wanted: bool) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_ui_of_another_version_is_told_which_side_is_older() {
+        use ipc::service_state::{APP_OLDER_THAN_SERVICE, SERVICE_NEEDS_UPDATE};
+        assert_eq!(ui_version_reject("bluecaster-ui/3.0.3", "3.0.3"), None);
+        assert_eq!(ui_version_reject("bluecaster-ui/3.0.4", "3.0.3"), Some(SERVICE_NEEDS_UPDATE));
+        assert_eq!(ui_version_reject("bluecaster-ui/3.0.2", "3.0.3"), Some(APP_OLDER_THAN_SERVICE));
+        assert_eq!(ui_version_reject("bluecaster-ui/x", "3.0.3"), Some(APP_OLDER_THAN_SERVICE));
+        // Not the UI: not asked
+        assert_eq!(ui_version_reject("bluecaster-request/3.0.2", "3.0.3"), None);
+        assert_eq!(ui_version_reject("encodeck/1.14.0", "3.0.3"), None);
+    }
 
     /// The core answers under both names (test names, not the user's pipe)
     #[test]

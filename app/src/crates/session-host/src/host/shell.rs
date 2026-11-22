@@ -17,6 +17,8 @@
 //! The tray goes when the connection ends (the core exited or crashed) and
 //! comes back with the next core's model.
 
+use std::path::{Path, PathBuf};
+
 use serde::{Deserialize, Serialize};
 
 use crate::{LocalHost, RemoteHost};
@@ -113,12 +115,85 @@ pub trait ShellHost {
     fn launch_ui(&self, page: UiPage) -> bool;
 }
 
-/// Starts `bluecaster.exe` next to this program with `page`'s argument
+/// Where the UI's program is, as this process decides it (never from the
+/// core: the core sends only the page)
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum UiSource {
+    /// `bluecaster.exe` next to this program (the per-user installation, a
+    /// test build)
+    Beside(PathBuf),
+    /// This program is the service folder's core (the agent of the real
+    /// service): the UI of the user's own per-user installation, from the
+    /// folder Setup registered under HKCU
+    Installed(PathBuf),
+}
+
+/// [`UiSource`] from this program (`own`), the service folder's core and
+/// the installation folder the registry names (`registered`: read only
+/// when needed)
+pub(crate) fn ui_source(
+    own: &Path,
+    service_core: Option<&Path>,
+    registered: impl FnOnce() -> Option<String>,
+) -> Option<UiSource> {
+    use win_sys::service_files::{UI_EXE, same_path};
+    if service_core.is_some_and(|s| same_path(s, own)) {
+        let folder = registered()?;
+        ipc::service_state::ui_in_install_folder(&folder).map(UiSource::Installed)
+    } else {
+        own.parent().map(|d| UiSource::Beside(d.join(UI_EXE)))
+    }
+}
+
+/// The per-user installation's folder, as Setup registered it for this user
+fn registered_install_folder() -> Option<String> {
+    use ipc::service_state::{INSTALL_LOCATION_VALUES, UNINSTALL_KEY};
+    INSTALL_LOCATION_VALUES.iter().find_map(|v| win_sys::service_files::hkcu_string(UNINSTALL_KEY, v))
+}
+
+/// Whether the UI found through the registry may be started: a plain file
+/// (no link), and in a signed build signed by this program's publisher
+/// (the same certificate). HKCU is the user's own, so this only keeps the
+/// agent from starting just any program; the agent runs as the user and
+/// gains nothing by it.
+fn installed_ui_ok(ui: &Path) -> Result<(), &'static str> {
+    use win_sys::authenticode::{Policy, check_path, own_signature};
+    match win_sys::service_files::is_reparse_point(ui) {
+        Ok(false) if ui.is_file() => {}
+        Ok(_) => return Err("not a plain file"),
+        Err(_) => return Err("not there"),
+    }
+    let policy = Policy::from_own(&own_signature().map_err(|_| "this program's signature is not readable")?);
+    if !policy.checks() {
+        return Ok(());
+    }
+    policy.admits(&check_path(ui).map_err(|_| "its signature is not readable")?)
+}
+
+/// The UI's program: next to this program, or for the service's agent the
+/// user's per-user installation (checked: [`installed_ui_ok`])
+fn ui_program() -> Option<PathBuf> {
+    let own = std::env::current_exe().ok()?;
+    let service_core = win_sys::service_files::service_core().ok();
+    match ui_source(&own, service_core.as_deref(), registered_install_folder) {
+        Some(UiSource::Beside(ui)) => Some(ui),
+        Some(UiSource::Installed(ui)) => match installed_ui_ok(&ui) {
+            Ok(()) => Some(ui),
+            Err(why) => {
+                tracing::warn!("shell: the installed UI is not used: {why}");
+                None
+            }
+        },
+        None => {
+            tracing::warn!("shell: no installed UI is registered for this user");
+            None
+        }
+    }
+}
+
+/// Starts the UI ([`ui_program`]) with `page`'s argument
 pub fn start_ui(page: UiPage) -> bool {
-    let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) else {
-        return false;
-    };
-    let ui = dir.join("bluecaster.exe");
+    let Some(ui) = ui_program() else { return false };
     if !ui.exists() {
         tracing::warn!("shell: the UI's program is not there");
         return false;
@@ -199,6 +274,45 @@ pub fn on_agent_event(f: impl Fn(ToCore) + Send + Sync + 'static) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The service's agent starts the user's installed UI, found through
+    /// the registry; any other agent the UI beside it. The core never names
+    /// the program.
+    #[test]
+    fn the_ui_is_found_by_the_agent_itself() {
+        let svc = Path::new(r"C:\Program Files\BlueCaster Service\bluecaster-core.exe");
+        let user = Path::new(r"C:\Users\u\AppData\Local\BlueCaster\bluecaster-core.exe");
+        let reg = || Some(r"C:\Users\u\AppData\Local\BlueCaster\".to_string());
+        assert_eq!(
+            ui_source(svc, Some(svc), reg),
+            Some(UiSource::Installed(r"C:\Users\u\AppData\Local\BlueCaster\bluecaster.exe".into()))
+        );
+        // Not registered, or registered somewhere odd: no UI
+        assert_eq!(ui_source(svc, Some(svc), || None), None);
+        assert_eq!(ui_source(svc, Some(svc), || Some(r"\\host\share".into())), None);
+        // The per-user installation (or a test build): beside, the
+        // registry not even read
+        assert_eq!(
+            ui_source(user, Some(svc), || panic!("not read")),
+            Some(UiSource::Beside(r"C:\Users\u\AppData\Local\BlueCaster\bluecaster.exe".into()))
+        );
+        assert!(matches!(ui_source(user, None, || panic!("not read")), Some(UiSource::Beside(_))));
+    }
+
+    #[test]
+    fn a_registered_ui_must_be_a_plain_file() {
+        let dir = std::env::temp_dir().join(format!("bc-ui-check-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(installed_ui_ok(&dir.join("bluecaster.exe")).is_err(), "missing");
+        std::fs::create_dir_all(dir.join("bluecaster.exe")).unwrap();
+        assert!(installed_ui_ok(&dir.join("bluecaster.exe")).is_err(), "a folder");
+        std::fs::remove_dir(dir.join("bluecaster.exe")).unwrap();
+        std::fs::write(dir.join("bluecaster.exe"), b"MZ").unwrap();
+        // The test program is unsigned: a developer build checks no signature
+        assert_eq!(installed_ui_ok(&dir.join("bluecaster.exe")), Ok(()));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn events_have_a_stable_shape() {

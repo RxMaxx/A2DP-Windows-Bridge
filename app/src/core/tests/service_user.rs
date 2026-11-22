@@ -271,7 +271,7 @@ fn the_service_core_closes_for_the_user_and_keeps_running() {
         assert_eq!(other.ask("state.snapshot", None, &mut events).await, "ok");
         assert_eq!(tray_items(&log_text(&svc)).last(), Some(&0));
         // ...BlueCaster's window does
-        let (mut ui, _) = Client::connect(&pipe, "bluecaster-ui/test").await;
+        let (mut ui, _) = Client::connect(&pipe, &format!("bluecaster-ui/{}", env!("CARGO_PKG_VERSION"))).await;
         assert_eq!(ui.ask("state.snapshot", None, &mut events).await, "ok");
         let log = wait_log(&svc, |l| tray_items(l).last().is_some_and(|&n| n > 0), &mut core.0);
         assert!(log.contains("tray: shown again"), "{log}");

@@ -14,6 +14,7 @@
 
 pub mod access;
 pub mod protocol;
+pub mod service_state;
 
 pub use protocol::*;
 

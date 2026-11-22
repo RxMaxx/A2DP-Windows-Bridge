@@ -596,6 +596,39 @@ fn to_ipc_hid_passkey(p: Option<(String, String)>) -> Option<ipc::HidPasskey> {
     p.map(|(address, passkey)| ipc::HidPasskey { address, passkey })
 }
 
+/// The devices being added, with the time left as of now
+fn to_ipc_hid_checks(service: &Service) -> Vec<ipc::HidCheck> {
+    let ms = |d: std::time::Duration| d.as_millis().min(u128::from(u32::MAX)) as u32;
+    service
+        .hid_checks()
+        .into_iter()
+        .map(|c| ipc::HidCheck {
+            address: c.address,
+            name: c.name,
+            kind: c.kind.to_string(),
+            waiting: c.waiting,
+            remaining_ms: ms(c.remaining),
+            window_ms: ms(c.window),
+        })
+        .collect()
+}
+
+fn to_ipc_hid_rolled_back(service: &Service) -> Option<ipc::HidRolledBack> {
+    service.hid_rolled_back().map(|r| ipc::HidRolledBack {
+        address: r.address,
+        name: r.name,
+        le: r.le,
+        reason: r.reason.as_str().to_string(),
+    })
+}
+
+fn to_ipc_hid_health(service: &Service) -> Option<ipc::HidHealth> {
+    service.hid_health().map(|h| {
+        let (state, reason) = h.parts();
+        ipc::HidHealth { state: state.to_string(), reason: reason.map(str::to_string) }
+    })
+}
+
 /// A Msg error of crate::hid ("error.hid.off") with its code ("hid.off")
 fn hid_err(m: &bluecaster_core::Msg) -> ErrorInfo {
     ErrorInfo { code: m.key.strip_prefix("error.").unwrap_or(m.key).to_string(), message: msg(m) }
@@ -1321,8 +1354,18 @@ fn effective_volume_sync(global: bool, _profile: VolumeSync) -> VolumeSync {
 /// started with --background (start_minimized: only the tray at logon).
 /// Written by the session host: the agent's user's HKCU when the agent
 /// does the session's work.
+///
+/// Service mode: nothing is written. The service starts with Windows and
+/// its agent shows the tray; the Run value keeps pointing at the user's
+/// per-user core, which exits at once while the service is installed
+/// (resident::EXIT_SERVICE_HOSTS) and works again once it is removed.
+/// This program (the service folder's core) must never be written there.
 fn apply_autostart(enabled: bool, minimized: bool) -> Result<(), String> {
     use win_sys::autostart::{VALUE_NAME, command_line};
+    if bluecaster_core::paths::service_mode() {
+        tracing::info!("start with Windows: left as it is in service mode");
+        return Ok(());
+    }
     if enabled {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         session_host::autostart::set(VALUE_NAME, &command_line(&exe, autostart_args(minimized)))
@@ -2024,6 +2067,9 @@ impl CoreState {
             hid_devices: to_ipc_hid_devices(service.hid_devices()),
             hid_candidates: Vec::new(),
             hid_passkey: to_ipc_hid_passkey(service.hid_passkey()),
+            hid_checks: to_ipc_hid_checks(&service),
+            hid_rolled_back: to_ipc_hid_rolled_back(&service),
+            hid_health: to_ipc_hid_health(&service),
             vendors: bluecaster_core::vendor::VENDORS
                 .iter()
                 .map(|v| ipc::VendorInfo {
@@ -2065,7 +2111,12 @@ impl CoreState {
     }
 
     pub fn snapshot(&self) -> (u64, Snapshot) {
-        self.snapshot.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        let (rev, mut snap) = self.snapshot.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        // The countdowns as of now, not as of the last event
+        if !snap.hid_checks.is_empty() {
+            snap.hid_checks = to_ipc_hid_checks(&self.service);
+        }
+        (rev, snap)
     }
 
     /// The revision of the state now
@@ -2117,6 +2168,11 @@ impl CoreState {
                 Event::HidDevices(d) => s.hid_devices = d.clone(),
                 Event::HidCandidates(d) => s.hid_candidates = d.clone(),
                 Event::HidPasskey(p) => s.hid_passkey = p.clone(),
+                Event::HidCheck { checks, rolled_back } => {
+                    s.hid_checks = checks.clone();
+                    s.hid_rolled_back = rolled_back.clone();
+                }
+                Event::HidHealth(h) => s.hid_health = h.clone(),
                 // Not state: no revision
                 Event::Link(_)
                 | Event::Log(_)
@@ -2445,6 +2501,20 @@ impl CoreState {
                 let p = to_ipc_hid_passkey(self.service.hid_passkey());
                 if p != s.hid_passkey {
                     self.publish(Event::HidPasskey(p));
+                }
+                return;
+            }
+            // Always sent: the time left changes
+            ServiceEvent::HidCheck => {
+                let checks = to_ipc_hid_checks(&self.service);
+                let rolled_back = to_ipc_hid_rolled_back(&self.service);
+                self.publish(Event::HidCheck { checks, rolled_back });
+                return;
+            }
+            ServiceEvent::HidHealth => {
+                let h = to_ipc_hid_health(&self.service);
+                if h != s.hid_health {
+                    self.publish(Event::HidHealth(h));
                 }
                 return;
             }
@@ -3063,6 +3133,11 @@ impl CoreState {
     pub fn refresh_autostart(&self, replaces_v1: bool) {
         use session_host::autostart::get;
         use win_sys::autostart::{OLD_VALUE_NAME, VALUE_NAME};
+        // Service mode: the Run value belongs to the per-user core
+        // (apply_autostart)
+        if bluecaster_core::paths::service_mode() {
+            return;
+        }
         let s = self.service.settings();
         let (current, old) = match (get(VALUE_NAME), get(OLD_VALUE_NAME)) {
             (Ok(c), Ok(o)) => (c, o),
@@ -4307,7 +4382,14 @@ impl CoreState {
                 developer(self)?;
                 blocking(Box::new(move |me| {
                     me.service.hid_confirm(&code, other_input_at_hand, risk_understood).map_err(|m| hid_err(&m))?;
-                    me.set_hid_host(true)
+                    me.set_hid_host(true)?;
+                    // The path to Windows tested at once: on failure the
+                    // feature goes off again, as hid.disable turns it off
+                    if let Err(m) = me.service.hid_self_test_enable() {
+                        let _ = me.set_hid_host(false);
+                        return Err(hid_err(&m));
+                    }
+                    Ok(Value::Null)
                 }))
                 .await
             }
@@ -4345,6 +4427,17 @@ impl CoreState {
                     Ok(Value::Null)
                 }))
                 .await
+            }
+            Method::HidCheckCancel { address } => {
+                blocking(Box::new(move |me| {
+                    me.service.hid_check_cancel(&address);
+                    Ok(Value::Null)
+                }))
+                .await
+            }
+            Method::HidCheckDismiss => {
+                self.service.hid_check_dismiss();
+                Ok(Value::Null)
             }
             Method::AppCheckUpdate => blocking(Box::new(|me| me.check_update().map(|u| json(&u)))).await,
             Method::AppHiddenToTray => {

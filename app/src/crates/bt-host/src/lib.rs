@@ -491,6 +491,8 @@ pub struct BtHost {
     /// The HID host runs (HostConfig::hid was Some)
     hid_on: bool,
     hid_counters: Arc<HidCounters>,
+    /// Where the HID host's input goes (with hid_on)
+    hid_sink: Option<Arc<dyn hid_input::sink::InputSink>>,
     /// What the LE worker API reads without a round trip
     le: Arc<le::core::LeShared>,
 }
@@ -584,7 +586,7 @@ impl BtHost {
     /// loader first), or with `tool` that loader instead (the probe, a
     /// script), its report to the sender
     fn launch(
-        config: HostConfig,
+        mut config: HostConfig,
         stats: Arc<LinkStats>,
         tool: Option<(mpsc::Sender<probe::ProbeReport>, ToolLoader)>,
     ) -> Result<BtHost, InitFailure> {
@@ -612,6 +614,13 @@ impl BtHost {
         let le_on = config.le_audio.is_some();
         let voice_on = config.voice;
         let hid_on = config.hid.is_some();
+        // The sink is chosen here, so that the core can ask it what reached
+        // Windows (hid_sink) while the engine passes input to it
+        let hid_sink = config.hid.as_mut().map(|h| {
+            let sink = hid::sink_for(h);
+            h.sink = Some(sink.clone());
+            sink
+        });
         // Keyboards and mice over LE need the LE core, also without LE Audio
         let le_core_on = le_on || hid_on;
         let hid_counters = Arc::new(HidCounters::default());
@@ -828,6 +837,7 @@ impl BtHost {
             voice_on,
             hid_on,
             hid_counters,
+            hid_sink,
             le: le_shared,
         };
         Ok(host)
@@ -1766,6 +1776,12 @@ impl BtHost {
     /// The stack runs the HID host ([`HostConfig::hid`])
     pub fn hid_enabled(&self) -> bool {
         self.hid_on
+    }
+
+    /// Where the HID host's input goes: what reached Windows from which
+    /// device, and the self-test. None without the HID host.
+    pub fn hid_sink(&self) -> Option<Arc<dyn hid_input::sink::InputSink>> {
+        self.hid_sink.clone()
     }
 
     /// What the HID host did so far (counts only)

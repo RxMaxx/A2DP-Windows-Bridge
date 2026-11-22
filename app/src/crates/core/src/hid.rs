@@ -21,6 +21,10 @@ use std::time::{Duration, Instant};
 use crate::messages::Msg;
 use crate::service::{Inner, Service, ServiceEvent};
 
+mod check;
+pub use check::{CONNECT_LIMIT, Health, Reason, WINDOW};
+use check::{Check, TestMoment, Verdict};
+
 /// How long a confirmation code stays valid
 const CODE_VALID: Duration = Duration::from_secs(120);
 /// How often a stack that stopped is started again while the feature is on
@@ -29,6 +33,36 @@ const KEEP_EVERY: Duration = Duration::from_secs(5);
 const LE_READY_WAIT: Duration = Duration::from_secs(3);
 /// At most this many keyboards and mice
 pub const MAX_DEVICES: usize = 8;
+/// How often a device under check is looked at
+const CHECK_TICK: Duration = Duration::from_millis(100);
+/// How long a self-test waits for the input helper and its answer
+const SELF_TEST_WAIT: Duration = Duration::from_secs(10);
+/// How long the self-test after hid.enable waits for a stack with
+/// keyboards and mice
+const SELF_TEST_STACK_WAIT: Duration = Duration::from_secs(10);
+
+/// A device being added, as the UI shows it ([`Service::hid_checks`])
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HidCheckView {
+    pub address: String,
+    pub name: String,
+    /// "keyboard", "mouse", "both", or "" while not known
+    pub kind: &'static str,
+    /// The countdown runs (false: not ready for input yet)
+    pub waiting: bool,
+    pub remaining: Duration,
+    pub window: Duration,
+}
+
+/// A device removed again because its input did not reach Windows
+/// ([`Service::hid_rolled_back`])
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HidRolledBack {
+    pub address: String,
+    pub name: String,
+    pub le: Option<u8>,
+    pub reason: Reason,
+}
 
 /// A keyboard or mouse the user added
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +113,21 @@ pub(crate) struct HidState {
     helper_config: Mutex<Option<input_helper::HelperConfig>>,
     /// The input helper's sink while input goes through it
     helper: Mutex<Option<Arc<input_helper::HelperSink>>>,
+    /// The devices being added, until their input reaches Windows
+    checks: Mutex<Vec<Check>>,
+    /// The device removed again last, until the user adds again or
+    /// dismisses the notice
+    rolled_back: Mutex<Option<HidRolledBack>>,
+    /// The thread of [`Inner::hid_watch`] runs
+    watching: AtomicBool,
+    /// The command line's countdown (--hid-confirm): devices it connects
+    /// as hid.add does are checked too; None: only hid.add checks, with
+    /// [`WINDOW`]
+    cli_window: Mutex<Option<Duration>>,
+    /// The last self-test's result; None: none ran yet
+    health: Arc<Mutex<Option<Health>>>,
+    /// The self-test of this process's first stack ran (or hid.enable's)
+    start_tested: AtomicBool,
 }
 
 /// The guard process (win_sys::hid_guard) and the held keys it reads: it
@@ -121,13 +170,21 @@ impl HidState {
 
     /// The input helper's sink, started (one for the life of the feature:
     /// it restarts its helper by itself). None: no helper configured.
-    fn helper_sink(&self) -> Option<Arc<input_helper::HelperSink>> {
+    /// Each helper after the first tests itself; its result goes to the
+    /// health state (a warning only) and `events`.
+    fn helper_sink(&self, events: std::sync::mpsc::Sender<ServiceEvent>) -> Option<Arc<input_helper::HelperSink>> {
         let config = self.helper_config.lock().unwrap_or_else(|e| e.into_inner()).clone()?;
         let mut helper = self.helper.lock().unwrap_or_else(|e| e.into_inner());
         let sink = helper.get_or_insert_with(|| {
             tracing::info!("keyboards and mice: input goes through the input helper");
             let sink = input_helper::HelperSink::new(config, Arc::new(input_helper::SessionLauncher));
             sink.on_sas(Box::new(secure_attention));
+            let health = self.health.clone();
+            let events = Mutex::new(events);
+            sink.on_tested(Box::new(move |result| {
+                *health.lock().unwrap_or_else(|e| e.into_inner()) = Some(Health::from(result));
+                let _ = events.lock().unwrap_or_else(|e| e.into_inner()).send(ServiceEvent::HidHealth);
+            }));
             sink
         });
         sink.start();
@@ -315,7 +372,7 @@ impl Inner {
             // (a test switch of debug builds), which never injects
             (Some(c), Some(h)) if !c.dry_run || h.record.is_some() => {
                 self.hid.stop_guard();
-                c.sink = self.hid.helper_sink().map(|s| s as Arc<dyn hid_input::sink::InputSink>);
+                c.sink = self.hid.helper_sink(self.event_sender()).map(|s| s as Arc<dyn hid_input::sink::InputSink>);
             }
             // Input to Windows from this process: the guard watches over
             // the keys held
@@ -379,6 +436,24 @@ impl Inner {
                 self.hid_identity(listed, identity);
                 return;
             }
+            bt_host::HidEvent::Ready(a, kind) => {
+                let mut changed = false;
+                for c in self.hid.checks.lock().unwrap_or_else(|e| e.into_inner()).iter_mut().filter(|c| c.is(&a)) {
+                    let first = !c.waiting();
+                    c.on_ready(kind, Instant::now());
+                    if first {
+                        tracing::info!(
+                            "keyboards and mice: the new device is ready, waiting {} s for its input",
+                            c.remaining(Instant::now()).as_secs()
+                        );
+                    }
+                    changed = true;
+                }
+                if changed {
+                    self.send_event(ServiceEvent::HidCheck);
+                }
+                return;
+            }
             // Its pairing is over either way
             bt_host::HidEvent::Connected(a) | bt_host::HidEvent::ConnectFailed(a, _) => {
                 self.hid_passkey_clear(Some(a));
@@ -389,6 +464,11 @@ impl Inner {
                 }
             }
             bt_host::HidEvent::Disconnected(_) => {}
+        }
+        if let bt_host::HidEvent::Disconnected(a) | bt_host::HidEvent::ConnectFailed(a, _) = e {
+            for c in self.hid.checks.lock().unwrap_or_else(|e| e.into_inner()).iter_mut().filter(|c| c.is(&a)) {
+                c.on_disconnected();
+            }
         }
         {
             let mut c = self.hid.connected.lock().unwrap_or_else(|e| e.into_inner());
@@ -401,6 +481,7 @@ impl Inner {
                 bt_host::HidEvent::Disconnected(a) | bt_host::HidEvent::ConnectFailed(a, _) => c.retain(|&x| x != a),
                 bt_host::HidEvent::Passkey(..)
                 | bt_host::HidEvent::PasskeyDone(_)
+                | bt_host::HidEvent::Ready(..)
                 | bt_host::HidEvent::Identity { .. } => {}
             }
             tracing::info!("keyboards and mice: {} connected", c.len());
@@ -433,7 +514,15 @@ impl Inner {
                 *a = identity.addr;
             }
         }
+        for c in self.hid.checks.lock().unwrap_or_else(|e| e.into_inner()).iter_mut() {
+            c.on_identity(&listed.addr, identity.addr, to.clone());
+        }
+        if check::load_unconfirmed(self.config_dir()).contains(&from) {
+            check::mark_unconfirmed(self.config_dir(), &from, false);
+            check::mark_unconfirmed(self.config_dir(), &to, true);
+        }
         self.send_event(ServiceEvent::HidDevices);
+        self.send_event(ServiceEvent::HidCheck);
     }
 
     /// The number shown goes away (`addr`: only that device's)
@@ -456,6 +545,9 @@ impl Inner {
     /// The stack is gone, and every keyboard and mouse with it
     pub(crate) fn hid_stack_stopped(&self) {
         self.hid_passkey_clear(None);
+        for c in self.hid.checks.lock().unwrap_or_else(|e| e.into_inner()).iter_mut() {
+            c.on_disconnected();
+        }
         let had = !std::mem::take(&mut *self.hid.connected.lock().unwrap_or_else(|e| e.into_inner())).is_empty();
         if had {
             tracing::warn!("keyboards and mice: disconnected, Bluetooth stopped");
@@ -482,9 +574,10 @@ impl Inner {
                 }
                 if inner.hid_may_start() && !inner.hid.hold.load(Ordering::Acquire) {
                     match inner.ensure_host() {
-                        Ok(_) => {
+                        Ok(host) => {
                             failed = false;
                             tracing::info!("keyboards and mice: Bluetooth started for them");
+                            inner.hid_start_test(&host);
                         }
                         // Once: without an adapter this repeats every few seconds
                         Err(e) if !failed => {
@@ -501,6 +594,231 @@ impl Inner {
         if spawned.is_err() {
             self.hid.keeping.store(false, Ordering::Release);
         }
+    }
+}
+
+impl Inner {
+    /// The keyboards and mice added but not confirmed when this core last
+    /// stopped (it died or was stopped during the countdown): removed as
+    /// hid.remove removes them, before any stack starts
+    pub(crate) fn hid_remove_unconfirmed(&self) {
+        let list = check::load_unconfirmed(self.config_dir());
+        if list.is_empty() {
+            return;
+        }
+        for address in &list {
+            self.hid_remove_entry(address);
+            check::mark_unconfirmed(self.config_dir(), address, false);
+        }
+        tracing::warn!(
+            "keyboards and mice: {} device(s) added but never confirmed before the last exit removed",
+            list.len()
+        );
+    }
+
+    /// hid.remove: disconnected, off the list (the saved one and the command
+    /// line's), its pairing forgotten; its check, if any, ends
+    pub(crate) fn hid_remove_entry(&self, address: &str) {
+        let mut list = load(self.config_dir());
+        let removed: Vec<Entry> = list.iter().filter(|e| e.address.eq_ignore_ascii_case(address)).cloned().collect();
+        list.retain(|e| !e.address.eq_ignore_ascii_case(address));
+        if let Err(e) = save(self.config_dir(), &list) {
+            tracing::warn!("keyboards and mice: the list was not saved ({e})");
+        }
+        let addr = bt_host::parse_addr(address);
+        let cli_le = match (self.hid.cli.lock().unwrap_or_else(|e| e.into_inner()).as_mut(), addr) {
+            (Some(cli), Some(a)) => {
+                let le = cli.le_devices.iter().any(|l| l.addr == a);
+                cli.devices.retain(|d| *d != a);
+                cli.le_devices.retain(|l| l.addr != a);
+                le
+            }
+            _ => false,
+        };
+        self.hid.checks.lock().unwrap_or_else(|e| e.into_inner()).retain(|c| !c.address.eq_ignore_ascii_case(address));
+        let host = self.host.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(host) = host.as_ref().filter(|h| h.hid_enabled()) {
+            let (classic, le) = addresses(&self.hid_list());
+            host.hid_set_devices(classic, le);
+        }
+        if let Some(addr) = addr {
+            self.hid.connected.lock().unwrap_or_else(|e| e.into_inner()).retain(|&a| a != addr);
+            bt_host::hid::forget_descriptors(&descriptors_dir(self.config_dir()), &addr);
+            let dir = self.config_dir();
+            if cli_le || removed.iter().any(|e| e.le.is_some()) {
+                // Its LE bond, unless LE Audio headphones of that address
+                // are saved (as Service::forget_device does)
+                if !crate::devices::load_le(dir).iter().any(|d| d.address.eq_ignore_ascii_case(address))
+                    && !host.as_ref().is_some_and(|h| h.forget_le_bond(addr))
+                {
+                    match bt_host::le_bond_file::forget(&crate::paths::le_bonds_file(dir), &addr) {
+                        Ok(n) => tracing::debug!("keyboards and mice: {n} LE bond(s) removed from the file"),
+                        Err(e) => {
+                            tracing::warn!("keyboards and mice: the LE bonds file cannot be changed ({})", e.kind())
+                        }
+                    }
+                }
+            } else if !crate::devices::load(dir).iter().any(|d| d.address.eq_ignore_ascii_case(address)) {
+                // Unless headphones of the same address are saved too; its
+                // link key alone (its LE keys stay with an LE Audio entry)
+                if !host.as_ref().is_some_and(|h| h.forget_link_key_only(addr)) {
+                    bt_host::link_keys::forget(&crate::paths::link_keys_file(dir), &addr);
+                }
+            }
+        }
+        tracing::info!("keyboards and mice: one removed, {} left", list.len());
+        self.send_event(ServiceEvent::HidDevices);
+    }
+
+    /// Starts checking a device the user adds (`cli`: one the command line
+    /// connects): unconfirmed, on disk too, until its input reaches Windows
+    fn hid_check_begin(self: &Arc<Self>, entry: &Entry, cli: bool, window: Duration) {
+        let Some(addr) = entry.addr() else { return };
+        let mut c = Check::new(addr, entry.address.clone(), entry.name.clone(), entry.le, window, Instant::now());
+        c.cli = cli;
+        {
+            let mut checks = self.hid.checks.lock().unwrap_or_else(|e| e.into_inner());
+            checks.retain(|x| !x.is(&addr));
+            checks.push(c);
+        }
+        if !cli {
+            check::mark_unconfirmed(self.config_dir(), &entry.address, true);
+        }
+        *self.hid.rolled_back.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        tracing::info!("keyboards and mice: the new device stays only if its input reaches Windows");
+        self.send_event(ServiceEvent::HidCheck);
+        self.hid_watch();
+    }
+
+    /// Decides on every device under check, every [`CHECK_TICK`], until
+    /// none is left. One thread.
+    fn hid_watch(self: &Arc<Self>) {
+        if self.hid.watching.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let weak: Weak<Inner> = Arc::downgrade(self);
+        let spawned = std::thread::Builder::new().name("hid-check".into()).spawn(move || {
+            loop {
+                let Some(inner) = weak.upgrade() else { return };
+                if !inner.hid_check_tick() {
+                    inner.hid.watching.store(false, Ordering::Release);
+                    // A check added between the last tick and now
+                    if inner.hid.checks.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
+                        || inner.hid.watching.swap(true, Ordering::AcqRel)
+                    {
+                        return;
+                    }
+                }
+                drop(inner);
+                std::thread::sleep(CHECK_TICK);
+            }
+        });
+        if spawned.is_err() {
+            self.hid.watching.store(false, Ordering::Release);
+        }
+    }
+
+    /// One look at every device under check: confirmed ones stay, those out
+    /// of time go. False when none is left.
+    fn hid_check_tick(&self) -> bool {
+        let sink = self.host.lock().unwrap_or_else(|e| e.into_inner()).clone().and_then(|h| h.hid_sink());
+        let delivered = |a: &[u8; 6]| sink.as_ref().and_then(|s| s.delivered(a));
+        let now = Instant::now();
+        let mut done = Vec::new();
+        let left = {
+            let mut checks = self.hid.checks.lock().unwrap_or_else(|e| e.into_inner());
+            checks.retain(|c| match c.decide(now, &|a| delivered(a).map(|d| d.at)) {
+                Verdict::Wait => true,
+                v => {
+                    done.push((c.clone(), v));
+                    false
+                }
+            });
+            checks.len()
+        };
+        for (c, v) in done {
+            match v {
+                Verdict::Confirmed => {
+                    let saw = c.addrs().iter().filter_map(&delivered).find_map(|d| d.windows_saw);
+                    tracing::info!(
+                        "keyboards and mice: the new device is confirmed, its input reached Windows (Windows registered input: {})",
+                        match saw {
+                            Some(true) => "yes",
+                            Some(false) => "not yet",
+                            None => "not checked",
+                        }
+                    );
+                    if !c.cli {
+                        check::mark_unconfirmed(self.config_dir(), &c.address, false);
+                    }
+                    self.send_event(ServiceEvent::HidCheck);
+                }
+                Verdict::RollBack(reason) => self.hid_roll_back(&c, reason),
+                Verdict::Wait => {}
+            }
+        }
+        left > 0
+    }
+
+    /// Removes a device that was not confirmed, as hid.remove does, and
+    /// tells the UI
+    fn hid_roll_back(&self, c: &Check, reason: Reason) {
+        tracing::warn!("keyboards and mice: the new device is removed again ({})", reason.as_str());
+        self.hid_remove_entry(&c.address);
+        check::mark_unconfirmed(self.config_dir(), &c.address, false);
+        // The user's own Remove needs no notice
+        if reason != Reason::Cancelled {
+            *self.hid.rolled_back.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some(HidRolledBack { address: c.address.clone(), name: c.name.clone(), le: c.le, reason });
+        }
+        self.send_event(ServiceEvent::HidCheck);
+    }
+
+    fn hid_set_health(&self, h: Health) {
+        *self.hid.health.lock().unwrap_or_else(|e| e.into_inner()) = Some(h);
+        self.send_event(ServiceEvent::HidHealth);
+    }
+
+    /// The self-test of a stack that started with the feature on, once per
+    /// process (later starts, or the first stack after hid.enable when that
+    /// found none): a failure only warns. In a thread of its own.
+    fn hid_start_test(&self, host: &Arc<bt_host::BtHost>) {
+        let on = self.settings.lock().unwrap_or_else(|e| e.into_inner()).hid_host();
+        let cli = self.hid.cli.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+        if !on || cli || !host.hid_enabled() || self.hid.start_tested.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let Some(sink) = host.hid_sink() else { return };
+        let health = self.hid.health.clone();
+        let events = self.event_sender();
+        let _ = std::thread::Builder::new().name("hid-self-test".into()).spawn(move || {
+            let result = sink.self_test(SELF_TEST_WAIT);
+            log_self_test(TestMoment::Later, result);
+            *health.lock().unwrap_or_else(|e| e.into_inner()) = Some(Health::from(result));
+            let _ = events.send(ServiceEvent::HidHealth);
+        });
+    }
+}
+
+/// Logs a self-test's result (states only)
+fn log_self_test(moment: TestMoment, result: hid_input::sink::SelfTest) {
+    use hid_input::sink::SelfTest;
+    let when = if moment == TestMoment::Enable { "after turning on" } else { "at start" };
+    match result {
+        SelfTest::Passed { windows_saw } => tracing::info!(
+            "keyboards and mice: self-test {when} passed (Windows registered input: {})",
+            match windows_saw {
+                Some(true) => "yes",
+                Some(false) => "no",
+                None => "not checked",
+            }
+        ),
+        SelfTest::NotTested => tracing::info!("keyboards and mice: self-test {when}: nothing goes to Windows"),
+        SelfTest::Failed(f) => tracing::warn!(
+            "keyboards and mice: self-test {when} failed ({}){}",
+            check::failure_str(f),
+            if check::turns_off(moment, result) { ", turning the feature off again" } else { "" }
+        ),
     }
 }
 
@@ -544,6 +862,96 @@ impl Service {
         self.inner.hid.helper.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|s| (s.started(), s.connected()))
     }
 
+    /// The command line connects devices as hid.add does with a countdown
+    /// of `window` (--hid-confirm, for the emulator test): a device whose
+    /// input does not reach Windows in time is removed from the list
+    pub fn set_hid_confirm_window(&self, window: Duration) {
+        *self.inner.hid.cli_window.lock().unwrap_or_else(|e| e.into_inner()) = Some(window);
+    }
+
+    /// The devices being added, until their input reaches Windows
+    pub fn hid_checks(&self) -> Vec<HidCheckView> {
+        let now = Instant::now();
+        self.inner
+            .hid
+            .checks
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .map(|c| HidCheckView {
+                address: c.address.clone(),
+                name: c.name.clone(),
+                kind: c.kind(),
+                waiting: c.waiting(),
+                remaining: c.remaining(now),
+                window: c.window(),
+            })
+            .collect()
+    }
+
+    /// The device removed again last, until the user adds one again or
+    /// dismisses the notice
+    pub fn hid_rolled_back(&self) -> Option<HidRolledBack> {
+        self.inner.hid.rolled_back.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// The user does not want the device being added after all: removed
+    /// now, as when its countdown ends. Only a device under check; false
+    /// when `address` is none.
+    pub fn hid_check_cancel(&self, address: &str) -> bool {
+        let c = {
+            let mut checks = self.inner.hid.checks.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(i) = checks.iter().position(|c| c.address.eq_ignore_ascii_case(address)) else { return false };
+            checks.remove(i)
+        };
+        self.inner.hid_roll_back(&c, Reason::Cancelled);
+        true
+    }
+
+    /// The notice of a device removed again goes away
+    pub fn hid_check_dismiss(&self) {
+        if self.inner.hid.rolled_back.lock().unwrap_or_else(|e| e.into_inner()).take().is_some() {
+            self.inner.send_event(ServiceEvent::HidCheck);
+        }
+    }
+
+    /// The last self-test's result; None: none ran yet
+    pub fn hid_health(&self) -> Option<Health> {
+        *self.inner.hid.health.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The self-test right after hid.enable turned the feature on: waits
+    /// for a stack with keyboards and mice, then passes the test input the
+    /// way their input goes. Err: it failed, and the caller turns the
+    /// feature off again (as hid.disable does). Without such a stack in
+    /// time (a stream keeps the old one), the test runs when one starts and
+    /// only warns then.
+    pub fn hid_self_test_enable(&self) -> Result<(), Msg> {
+        let until = Instant::now() + SELF_TEST_STACK_WAIT;
+        let host = loop {
+            match self.host().filter(|h| h.hid_enabled()) {
+                Some(h) => break Some(h),
+                None if Instant::now() >= until => break None,
+                None => std::thread::sleep(Duration::from_millis(100)),
+            }
+        };
+        let Some(sink) = host.and_then(|h| h.hid_sink()) else {
+            tracing::info!("keyboards and mice: no stack for them yet, the self-test runs when one starts");
+            self.inner.hid.start_tested.store(false, Ordering::Release);
+            return Ok(());
+        };
+        self.inner.hid.start_tested.store(true, Ordering::Release);
+        let result = sink.self_test(SELF_TEST_WAIT);
+        log_self_test(TestMoment::Enable, result);
+        self.inner.hid_set_health(Health::from(result));
+        match result {
+            hid_input::sink::SelfTest::Failed(f) if check::turns_off(TestMoment::Enable, result) => {
+                Err(Msg::new(check::enable_failure_key(f)))
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// A new code the user has to type to turn the feature on; the one
     /// before it no longer counts
     pub fn hid_code(&self) -> String {
@@ -567,6 +975,9 @@ impl Service {
         match handed {
             Some((c, at)) if at.elapsed() <= CODE_VALID && c == code.trim() => {
                 tracing::warn!("keyboards and mice through BlueCaster: confirmed by the user, turning on");
+                // hid.enable's own self-test follows: the one of a stack
+                // start would only run beside it
+                self.inner.hid.start_tested.store(true, Ordering::Release);
                 Ok(())
             }
             _ => Err(Msg::new("error.hid.wrong_code")),
@@ -603,6 +1014,7 @@ impl Service {
         let address = address.to_uppercase();
         let entry = Entry { address: address.clone(), name: name.to_string(), le };
         let full = list.len() >= MAX_DEVICES;
+        let new = !list.iter().any(|e| e.address == address);
         match list.iter_mut().find(|e| e.address == address) {
             // Added again: as what it is now (classic or LE)
             Some(e) if e.le != le => *e = entry.clone(),
@@ -619,7 +1031,23 @@ impl Service {
             if le.is_some() { "LE" } else { "classic" }
         );
         self.inner.send_event(ServiceEvent::HidDevices);
-        self.hid_connect_entry(&entry, true)
+        // A new device stays only when its input reaches Windows (one added
+        // again was confirmed before)
+        if new {
+            self.inner.hid_check_begin(&entry, false, WINDOW);
+        }
+        let r = self.hid_connect_entry(&entry, true);
+        if r.is_err() && new {
+            // Not connected at all: removed now, as hid.add failed
+            let c =
+                self.inner.hid.checks.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|c| c.address == address);
+            if c {
+                self.inner.hid_remove_entry(&address);
+                check::mark_unconfirmed(self.config_dir(), &address, false);
+                self.inner.send_event(ServiceEvent::HidCheck);
+            }
+        }
+        r
     }
 
     /// Connects a keyboard or mouse on the list (or given on the command
@@ -701,7 +1129,13 @@ impl Service {
             return Err(Msg::new("error.hid.off"));
         }
         match self.inner.hid_list().into_iter().find(|e| e.address.eq_ignore_ascii_case(address)) {
-            Some(e) => self.hid_connect_entry(&e, true),
+            Some(e) => {
+                let window = *self.inner.hid.cli_window.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(w) = window {
+                    self.inner.hid_check_begin(&e, true, w);
+                }
+                self.hid_connect_entry(&e, true)
+            }
             None => Err(Msg::new("error.hid.connect_failed")),
         }
     }
@@ -720,40 +1154,9 @@ impl Service {
     /// Removes a keyboard or mouse: disconnected, off the list, its pairing
     /// forgotten
     pub fn hid_remove(&self, address: &str) {
-        let mut list = load(self.config_dir());
-        let removed: Vec<Entry> = list.iter().filter(|e| e.address.eq_ignore_ascii_case(address)).cloned().collect();
-        list.retain(|e| !e.address.eq_ignore_ascii_case(address));
-        if let Err(e) = save(self.config_dir(), &list) {
-            tracing::warn!("keyboards and mice: the list was not saved ({e})");
-        }
-        if let Some(host) = self.host().filter(|h| h.hid_enabled()) {
-            let (classic, le) = addresses(&self.inner.hid_list());
-            host.hid_set_devices(classic, le);
-        }
-        if let Some(addr) = bt_host::parse_addr(address) {
-            self.inner.hid.connected.lock().unwrap_or_else(|e| e.into_inner()).retain(|&a| a != addr);
-            bt_host::hid::forget_descriptors(&descriptors_dir(self.config_dir()), &addr);
-            let dir = self.config_dir();
-            if removed.iter().any(|e| e.le.is_some()) {
-                // Its LE bond, unless LE Audio headphones of that address
-                // are saved (as Service::forget_device does)
-                if !crate::devices::load_le(dir).iter().any(|d| d.address.eq_ignore_ascii_case(address))
-                    && !self.host().is_some_and(|h| h.forget_le_bond(addr))
-                {
-                    match bt_host::le_bond_file::forget(&crate::paths::le_bonds_file(dir), &addr) {
-                        Ok(n) => tracing::debug!("keyboards and mice: {n} LE bond(s) removed from the file"),
-                        Err(e) => {
-                            tracing::warn!("keyboards and mice: the LE bonds file cannot be changed ({})", e.kind())
-                        }
-                    }
-                }
-            } else if !crate::devices::load(dir).iter().any(|d| d.address.eq_ignore_ascii_case(address)) {
-                // Unless headphones of the same address are saved too
-                self.forget_link_key_only(addr);
-            }
-        }
-        tracing::info!("keyboards and mice: one removed, {} left", list.len());
-        self.inner.send_event(ServiceEvent::HidDevices);
+        self.inner.hid_remove_entry(address);
+        check::mark_unconfirmed(self.config_dir(), &address.to_uppercase(), false);
+        self.inner.send_event(ServiceEvent::HidCheck);
     }
 
     /// Counts of the running stack's HID host; None while it has none
@@ -805,6 +1208,31 @@ impl Service {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A core that stopped during a countdown: at its next start the
+    /// device added and never confirmed is removed, the others stay
+    #[test]
+    fn a_restart_removes_a_device_added_and_never_confirmed() {
+        let dir = std::env::temp_dir().join(format!("bc-hid-restart-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let entry = |a: &str| Entry { address: a.to_string(), name: "K".into(), le: None };
+        save(&dir, &[entry("00:11:22:33:44:55"), entry("00:11:22:33:44:66")]).unwrap();
+        check::mark_unconfirmed(&dir, "00:11:22:33:44:66", true);
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let options = crate::ServiceOptions {
+            config_dir: dir.clone(),
+            hci_tcp: None,
+            capture: bt_host::HciCapture::new(),
+            afh: None,
+            usb: Default::default(),
+        };
+        let service = Service::new(options, tx);
+        assert_eq!(load(&dir), [entry("00:11:22:33:44:55")]);
+        assert!(check::load_unconfirmed(&dir).is_empty());
+        assert!(service.hid_checks().is_empty());
+        drop(service);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn codes_are_six_digits() {

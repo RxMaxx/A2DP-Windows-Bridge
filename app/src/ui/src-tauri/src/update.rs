@@ -17,11 +17,13 @@
 //! copy (no unins000.exe next to it) and builds without a key show the
 //! release page instead (Phase::Unavailable).
 //!
-//! Neither does a UI connected to a core that runs as a Windows service
-//! ([`SERVICE`]): `app.quit_for_update` is refused there (Windows starts
-//! and stops the service), step 3 would wait for a core that never exits,
-//! and a per-user installer cannot replace a service's program. The
-//! all-users installer brings its own update path.
+//! A window connected to the service add-on updates the user's own install
+//! as well: the service runs its own copy of the core from Program Files,
+//! so nothing of the user's install is in use but this program. The
+//! service refuses `app.quit_for_update` (Windows starts and stops it):
+//! there is no core of the user's to wait for, and this process just
+//! closes for the installer. The next start finds the service at the old
+//! version and offers its update (service.rs).
 
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -39,8 +41,6 @@ const MANIFEST_PREFIX: &str = "https://github.com/SeiyaFunaokaJP/BlueCaster/rele
 const RETRY_INTERVAL: Duration = Duration::from_secs(3);
 /// Stopping a stream and resetting the adapter takes a few seconds
 const CORE_EXIT_TIMEOUT: Duration = Duration::from_secs(20);
-/// Phase::Unavailable's reason while the core runs as a service
-pub const SERVICE: &str = "service";
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -133,9 +133,6 @@ impl Updates {
 /// Ok also when one is already under way.
 pub fn start(app: &AppHandle, manifest_url: String) -> Result<(), String> {
     let updates = app.state::<Arc<Updates>>().inner().clone();
-    if app.state::<Arc<Ipc>>().service() {
-        return Err(format!("no in-app update ({SERVICE})"));
-    }
     match updates.phase() {
         Phase::Unavailable { reason } => return Err(format!("no in-app update ({reason})")),
         Phase::Downloading { .. } | Phase::Waiting { .. } | Phase::Installing { .. } => return Ok(()),
@@ -221,8 +218,9 @@ async fn install(app: &AppHandle, updates: &Updates, ipc: &Ipc) -> Result<bool, 
             ipc.set_updating(false);
             return Ok(true);
         }
-        // The core became a service meanwhile: it does not exit
-        Err(e) if e.code == ipc::access::NOT_IN_SERVICE => return Err(("update.service", e.code)),
+        // The service add-on's core: it stays, and its files are not the
+        // installer's. Streaming does not stop for this either.
+        Err(e) if e.code == ipc::access::NOT_IN_SERVICE => {}
         // Not running (or gone while answering): nothing to stop
         Err(e) if e.code.starts_with("ipc.") => {}
         Err(e) => return Err(("update.core", e.code)),

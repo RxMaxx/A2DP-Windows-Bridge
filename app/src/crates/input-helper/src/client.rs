@@ -32,13 +32,14 @@ use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use hid_input::sink::{HidCounters, InputSink};
+use hid_input::sink::{Delivery, DeliveryLog, HidCounters, InputSink, SELF_TEST_INPUT};
+pub use hid_input::sink::{SelfTest, SelfTestFailure};
 use tokio::io::AsyncWriteExt;
 use win_sys::input_inject::Inject;
 
 use crate::helper::{HELPER_ARG, PIPE_PREFIX, RECORD_ARG};
 use crate::protocol::{self, DesktopState, ToCore, ToHelper};
-use crate::queue::{SendQueue, UNCONFIRMED_MAX};
+use crate::queue::{Origin, SendQueue, UNCONFIRMED_MAX};
 
 /// How long the helper may take to connect and say hello
 const CONNECT_WAIT: Duration = Duration::from_secs(10);
@@ -122,6 +123,28 @@ pub struct HelperConfig {
 
 /// Called when the user pressed Ctrl+Alt+Del on a keyboard of ours
 pub type SasFn = Box<dyn Fn() + Send + Sync>;
+/// Called with the self-test of each helper after the first one (a new
+/// session, a helper that died)
+pub type TestedFn = Box<dyn Fn(SelfTest) + Send + Sync>;
+
+/// How long a self-test waits for Windows' last input after the helper
+/// took the test input
+const SEEN_WAIT: Duration = Duration::from_millis(400);
+/// How long the self-test of a new helper waits
+const NEW_HELPER_TEST_WAIT: Duration = Duration::from_secs(5);
+
+/// The self-test running now (one at a time)
+#[derive(Default)]
+struct TestSlot {
+    /// The test input is queued, its ack awaited
+    waiting: bool,
+    /// Its outcome: Windows took it (true) or refused it
+    taken: Option<bool>,
+    /// The ack's item count that covered it
+    seq: u64,
+    /// Windows registered input after it
+    seen: bool,
+}
 
 struct Queued {
     queue: SendQueue,
@@ -143,6 +166,20 @@ struct Shared {
     /// The queue overflowed once (logged once)
     overflow_logged: AtomicBool,
     on_sas: Mutex<Option<SasFn>>,
+    on_tested: Mutex<Option<TestedFn>>,
+    /// Helpers that connected, in all
+    connections: AtomicU64,
+    /// When each device's input was confirmed by a helper
+    log: DeliveryLog,
+    /// The helper records instead of injecting: Windows is never asked
+    record: bool,
+    /// The ack's item count when each device's input was confirmed last
+    /// (this connection's numbers), for `ToCore::Seen`
+    seqs: Mutex<std::collections::HashMap<[u8; 6], u64>>,
+    test: Mutex<TestSlot>,
+    test_done: std::sync::Condvar,
+    /// Held for the whole of a self-test
+    test_running: Mutex<()>,
 }
 
 impl Shared {
@@ -154,6 +191,87 @@ impl Shared {
         if let Some(c) = self.queue().counters.clone() {
             f(&c);
         }
+    }
+
+    fn slot(&self) -> std::sync::MutexGuard<'_, TestSlot> {
+        self.test.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The helper confirmed items up to `processed`, of `origins`, with
+    /// `blocked` refused among them
+    fn confirmed(&self, origins: &[Origin], processed: u64, blocked: u32) {
+        for o in origins {
+            match o {
+                Origin::Device(d) if blocked == 0 => {
+                    self.log.record(*d, None, (!self.record).then_some(false));
+                    self.seqs.lock().unwrap_or_else(|e| e.into_inner()).insert(*d, processed);
+                }
+                Origin::SelfTest => {
+                    let mut t = self.slot();
+                    if t.waiting && t.taken.is_none() {
+                        t.taken = Some(blocked == 0);
+                        t.seq = processed;
+                        self.test_done.notify_all();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Windows registered input after items up to `processed`
+    fn seen(&self, processed: u64) {
+        for (d, _) in self.seqs.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|(_, s)| **s <= processed) {
+            self.log.saw(d);
+        }
+        let mut t = self.slot();
+        if t.taken == Some(true) && t.seq <= processed {
+            t.seen = true;
+            self.test_done.notify_all();
+        }
+    }
+
+    /// See `InputSink::self_test`; the sender thread must run
+    fn self_test(&self, wait: Duration) -> SelfTest {
+        let _one = self.test_running.lock().unwrap_or_else(|e| e.into_inner());
+        let until = Instant::now() + wait;
+        while !self.connected.load(Ordering::Acquire) {
+            if Instant::now() >= until || self.stop.load(Ordering::Acquire) {
+                return SelfTest::Failed(SelfTestFailure::HelperNotStarted);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        *self.slot() = TestSlot { waiting: true, ..TestSlot::default() };
+        if self.queue().queue.push_from(Origin::SelfTest, &[SELF_TEST_INPUT]).dropped > 0 {
+            *self.slot() = TestSlot::default();
+            return SelfTest::Failed(SelfTestFailure::HelperNotStarted);
+        }
+        self.wake.notify_one();
+        let mut t = self.slot();
+        while t.taken.is_none() {
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                *t = TestSlot::default();
+                return SelfTest::Failed(SelfTestFailure::TimedOut);
+            }
+            t = self.test_done.wait_timeout(t, left).unwrap_or_else(|e| e.into_inner()).0;
+        }
+        if t.taken == Some(false) {
+            *t = TestSlot::default();
+            return SelfTest::Failed(SelfTestFailure::Refused);
+        }
+        let windows_saw = if self.record {
+            None
+        } else {
+            let seen_until = Instant::now() + SEEN_WAIT;
+            while !t.seen && Instant::now() < seen_until {
+                let left = seen_until.saturating_duration_since(Instant::now());
+                t = self.test_done.wait_timeout(t, left).unwrap_or_else(|e| e.into_inner()).0;
+            }
+            Some(t.seen)
+        };
+        *t = TestSlot::default();
+        SelfTest::Passed { windows_saw }
     }
 }
 
@@ -186,6 +304,14 @@ impl HelperSink {
                 pid: AtomicU32::new(0),
                 overflow_logged: AtomicBool::new(false),
                 on_sas: Mutex::new(None),
+                on_tested: Mutex::new(None),
+                connections: AtomicU64::new(0),
+                log: DeliveryLog::default(),
+                record: config.record.is_some(),
+                seqs: Mutex::default(),
+                test: Mutex::default(),
+                test_done: std::sync::Condvar::new(),
+                test_running: Mutex::new(()),
             }),
             config,
             launcher,
@@ -196,6 +322,11 @@ impl HelperSink {
     /// What to do when the user presses Ctrl+Alt+Del
     pub fn on_sas(&self, f: SasFn) {
         *self.shared.on_sas.lock().unwrap_or_else(|e| e.into_inner()) = Some(f);
+    }
+
+    /// What to do with the self-test of each helper after the first
+    pub fn on_tested(&self, f: TestedFn) {
+        *self.shared.on_tested.lock().unwrap_or_else(|e| e.into_inner()) = Some(f);
     }
 
     /// A helper is connected and takes input
@@ -249,13 +380,14 @@ impl HelperSink {
 }
 
 impl InputSink for HelperSink {
-    fn pass(&self, injects: &[Inject], counters: &Arc<HidCounters>) {
+    fn pass(&self, from: Option<[u8; 6]>, injects: &[Inject], counters: &Arc<HidCounters>) {
+        let origin = from.map_or(Origin::None, Origin::Device);
         let pushed = {
             let mut q = self.shared.queue();
             if !q.counters.as_ref().is_some_and(|c| Arc::ptr_eq(c, counters)) {
                 q.counters = Some(counters.clone());
             }
-            q.queue.push(injects)
+            q.queue.push_from(origin, injects)
         };
         if pushed.dropped > 0 {
             counters.dropped.fetch_add(pushed.dropped, Ordering::Relaxed);
@@ -274,6 +406,21 @@ impl InputSink for HelperSink {
     fn release_all(&self) {
         self.shared.queue().queue.push_release_all();
         self.shared.wake.notify_one();
+    }
+
+    /// When a helper confirmed a batch with input of `device` and nothing
+    /// refused in it (its ack); `windows_saw` from the helper's
+    /// [`ToCore::Seen`] (None in record mode)
+    fn delivered(&self, device: &[u8; 6]) -> Option<Delivery> {
+        self.shared.log.get(device, &|_| None)
+    }
+
+    /// The test input through the queue, the pipe and the helper: fails
+    /// when no helper connects within `wait` (HelperNotStarted), when the
+    /// helper's ack says Windows refused it, or when no ack comes in time
+    fn self_test(&self, wait: Duration) -> SelfTest {
+        self.start();
+        self.shared.self_test(wait)
     }
 }
 
@@ -406,7 +553,23 @@ async fn connect_and_serve(
         _ => return Err(End::Failed("its hello was wrong")),
     }
     let released = shared.queue().queue.connect();
+    shared.seqs.lock().unwrap_or_else(|e| e.into_inner()).clear();
     shared.connected.store(true, Ordering::Release);
+    // Every helper after the first is tested by itself (the core tests the
+    // first one): a warning only, never a reason to stop
+    if shared.connections.fetch_add(1, Ordering::AcqRel) > 0 {
+        let s = shared.clone();
+        let _ = std::thread::Builder::new().name("input-helper-test".into()).spawn(move || {
+            let result = s.self_test(NEW_HELPER_TEST_WAIT);
+            tracing::info!(
+                "input helper: the new helper's self-test {}",
+                if result.failed() { "failed" } else { "passed" }
+            );
+            if let Some(f) = s.on_tested.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+                f(result);
+            }
+        });
+    }
     // The releases go out at once
     shared.wake.notify_one();
     tracing::info!(
@@ -511,14 +674,15 @@ fn on_message(shared: &Shared, msg: ToCore, waiting_since: &mut Option<Instant>)
     match msg {
         ToCore::Hello { .. } => return Err(End::Failed("it said hello twice")),
         ToCore::Ack { processed, injected, blocked } => {
-            let (ok, counters, left) = {
+            let (origins, counters, left) = {
                 let mut q = shared.queue();
-                let ok = q.queue.ack(processed);
-                (ok, q.counters.clone(), q.queue.unconfirmed())
+                let origins = q.queue.ack_items(processed);
+                (origins, q.counters.clone(), q.queue.unconfirmed())
             };
-            if !ok {
+            let Some(origins) = origins else {
                 return Err(End::Failed("it confirmed more than it was sent"));
-            }
+            };
+            shared.confirmed(&origins, processed, blocked);
             *waiting_since = (left > 0).then(Instant::now);
             if let Some(c) = counters {
                 c.injected.fetch_add(u64::from(injected), Ordering::Relaxed);
@@ -527,6 +691,7 @@ fn on_message(shared: &Shared, msg: ToCore, waiting_since: &mut Option<Instant>)
                 }
             }
         }
+        ToCore::Seen { processed } => shared.seen(processed),
         ToCore::LockKeys(mask) => {
             shared.lock_keys.store(0x100 | u16::from(mask), Ordering::Release);
             tracing::debug!("input helper: lock keys changed");
@@ -571,10 +736,13 @@ mod tests {
         let c = Arc::new(HidCounters::default());
         let t = Instant::now();
         for _ in 0..1000 {
-            sink.pass(&[Inject::Key { scan: 0x1E, extended: false, up: false }], &c);
+            sink.pass(Some([1; 6]), &[Inject::Key { scan: 0x1E, extended: false, up: false }], &c);
         }
         assert!(t.elapsed() < Duration::from_secs(1));
         assert_eq!(c.dropped.load(Ordering::Relaxed), 1000);
+        // Dropped input is nobody's delivery; no helper fails the self-test
+        assert_eq!(sink.delivered(&[1; 6]), None);
+        assert_eq!(sink.self_test(Duration::from_millis(200)), SelfTest::Failed(SelfTestFailure::HelperNotStarted));
         assert_eq!(sink.lock_keys(), None);
         assert!(!sink.connected());
         sink.stop();

@@ -512,7 +512,13 @@ mod tests {
         }
         // A process without audio: the capture delivers only silence fill,
         // and ends once the process is gone
-        let mut child = std::process::Command::new("cmd").args(["/C", "ping -n 2 127.0.0.1 >NUL"]).spawn().unwrap();
+        // CREATE_NO_WINDOW: no terminal window pops up on the desktop
+        let mut child = std::os::windows::process::CommandExt::creation_flags(
+            std::process::Command::new("cmd").args(["/C", "ping -n 2 127.0.0.1 >NUL"]),
+            0x0800_0000,
+        )
+        .spawn()
+        .unwrap();
         let opts = CaptureOptions { preferred_rate: Some(44_100), fill_silence: true };
         let cap = Capture::open(&Source::Application { process_id: child.id() }, &opts).unwrap();
         assert_eq!(cap.format(), Format { sample_rate: 44_100, channels: 2, sample_format: SampleFormat::F32 });

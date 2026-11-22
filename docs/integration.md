@@ -32,6 +32,20 @@ The core (`bluecaster-core.exe`) runs whenever BlueCaster runs, with or without 
 - To check whether the core is running, look for the pipe, not the core's mutex: if the pipe does not exist, the core is not running.
 - Development builds started with `BLUECASTER_INSTANCE=<name>` listen on `\\.\pipe\bluecaster-<SID>-<name>` instead, so they can run alongside the installed version.
 
+### The service pipe
+
+The BlueCaster service is a developer-mode prototype that lets Bluetooth keyboards and mice work on the sign-in screen. On a PC with the service installed, the core runs as a Windows service. The per-user pipe does not exist then; instead, the core serves one pipe for all users:
+
+```
+\\.\pipe\bluecaster-service
+```
+
+- Try `bluecaster-<user SID>` first, then `bluecaster-service`. The service serves no pipe under the old name. Frames, the handshake and requests are the same on both pipes.
+- Open the pipe with `GENERIC_READ | FILE_WRITE_DATA` only (add `FILE_WRITE_ATTRIBUTES` to change the pipe's mode). The pipe refuses clients that ask for `GENERIC_WRITE`, because that access includes creating another instance of the pipe (`FILE_CREATE_PIPE_INSTANCE`). Python's `open(..., "r+b")` asks for `GENERIC_WRITE`, so use `CreateFileW` instead (for example through `ctypes`).
+- To check that the server really is BlueCaster, compare the pipe's server process ID (`GetNamedPipeServerProcessId`) with the process ID of the `BlueCaster` service (`QueryServiceStatusEx`). While the service is stopped, another program could create a pipe with that name.
+- Requests that change the whole PC, such as developer mode, adapter drivers or adding keyboards and mice, return the error `ipc.needs_admin`. A tool cannot grant administrator approval. Ask the user to make the change in the BlueCaster window instead; the window asks Windows for approval.
+- Some requests return `ipc.not_in_service` when the core runs as a service. `app.quit` is one of them, because the service must keep running for keyboards and mice. Use `app.close` instead: it stops streaming and closes the BlueCaster window and tray icon.
+
 ### Frames
 
 Every message in both directions is one frame: the length of the JSON as a **u32 little-endian**, then the JSON (UTF-8). Frames over 4 MiB are refused.

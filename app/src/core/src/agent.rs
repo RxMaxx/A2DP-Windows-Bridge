@@ -52,6 +52,28 @@ pub(crate) fn session_source(own_session: u32, test_file: Option<std::path::Path
     }
 }
 
+/// The real service: a core in session 0 that is not a test instance
+pub(crate) fn real_service(core_session: u32) -> bool {
+    core_session == 0 && !ipc::service_state::test_instance()
+}
+
+/// The program the hub starts as the agent and requires of it
+/// (session_host's `authorize`): this program, which for the real service
+/// must be the service folder's core. A service registered with another
+/// program (the stage 4 install in the user's folder) gets no agent.
+pub(crate) fn agent_program(
+    exe: &std::path::Path,
+    service_core: Option<&std::path::Path>,
+    real_service: bool,
+) -> Result<(), String> {
+    let required = win_sys::service_files::required_core(exe, service_core, real_service)?;
+    if win_sys::service_files::same_path(required, exe) {
+        Ok(())
+    } else {
+        Err("session agent: the service does not run from the service folder".into())
+    }
+}
+
 pub fn run(args: &[String]) -> i32 {
     let log = crate::logging::init(&crate::logging::LogOptions { console: true, agent: true, ..Default::default() });
     let (mut child, mut test_shell, mut service) = (false, false, false);
@@ -119,6 +141,11 @@ pub fn use_agent_with(extra: &[&str]) -> Result<(), String> {
     }
     args.extend(extra.iter().map(|a| a.to_string()));
     let core_session = win_sys::pipe::process_session_id(std::process::id()).unwrap_or(0);
+    // The real service (session 0, not a test instance) runs only from the
+    // service folder, and its agent is that folder's core
+    if service {
+        agent_program(&exe, ipc::service_state::service_core().as_deref(), real_service(core_session))?;
+    }
     // Service mode: only the process the hub started, from our own
     // program, in the session it was started in
     let agent_check = service.then(|| session_host::AgentCheck { exe: exe.clone(), core_session });
@@ -151,6 +178,20 @@ mod tests {
         } else {
             assert_eq!(with_file, SessionSource::Own(2));
         }
+    }
+
+    #[test]
+    fn the_real_services_agent_is_the_service_folders_core() {
+        use std::path::Path;
+        let svc = Path::new(r"C:\Program Files\BlueCaster Service\bluecaster-core.exe");
+        let user = Path::new(r"C:\Users\u\AppData\Local\BlueCaster\bluecaster-core.exe");
+        assert_eq!(agent_program(svc, Some(svc), true), Ok(()));
+        assert!(agent_program(user, Some(svc), true).is_err(), "the stage 4 install in the user's folder");
+        assert!(agent_program(svc, None, true).is_err());
+        // A test instance or a core run by hand: its own program
+        assert_eq!(agent_program(user, Some(svc), false), Ok(()));
+        // Not session 0: never the real service
+        assert!(!real_service(2));
     }
 
     /// Only the test instance and folders go to a service's agent, and

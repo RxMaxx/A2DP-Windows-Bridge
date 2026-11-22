@@ -12,7 +12,7 @@
 use win_sys::input_inject::{Inject, MouseButton};
 
 /// Raised whenever a frame changes meaning
-pub const VERSION: u16 = 1;
+pub const VERSION: u16 = 2;
 
 /// At most this many records in one [`ToHelper::Inject`]
 pub const MAX_RECORDS: usize = 64;
@@ -35,6 +35,7 @@ const K_ACK: u8 = 0x82;
 const K_LOCK_KEYS: u8 = 0x83;
 const K_SAS: u8 = 0x84;
 const K_DESKTOP: u8 = 0x85;
+const K_SEEN: u8 = 0x86;
 
 const T_KEY: u8 = 1;
 const T_VK: u8 = 2;
@@ -85,6 +86,10 @@ pub enum ToCore {
     Sas,
     /// The helper follows another desktop now
     Desktop(DesktopState),
+    /// Windows registered input in the helper's session (GetLastInputInfo)
+    /// after every item up to `processed` was injected: a hint, sent only
+    /// by a helper that really injects
+    Seen { processed: u64 },
 }
 
 /// Why a frame was refused
@@ -260,6 +265,10 @@ pub fn encode_to_core(m: &ToCore) -> Vec<u8> {
             body.extend(blocked.to_le_bytes());
         }
         ToCore::LockKeys(mask) => body.extend([K_LOCK_KEYS, mask & hid_input::leds::ALL]),
+        ToCore::Seen { processed } => {
+            body.push(K_SEEN);
+            body.extend(processed.to_le_bytes());
+        }
         ToCore::Sas => body.push(K_SAS),
         ToCore::Desktop(d) => body.extend([
             K_DESKTOP,
@@ -300,6 +309,12 @@ pub fn decode_to_core(body: &[u8]) -> Result<ToCore, ProtocolError> {
             Ok(ToCore::LockKeys(body[1]))
         }
         K_SAS => len(1).map(|_| ToCore::Sas),
+        K_SEEN => {
+            len(9)?;
+            let mut p = [0u8; 8];
+            p.copy_from_slice(&body[1..9]);
+            Ok(ToCore::Seen { processed: u64::from_le_bytes(p) })
+        }
         K_DESKTOP => {
             len(2)?;
             Ok(ToCore::Desktop(match body[1] {
@@ -367,6 +382,7 @@ mod tests {
             ToCore::Sas,
             ToCore::Desktop(DesktopState::Secure),
             ToCore::Desktop(DesktopState::Unavailable),
+            ToCore::Seen { processed: 77 },
         ] {
             assert_eq!(decode_to_core(body(&encode_to_core(&m))), Ok(m));
         }
@@ -424,6 +440,7 @@ mod tests {
         assert_eq!(decode_to_core(&[K_LOCK_KEYS, 8]), Err(ProtocolError::Record));
         assert_eq!(decode_to_core(&[K_DESKTOP, 3]), Err(ProtocolError::Record));
         assert_eq!(decode_to_core(&[K_ACK, 0]), Err(ProtocolError::Length));
+        assert_eq!(decode_to_core(&[K_SEEN, 0, 0]), Err(ProtocolError::Length));
         assert_eq!(decode_to_core(&[K_INJECT, 1]), Err(ProtocolError::Kind));
     }
 

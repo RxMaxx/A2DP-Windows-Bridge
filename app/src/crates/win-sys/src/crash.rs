@@ -255,13 +255,17 @@ mod tests {
     fn an_invalid_parameter_writes_a_report() {
         let dir = std::env::temp_dir().join(format!("bluecaster-invalid-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let status = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "crash::tests::invalid_parameter_child", "--ignored", "--nocapture"])
-            .env("BLUECASTER_CRASH_TEST_DIR", &dir)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .unwrap();
+        // The test program is a console program: no terminal window
+        let status = std::os::windows::process::CommandExt::creation_flags(
+            &mut std::process::Command::new(std::env::current_exe().unwrap()),
+            0x0800_0000,
+        )
+        .args(["--exact", "crash::tests::invalid_parameter_child", "--ignored", "--nocapture"])
+        .env("BLUECASTER_CRASH_TEST_DIR", &dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap();
         let texts: Vec<String> = std::fs::read_dir(&dir)
             .map(|e| {
                 e.flatten()

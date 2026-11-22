@@ -35,10 +35,21 @@ pub const CAPACITY: usize = 256;
 /// confirms is treated as hung
 pub const UNCONFIRMED_MAX: usize = 4096;
 
+/// Where a queued input came from
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Origin {
+    /// Not the user's input (releases)
+    None,
+    /// A report of this keyboard or mouse
+    Device([u8; 6]),
+    /// The sink's self-test
+    SelfTest,
+}
+
 /// One queued item
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Item {
-    Input(Inject),
+    Input(Inject, Origin),
     ReleaseAll,
 }
 
@@ -107,8 +118,14 @@ impl SendQueue {
         self.sent.len()
     }
 
-    /// Queues `injects` in order (from the BTstack thread)
+    /// Queues `injects` in order (from the BTstack thread), as no one's
     pub fn push(&mut self, injects: &[Inject]) -> Pushed {
+        self.push_from(Origin::None, injects)
+    }
+
+    /// Queues `injects` of `origin` in order. Motions of different origins
+    /// are never merged, so that each input is confirmed as its origin's.
+    pub fn push_from(&mut self, origin: Origin, injects: &[Inject]) -> Pushed {
         let mut out = Pushed::default();
         if !self.connected {
             out.dropped = injects.len() as u64;
@@ -120,7 +137,8 @@ impl SendQueue {
                 continue;
             };
             if is_motion(&i)
-                && let Some(Item::Input(last)) = self.items.back_mut()
+                && let Some(Item::Input(last, o)) = self.items.back_mut()
+                && *o == origin
                 && let Some(m) = merge(*last, i)
             {
                 *last = m;
@@ -128,7 +146,7 @@ impl SendQueue {
                 continue;
             }
             if self.items.len() >= CAPACITY {
-                match self.items.iter().position(|q| matches!(q, Item::Input(m) if is_motion(m))) {
+                match self.items.iter().position(|q| matches!(q, Item::Input(m, _) if is_motion(m))) {
                     Some(at) => {
                         self.items.remove(at);
                         out.dropped += 1;
@@ -142,14 +160,14 @@ impl SendQueue {
                         // everything takes their place (what the helper
                         // holds stays in possibly_held until the release is
                         // confirmed; the downs dropped never reach anyone)
-                        out.dropped += self.items.iter().filter(|q| matches!(q, Item::Input(_))).count() as u64;
+                        out.dropped += self.items.iter().filter(|q| matches!(q, Item::Input(..))).count() as u64;
                         self.items.clear();
                         self.items.push_back(Item::ReleaseAll);
                         out.overflowed = true;
                     }
                 }
             }
-            self.items.push_back(Item::Input(i));
+            self.items.push_back(Item::Input(i, origin));
         }
         out
     }
@@ -172,10 +190,10 @@ impl SendQueue {
         }
         let mut batch = Vec::with_capacity(MAX_RECORDS);
         while batch.len() < MAX_RECORDS
-            && let Some(Item::Input(i)) = self.items.front().copied()
+            && let Some(Item::Input(i, o)) = self.items.front().copied()
         {
             self.items.pop_front();
-            self.mark_sent(Item::Input(i));
+            self.mark_sent(Item::Input(i, o));
             batch.push(i);
         }
         Some(ToHelper::Inject(batch))
@@ -189,19 +207,29 @@ impl SendQueue {
     /// The helper confirmed every item up to `processed`. False: it
     /// confirmed more than was written (a protocol violation).
     pub fn ack(&mut self, processed: u64) -> bool {
+        self.ack_items(processed).is_some()
+    }
+
+    /// As [`SendQueue::ack`]; the origins of the inputs confirmed now, each
+    /// once, in order. None: a protocol violation.
+    pub fn ack_items(&mut self, processed: u64) -> Option<Vec<Origin>> {
         if processed > self.next {
-            return false;
+            return None;
         }
+        let mut origins = Vec::new();
         while self.sent.front().is_some_and(|(n, _)| *n <= processed) {
             let Some((_, item)) = self.sent.pop_front() else { break };
             match item {
-                Item::Input(i) => {
+                Item::Input(i, o) => {
                     self.confirmed.apply(&[i]);
+                    if !origins.contains(&o) {
+                        origins.push(o);
+                    }
                 }
                 Item::ReleaseAll => self.confirmed = HeldSet::default(),
             }
         }
-        true
+        Some(origins)
     }
 
     /// What may be held in Windows right now: what was confirmed held,
@@ -211,7 +239,7 @@ impl SendQueue {
         let mut held = self.confirmed.clone();
         let pending = self.sent.iter().map(|(_, i)| i).chain(&self.items);
         let downs: Vec<Inject> =
-            pending.filter_map(|i| if let Item::Input(d) = i { Some(*d) } else { None }).filter(is_down).collect();
+            pending.filter_map(|i| if let Item::Input(d, _) = i { Some(*d) } else { None }).filter(is_down).collect();
         held.apply(&downs);
         held
     }
@@ -221,7 +249,7 @@ impl SendQueue {
     /// count returned). What may be held is kept for the next helper.
     pub fn disconnect(&mut self) -> u64 {
         let held = self.possibly_held();
-        let dropped = self.items.iter().filter(|i| matches!(i, Item::Input(_))).count() as u64;
+        let dropped = self.items.iter().filter(|i| matches!(i, Item::Input(..))).count() as u64;
         self.items.clear();
         self.sent.clear();
         self.next = 0;
@@ -238,7 +266,7 @@ impl SendQueue {
         self.connected = true;
         let releases = self.confirmed.releases();
         // Counted as held by this helper until it confirms the releases
-        self.items.extend(releases.iter().map(|&r| Item::Input(r)));
+        self.items.extend(releases.iter().map(|&r| Item::Input(r, Origin::None)));
         releases.len()
     }
 }
@@ -387,6 +415,27 @@ mod tests {
         // A clean helper change with nothing held releases nothing
         q.disconnect();
         assert_eq!(q.connect(), 0);
+    }
+
+    /// Each input is confirmed as its origin's: motions of two devices are
+    /// not merged, and an ack names the origins it covers
+    #[test]
+    fn acks_name_the_origins_of_what_they_confirm() {
+        let a = Origin::Device([1; 6]);
+        let b = Origin::Device([2; 6]);
+        let mut q = connected();
+        q.push_from(a, &[mv(1, 0)]);
+        assert_eq!(q.push_from(b, &[mv(1, 0)]).merged, 0);
+        assert_eq!(q.push_from(b, &[mv(1, 0)]).merged, 1);
+        q.push_from(Origin::SelfTest, &[mv(0, 0)]);
+        assert_eq!(drain(&mut q), [ToHelper::Inject(vec![mv(1, 0), mv(2, 0), mv(0, 0)])]);
+        assert_eq!(q.ack_items(1), Some(vec![a]));
+        assert_eq!(q.ack_items(3), Some(vec![b, Origin::SelfTest]));
+        assert_eq!(q.ack_items(3), Some(vec![]));
+        assert_eq!(q.ack_items(4), None);
+        // Without a helper the input of a device is dropped, not confirmed
+        q.disconnect();
+        assert_eq!(q.push_from(a, &[key(0x1E, false)]).dropped, 1);
     }
 
     #[test]

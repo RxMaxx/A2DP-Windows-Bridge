@@ -26,6 +26,7 @@ mod rfcomm;
 mod rules;
 mod server;
 mod service_host;
+mod service_setup;
 mod state;
 mod vb_cable;
 mod zip;

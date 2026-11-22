@@ -33,6 +33,20 @@ nav_order: 2.7
 - 코어가 실행 중인지 확인하려면 코어의 뮤텍스가 아니라 파이프를 보세요. 파이프가 없으면 코어가 실행되지 않은 것입니다.
 - `BLUECASTER_INSTANCE=<name>`으로 시작한 개발 빌드는 대신 `\\.\pipe\bluecaster-<SID>-<name>`에서 대기하므로, 설치된 버전과 나란히 실행할 수 있습니다.
 
+### 서비스 파이프 {#the-service-pipe}
+
+BlueCaster 서비스는 로그인 화면에서 Bluetooth 키보드와 마우스를 쓸 수 있게 해 주는 개발자 모드의 프로토타입입니다. 서비스를 설치한 PC에서는 코어가 Windows 서비스로 실행됩니다. 이때는 사용자별 파이프가 없습니다. 대신 코어는 모든 사용자가 함께 쓰는 파이프 하나를 제공합니다.
+
+```
+\\.\pipe\bluecaster-service
+```
+
+- 먼저 `bluecaster-<user SID>`에 연결해 보고, 실패하면 `bluecaster-service`에 연결하세요. 서비스는 이전 이름의 파이프를 제공하지 않습니다. 프레임, 핸드셰이크, 요청은 두 파이프에서 같습니다.
+- 파이프는 `GENERIC_READ | FILE_WRITE_DATA`로만 여세요. 파이프 모드를 바꾸려면 `FILE_WRITE_ATTRIBUTES`를 추가합니다. 파이프는 `GENERIC_WRITE`를 요청하는 클라이언트를 거부합니다. `GENERIC_WRITE`에는 파이프의 다른 인스턴스를 만드는 권한(`FILE_CREATE_PIPE_INSTANCE`)이 포함되기 때문입니다. Python의 `open(..., "r+b")`는 `GENERIC_WRITE`를 요청하므로, 대신 `CreateFileW`를 사용하세요(예: `ctypes` 사용).
+- 서버가 정말 BlueCaster인지 확인하려면, 파이프 서버의 프로세스 ID(`GetNamedPipeServerProcessId`)와 `BlueCaster` 서비스의 프로세스 ID(`QueryServiceStatusEx`)를 비교하세요. 서비스가 중지된 동안에는 다른 프로그램이 같은 이름의 파이프를 만들 수 있습니다.
+- 개발자 모드, 어댑터 드라이버, 키보드와 마우스 추가처럼 PC 전체를 바꾸는 요청은 `ipc.needs_admin` 오류를 반환합니다. 도구는 관리자 승인을 부여할 수 없습니다. BlueCaster 창에서 변경하도록 사용자에게 요청하세요. BlueCaster 창이 Windows에 승인을 요청합니다.
+- 코어가 서비스로 실행 중이면 일부 요청은 `ipc.not_in_service`를 반환합니다. `app.quit`도 그중 하나입니다. 키보드와 마우스를 위해 서비스가 계속 실행되어야 하기 때문입니다. 대신 `app.close`를 사용하세요. `app.close`는 스트리밍을 중지하고 BlueCaster 창과 트레이 아이콘을 닫습니다.
+
 ### 프레임 {#frames}
 
 메시지는 방향과 관계없이 모두 프레임 하나로 보냅니다. 프레임은 JSON 길이(**u32 little-endian**) 뒤에 JSON(UTF-8)이 이어지는 형식입니다. 4 MiB를 넘는 프레임은 거부됩니다.

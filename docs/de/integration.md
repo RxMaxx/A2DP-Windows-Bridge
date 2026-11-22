@@ -33,6 +33,20 @@ Der Kern (`bluecaster-core.exe`) läuft, solange BlueCaster läuft, mit oder ohn
 - Ob der Kern läuft, prüfen Sie anhand der Pipe, nicht anhand des Mutex des Kerns. Existiert die Pipe nicht, läuft der Kern nicht.
 - Mit `BLUECASTER_INSTANCE=<name>` gestartete Entwicklungsbuilds warten stattdessen auf `\\.\pipe\bluecaster-<SID>-<name>`. So können sie neben der installierten Version laufen.
 
+### Die Dienst-Pipe {#the-service-pipe}
+
+Der BlueCaster-Dienst ist ein Prototyp im Entwicklermodus. Mit ihm funktionieren Bluetooth-Tastaturen und -Mäuse auch auf dem Anmeldebildschirm. Auf einem PC mit installiertem Dienst läuft der Kern als Windows-Dienst. Die benutzerspezifische Pipe gibt es dann nicht. Stattdessen stellt der Kern eine gemeinsame Pipe für alle Benutzer bereit:
+
+```
+\\.\pipe\bluecaster-service
+```
+
+- Versuchen Sie zuerst `bluecaster-<user SID>` und dann `bluecaster-service`. Unter dem alten Namen stellt der Dienst keine Pipe bereit. Frames, Handshake und Anfragen sind auf beiden Pipes gleich.
+- Öffnen Sie die Pipe nur mit `GENERIC_READ | FILE_WRITE_DATA`. Um den Modus der Pipe zu ändern, fügen Sie `FILE_WRITE_ATTRIBUTES` hinzu. Clients, die `GENERIC_WRITE` anfordern, weist die Pipe ab, weil dieses Zugriffsrecht auch das Erstellen einer weiteren Instanz der Pipe einschließt (`FILE_CREATE_PIPE_INSTANCE`). Pythons `open(..., "r+b")` fordert `GENERIC_WRITE` an. Verwenden Sie stattdessen `CreateFileW`, zum Beispiel über `ctypes`.
+- Um zu prüfen, ob der Server wirklich BlueCaster ist, vergleichen Sie die Prozess-ID des Pipe-Servers (`GetNamedPipeServerProcessId`) mit der Prozess-ID des Dienstes `BlueCaster` (`QueryServiceStatusEx`). Solange der Dienst beendet ist, könnte ein anderes Programm eine Pipe mit diesem Namen erstellen.
+- Anfragen, die den ganzen PC betreffen, geben den Fehler `ipc.needs_admin` zurück. Dazu gehören der Entwicklermodus, Adaptertreiber und das Hinzufügen von Tastaturen und Mäusen. Ein Werkzeug kann keine Administratorberechtigung erteilen. Bitten Sie den Benutzer, die Änderung im BlueCaster-Fenster vorzunehmen. Das Fenster fordert die Berechtigung bei Windows an.
+- Wenn der Kern als Dienst läuft, geben einige Anfragen `ipc.not_in_service` zurück. Dazu gehört `app.quit`, denn der Dienst muss für Tastaturen und Mäuse weiterlaufen. Verwenden Sie stattdessen `app.close`. Diese Methode beendet das Streaming und schließt das BlueCaster-Fenster und das Symbol im Infobereich.
+
 ### Frames
 
 Jede Nachricht ist in beiden Richtungen ein Frame: zuerst die Länge des JSON als **u32 little-endian**, dann das JSON selbst (UTF-8). Frames über 4 MiB werden abgewiesen.

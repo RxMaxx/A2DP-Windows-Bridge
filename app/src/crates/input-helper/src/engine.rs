@@ -29,6 +29,15 @@ pub trait Injector {
     fn lock_keys(&mut self) -> u8;
     /// A line for the record (the record mode only)
     fn note(&mut self, _line: &str) {}
+    /// The tick count now, for [`Injector::input_since`]; None: Windows'
+    /// last input is not checked (record mode, fakes)
+    fn tick(&mut self) -> Option<u32> {
+        None
+    }
+    /// Whether Windows registered input in this session at or after `tick`
+    fn input_since(&mut self, _tick: u32) -> Option<bool> {
+        None
+    }
 }
 
 /// `SendInput` (win_sys::input_inject) on the injecting thread
@@ -45,6 +54,14 @@ impl Injector for SendInputInjector {
 
     fn lock_keys(&mut self) -> u8 {
         win_sys::input_inject::lock_keys()
+    }
+
+    fn tick(&mut self) -> Option<u32> {
+        Some(win_sys::input_inject::tick_now())
+    }
+
+    fn input_since(&mut self, tick: u32) -> Option<bool> {
+        win_sys::input_inject::input_since(tick)
     }
 }
 
@@ -149,6 +166,10 @@ pub struct HelperEngine<I: Injector, D: DesktopApi> {
     desktop_state: Option<DesktopState>,
     /// News for the core not sent yet
     pending: Vec<ToCore>,
+    /// The tick count before the last batch Windows took, and the items
+    /// done with it: reported as [`ToCore::Seen`] once Windows' last input
+    /// is not older
+    unseen: Option<(u32, u64)>,
 }
 
 impl<I: Injector, D: DesktopApi> HelperEngine<I, D> {
@@ -164,6 +185,7 @@ impl<I: Injector, D: DesktopApi> HelperEngine<I, D> {
             lock_keys: None,
             desktop_state: None,
             pending: Vec::new(),
+            unseen: None,
         }
     }
 
@@ -258,8 +280,12 @@ impl<I: Injector, D: DesktopApi> HelperEngine<I, D> {
                 self.pending.push(ToCore::Sas);
             }
         }
-        self.send(batch);
+        let tick = self.injector.tick();
+        let taken = self.send(batch);
         self.processed += batch.len() as u64;
+        if let Some(t) = tick.filter(|_| taken > 0) {
+            self.unseen = Some((t, self.processed));
+        }
         let mut out = std::mem::take(&mut self.pending);
         out.push(self.ack());
         out
@@ -296,6 +322,12 @@ impl<I: Injector, D: DesktopApi> HelperEngine<I, D> {
         if self.injected + self.blocked > 0 {
             out.push(self.ack());
         }
+        if let Some((t, processed)) = self.unseen
+            && self.injector.input_since(t) == Some(true)
+        {
+            self.unseen = None;
+            out.push(ToCore::Seen { processed });
+        }
         out
     }
 }
@@ -313,6 +345,8 @@ mod tests {
         deny_next: usize,
         refuse_all: bool,
         locks: u8,
+        /// Some: the tick count now, and Windows' last input
+        clock: Option<(u32, u32)>,
     }
 
     impl Injector for FakeInjector {
@@ -333,6 +367,35 @@ mod tests {
         fn lock_keys(&mut self) -> u8 {
             self.locks
         }
+
+        fn tick(&mut self) -> Option<u32> {
+            self.clock.map(|(now, _)| now)
+        }
+
+        fn input_since(&mut self, tick: u32) -> Option<bool> {
+            self.clock.map(|(_, last)| win_sys::input_inject::tick_not_older(last, tick))
+        }
+    }
+
+    /// Windows' last input not older than the batch: one Seen with the
+    /// items done; never without a clock (record mode) or before it is
+    #[test]
+    fn windows_registering_the_input_is_reported_once() {
+        let d = FakeDesktops::on("Default");
+        let mut e = engine(&d);
+        e.batch(&[Inject::Move { dx: 0, dy: 0 }]);
+        assert!(!e.tick().iter().any(|m| matches!(m, ToCore::Seen { .. })));
+        e.injector().clock = Some((500, 400));
+        e.batch(&[key(0x1E, false, false), key(0x1E, false, true)]);
+        assert!(!e.tick().iter().any(|m| matches!(m, ToCore::Seen { .. })));
+        e.injector().clock = Some((600, 510));
+        assert_eq!(e.tick(), [ToCore::Seen { processed: 3 }]);
+        assert!(e.tick().is_empty());
+        // Refused: nothing to see
+        e.injector().refuse_all = true;
+        e.batch(&[key(0x1E, false, false)]);
+        let out = e.tick();
+        assert!(!out.iter().any(|m| matches!(m, ToCore::Seen { .. })));
     }
 
     fn key(scan: u16, extended: bool, up: bool) -> Inject {

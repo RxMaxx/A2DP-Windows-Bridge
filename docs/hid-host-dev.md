@@ -86,6 +86,89 @@ The code follows these rules:
 With the feature on and LE Audio off, the stack starts LE for keyboards and
 mice only. No LE Audio service, scan entry or UI state appears.
 
+## Checks that undo a change
+
+Two checks keep a change from leaving the user without a working keyboard
+or mouse. They work like Windows' "Keep these display settings?" prompt
+(`crates/core/src/hid/check.rs`).
+
+### What counts as delivered
+
+Input counts as delivered only when it came from a report of that very
+device and the sink passed it on for real. Each sink says what that means
+in `InputSink::delivered` (`hid-input/src/sink.rs`):
+
+| Sink | Delivered when |
+| --- | --- |
+| `LocalSink` (this process) | `SendInput` inserted every input of the batch |
+| `HelperSink` (input helper) | The helper's ack covers the batch, and the ack reports nothing refused |
+| `DryRunSink` (emulator, `--hci-tcp`) | The batch was counted |
+
+The engine passes each batch with the address of the device it came from.
+Key-ups of a release carry no address, so a release never counts. Inputs of
+two devices are never merged in the helper's queue.
+
+Each delivery also records a hint: whether Windows registered input since
+then (`GetLastInputInfo`). The process that injects reads the hint, so the
+core reads it for `LocalSink` and the helper for `HelperSink`. The helper
+reports the hint as a `Seen` frame. Record mode and dry run never read it.
+The hint never decides anything. Microsoft documents `GetLastInputInfo` as
+per session, but does not say whether injected input updates it. The
+documentation also says nothing about desktops or about callers running as
+SYSTEM. The log line of a confirmation shows the hint.
+
+### Adding a device
+
+After `hid.add`, a device that was not on the list is unconfirmed. Adding a
+device again that is already on the list starts no check.
+
+- The countdown of 30 seconds starts when the device is ready for input
+  (`HidEvent::Ready`). Over classic Bluetooth the device is ready once its
+  channels are open and its report descriptor is known, or turned out to be
+  unusable. Over LE the device is ready once every input report is
+  subscribed to. Pairing with a number comes first.
+- The UI asks for a key press, a mouse move, or either, from the report
+  descriptor (`Decoder::kind`).
+- Delivered input from that device confirms it. Input from another device
+  does not. A confirmed device is never removed by this check later.
+- The device is removed when the countdown ends without input, when the
+  device went away and did not come back in time, or when the device never
+  became ready within 120 seconds. The removal is the one `hid.remove` does:
+  the device is disconnected, taken off the list and its pairing is
+  forgotten. The UI then shows one sentence and **Try again**.
+- The core keeps the state, so the check goes on with the window closed.
+  `devices/hid_unconfirmed.txt` lists the unconfirmed devices. At its next
+  start the core removes every device in that file.
+- No request confirms a device. `hid.check_cancel` (remove now) and
+  `hid.check_dismiss` (hide the notice) are open requests, because they
+  only remove.
+
+### Turning the feature on
+
+Right after `hid.enable` turns the feature on, the core runs a self-test
+(`InputSink::self_test`). The sink injects one relative pointer move of
+zero in each direction. The pointer stays where it is, and no window gets a
+key or a click. `LocalSink` passes the move with `SendInput`. `HelperSink`
+passes it through the queue, the pipe and the helper, which proves that the
+helper started and is attached to the input desktop. `DryRunSink` reports
+"not tested" and passes.
+
+If the test fails, the core turns the feature off again, as `hid.disable`
+does, and `hid.enable` fails with the reason: the helper did not start,
+Windows refused the input, or the test timed out. If no stack with
+keyboards and mice is up within 10 seconds (a stream keeps the old stack),
+the test runs when such a stack starts and only warns then.
+
+Later self-tests run once per core start with the feature already on, and
+for every input helper after the first one (a new session, a helper that
+died). A failure then never turns anything off. The banner shows a warning
+instead, because turning the feature off cannot help someone whose input
+already fails, and a false alarm would cut a keyboard that works. No client
+request can start a self-test, other than `hid.enable`.
+
+Tests never inject: `LocalSink` takes a fake `LocalInjector` in unit tests,
+and the helper tests use the record mode.
+
 ## Pairing with a number
 
 Some keyboards ask for a number when they are added. BlueCaster shows six
@@ -139,6 +222,12 @@ again, an LE device whose address changes, input sent right after an LE
 reconnection, pairing with a number (classic and LE), keyboard lights
 (classic and LE), the LE scan, and the feature turned off.
 
+Four more cases test the check of a device being added, with a countdown of
+4 seconds (`--hid-confirm 4`). In `hid-confirm` and `hid-le-confirm` the
+device types, and BlueCaster keeps the device. In `hid-confirm-silent` and
+`hid-le-confirm-silent` the device sends nothing, and BlueCaster removes the
+device and closes its link after the countdown.
+
 `cargo test -p bluecaster-core-exe --test hid_guard` tests the guard without
 passing any input to Windows.
 
@@ -181,6 +270,17 @@ Windows.
 - [ ] Several streams in a row with a mouse connected: does the stutter of
       issue #84 return?
 - [ ] An adapter without Bluetooth LE.
+- [ ] Add a keyboard and do nothing: BlueCaster removes it after 30 s and
+      shows **Try again**.
+- [ ] Add a keyboard and type: the keyboard stays.
+- [ ] The same two steps with a mouse.
+- [ ] Close the window during the countdown: the device is still removed.
+      Stop the core during the countdown: the device is removed at the next
+      start.
+- [ ] Turn the feature on with the service: the self-test passes. The
+      service's log shows whether Windows registered the input.
+- [ ] Turn the feature on with an administrator window in front (without
+      the service): the self-test fails, and the feature turns off again.
 
 ## Moving to a Windows service (in progress)
 
@@ -321,7 +421,8 @@ passes session changes to the agent's hub. Sleep and resume use the
 core's own power notifications, which work in a service too.
 
 `--install-service` and `--uninstall-service` create and remove the
-service and need an administrator. The service starts automatically,
+service and need an administrator (stage 5 replaces them with
+`--service-setup`). The service starts automatically,
 without a delay, so that keyboards and mice work on the sign-in screen.
 Windows restarts it after a crash. It runs as LocalSystem and keeps only
 four privileges. `service_host.rs` explains why, and what a split into a
@@ -443,55 +544,245 @@ the CLI's `--hid-helper-record` and need a debug build. Not tested yet: the
 helper's real `SendInput`, desktop switches on a real secure desktop, the
 helper running as SYSTEM, and `SendSAS`.
 
+### The service as an add-on (stage 5)
+
+BlueCaster still installs per user, without administrator rights. Nothing
+changes for people who don't use keyboards and mice. Only those who do add
+the service. With one administrator prompt, the app copies the programs the
+service needs to a folder under Program Files and registers the service
+from there. Only an administrator can change that folder, which is what
+gives the program checks of stages 3 and 4 their value.
+
+- **The layout.** The service folder is `<Program Files>\BlueCaster
+  Service` (`win-sys/src/service_files.rs`). The path comes from the
+  known-folder API, never from an environment variable. The folder holds
+  its own copies of `bluecaster-core.exe`, `bluecaster-driver.exe` and
+  `licenses\` (`SERVICE_PROGRAMS` and `SERVICE_DIRS` in
+  `core/src/service_setup.rs`). `bluecaster-core.exe` runs as the service,
+  the agent, the input helper and the elevated helper. The folder's DACL
+  gives SYSTEM and Administrators full access, and users read and execute
+  access only. The window, `bluecaster.exe`, stays in the user's own
+  installation and is not copied.
+- **The set-up tool.** `bluecaster-core.exe --service-setup
+  <install|update|remove> [--remove-data]` (`core/src/service_setup.rs`)
+  runs elevated from the per-user folder. The window starts the tool
+  (`ui/src-tauri/src/service.rs`), so Windows shows its own prompt. For
+  install and update, the tool copies the files from its own folder into
+  the service folder, then registers or updates the service and starts it.
+  Each copy is read back and compared before it replaces the old file, and
+  a failed step undoes what the run did. For remove, the tool stops the
+  service, deletes it and deletes the service folder. `--remove-data` also
+  deletes `%ProgramData%\BlueCaster`. The tool refuses to install or update
+  from the service folder itself. Stage 4's `--install-service` and
+  `--uninstall-service` now run install and remove the same way. Exit
+  codes: 0 done, 1 failed (everything undone), 2 bad arguments, 5 not
+  elevated, 20 a file to copy is missing, 21 a program is not signed by
+  the tool's publisher, 22 the service folder or something in it is a link,
+  23 a copy failed, 24 the service could not be registered, stopped,
+  started or deleted, 25 run from the service folder, 1060 nothing to
+  update.
+- **Signatures.** When the tool itself is signed (a release), every file it
+  copies must carry a valid signature from the same certificate, which
+  means the same SHA-256 certificate thumbprint (`win-sys/src/authenticode.rs`).
+  The tool checks each file through a handle that denies writes, and
+  copies the bytes it read through that handle. Revocation is not checked.
+  An unsigned tool (a developer build) copies without checking and says so
+  in its output. A tool with a broken signature copies nothing. The
+  licence files are compared, not signed. The agent applies the same check
+  to the window it starts. `installer/build-release.ps1` signs all three
+  programs with one certificate (`installer/README.md`).
+- **The version rule.** The app and the service must be the same version.
+  The service's version is the file version of its core
+  (`ipc::service_state::service_state`). In the handshake, the service
+  refuses a window of another version (`core/src/server.rs`):
+  `ipc.service_needs_update` when the service is older, and
+  `ipc.app_older_than_service` when the app is older. The window then
+  shows both versions. One administrator prompt updates the service
+  (`--service-setup update`). The service does not check the version of
+  other pipe clients. Setup updates only the per-user installation and
+  never elevates, so after every app update the service needs an update
+  too.
+- **What the trust checks compare.** For the real service, every check
+  requires the service folder's core, never "the core beside me"
+  (`ipc::service_state::expected_core`). The window and the elevated
+  helper check that the pipe's server is the process the service control
+  manager runs, in session 0, from that program
+  (`ipc::service_state::check_service_pipe`). The service starts an agent
+  only when the service itself runs from the service folder
+  (`core/src/agent.rs`, `agent_program`). An elevated caller counts as
+  BlueCaster's only when its program is the service folder's core
+  (`core/src/rules.rs`, `elevated_programs`). An elevated window from the
+  user's folder does not count, because software running as the user could
+  replace that file. A test instance (`BLUECASTER_INSTANCE`) keeps the old
+  check against the core beside it.
+- **Per-user core or service.** While the service is not added, the window
+  starts and uses the per-user core as before. Once the service is added,
+  the window uses only the service pipe and never starts a core of its own
+  beside the service (`ui/src-tauri/src/connection.rs`). If the service is
+  stopped or has another version, the window shows a status instead. While
+  the tool adds or removes the service, the window waits for the new core
+  instead of closing when the old core sends Bye.
+- **Finding the window.** The agent finds the user's `bluecaster.exe`
+  through the folder that Setup's uninstall entry names
+  (`ipc::service_state::UNINSTALL_KEY`, `InstallLocation`,
+  `session-host/src/host/shell.rs`).
+- **Setup.** Setup never elevates and never touches the service. `--quit`
+  reaches only the user's own core. Restart Manager closes only programs
+  that use the per-user folder's files, which here means the window. The
+  uninstaller removes the service first, with one administrator prompt. If
+  the user declines the prompt or the removal fails, the uninstall stops
+  before removing anything (`installer/BlueCaster.iss`, `RemoveService`).
+- **Other pipe clients.** The service pipe, its access rules and the new
+  errors are documented in [Integration (IPC)](integration#the-service-pipe).
+
 Still to do:
 
-1. Test the service by hand (next section). None of the service code has
-   run as a Windows service yet.
+1. Run the test plan below on a test PC. None of the service code has run
+   as a Windows service yet, and none of the set-up tool's privileged steps
+   have run.
 2. Test the input helper as SYSTEM on real hardware: the sign-in screen,
    the lock screen, a UAC prompt and fast user switching.
-3. Change the installer and updater to install for all users under Program
-   Files. Today, BlueCaster is installed per user, so another program running
-   as the same user can replace BlueCaster's files and pass the program
-   checks. Tell authors of other pipe clients how to open the service pipe.
-4. Decide what Windows users on the same PC share. Today, the core
-   migrates only the first user's data, and every user sees the same devices.
-5. Decide whether to split the service into a low-privilege process for the
+3. Sign the releases. This needs a certificate that Windows trusts. Until
+   then, releases carry no Authenticode signature, and the set-up tool
+   copies their files without checking them.
+4. Driver records. In service mode the core keeps the adapters' driver
+   records in the service's folder, and the uninstaller cannot read that
+   folder. The uninstaller then shows **Restore the original Bluetooth
+   driver** only in its no-record form, which is off by default.
+   `--remove-data` deletes the records. Decide whether `--service-setup
+   remove` restores those adapters first.
+5. Decide what Windows users on the same PC share. Today, the core moves
+   only the first user's data, and every user sees the same devices.
+6. Decide whether to split the service into a low-privilege process for the
    Bluetooth stack and a small LocalSystem launcher. Today, one LocalSystem
    service does both, so the stack handles radio data as SYSTEM.
-6. Decide whether headphones may reconnect after Exit while the tray icon
+7. Decide whether headphones may reconnect after Exit while the tray icon
    is hidden.
 
 ### Testing the service by hand
 
-None of these steps have been run yet. Use a test PC or a virtual machine with a spare
-adapter, and keep a USB keyboard and mouse connected. The per-user install
-makes the program checks weak, so do not leave the service installed on a
-PC you rely on.
+None of these steps have been run yet. Use a test PC or a virtual machine
+with a spare adapter, and keep a USB keyboard and mouse connected the whole
+time. On a virtual machine, take a snapshot first. Restoring the snapshot
+is the quickest undo for every step.
 
-1. Exit the installed copy of BlueCaster.
-2. From an elevated prompt, run `bluecaster-core.exe --install-service`.
-   Check the result with `sc qc BlueCaster` and `sc qfailure BlueCaster`.
-3. Run `sc start BlueCaster`. The log is in
-   `%ProgramData%\BlueCaster\logs`. The tray icon appears when the agent
-   starts in your session.
-4. Start BlueCaster. The window must connect to the service. Turn on
-   keyboards and mice. Windows asks for administrator approval once, after
-   the code and the wait.
-5. Add a Bluetooth keyboard or mouse. Then check input in each place: on
-   the desktop, in an administrator window, at a UAC prompt, on the lock
-   screen, on the sign-in screen after a restart, and after fast user
-   switching.
-6. Hold down a key and end `bluecaster-core.exe --input-helper` in Task Manager.
-   The key must be released when the next helper starts.
-7. Run `sc stop BlueCaster`. The service must stop within a few seconds.
+Use one build for every program. A signed set-up tool copies only files
+signed with the tool's own certificate. An unsigned tool (a developer
+build) copies without checking.
 
-To remove the service, run `bluecaster-core.exe --uninstall-service` from an
-elevated prompt, or `sc delete BlueCaster`. To remove the service's data as
-well, delete `%ProgramData%\BlueCaster`. The user's own folder is not
-affected.
+These commands show the service's state without changing it:
 
-Ctrl+Alt+Del from a Bluetooth keyboard needs a Windows policy that lets
-services raise the secure screen. BlueCaster never changes that policy. The
-policy's registry value name and numbers in `win-sys/src/input_desktop.rs`
-were written from memory. Check them against Microsoft's documentation
-before relying on them.
+```
+sc qc BlueCaster
+sc queryex BlueCaster
+sc qfailure BlueCaster
+icacls "%ProgramFiles%\BlueCaster Service"
+```
+
+The service's log is in `%ProgramData%\BlueCaster\logs`, which only an
+elevated prompt can read. Setup and the uninstaller write their logs to
+`%TEMP%\Setup Log <date> #<n>.txt`.
+
+To remove the service by hand at any point, run
+`bluecaster-core.exe --service-setup remove` from an elevated prompt in
+the per-user folder (`%LOCALAPPDATA%\BlueCaster`). The copy in the
+service folder removes the service too, but cannot delete its own
+folder. If the tool fails, run `sc stop BlueCaster` and `sc delete BlueCaster`, then
+delete the service folder. To remove the service's data as well, add
+`--remove-data` or delete `%ProgramData%\BlueCaster`. The user's own
+folder is not affected.
+
+### Test plan
+
+This is the shortest sequence that covers everything not yet run. Each
+step says what to look at and how to undo it. Step 9 needs two builds with
+different versions: install the older one in step 1, and run the newer
+one's setup in step 9. The version comes from `Cargo.toml` and
+`app/src/ui/package.json`, so two local builds with different numbers work
+too.
+
+1. **Install the per-user app** (the older build). Look at: nothing asks
+   for administrator rights, `sc query BlueCaster` reports that the
+   service does not exist, and there is no `BlueCaster Service` folder.
+   Undo: uninstall.
+2. **Add the service.** Turn on developer mode. On **Developer**, in
+   **Bluetooth keyboards and mice**, click **Add** in the row **Also on the
+   sign-in screen and in administrator windows**, then confirm. Look at:
+   exactly one UAC prompt, for `bluecaster-core.exe` from the per-user
+   folder. Afterwards the row shows **Added**. `sc qc BlueCaster` shows
+   `AUTO_START`, `LocalSystem` and the program in the service folder. The
+   folder holds `bluecaster-core.exe` and `bluecaster-driver.exe` and no
+   `bluecaster.exe`. `icacls` shows full access only for SYSTEM and
+   Administrators. In each file's **Properties > Digital Signatures**, the
+   signer is the same as on the per-user files (signed builds only). The
+   window reconnects, and the agent's tray icon appears. Headphones still
+   play. Undo: step 11.
+3. **Turn on keyboards and mice and add one.** Turn the feature on (code,
+   both check boxes, the wait, then one UAC prompt). Add a Bluetooth
+   keyboard and a mouse. Type in Notepad. Look at: the text appears in
+   Notepad, and the mouse moves the pointer. Undo: turn the feature off.
+4. **Administrator window and UAC prompt.** Open an elevated Command
+   Prompt and type in it. Open any program that shows a UAC prompt, and
+   answer the prompt with only the Bluetooth keyboard and mouse. Look at:
+   input works in both. Undo: close them.
+5. **Lock.** Press Win+L with the USB keyboard, then unlock with the
+   Bluetooth keyboard only. Look at: the lock screen takes input, and no
+   key stays held after unlocking. Undo: none needed.
+6. **Sign out and sign in.** Sign out. On the sign-in screen, use only the
+   Bluetooth keyboard and mouse. Look at: input works before anyone signs
+   in. After signing in, the tray icon appears and the window connects.
+   The service's log shows the agent starting in the new session. Undo:
+   none needed.
+7. **Restart to the sign-in screen.** Restart Windows. Sign in with the
+   Bluetooth keyboard only. Look at: `sc queryex BlueCaster` shows
+   `RUNNING` with a process ID, input works on the sign-in screen, and
+   headphones reconnect after sign-in. Undo: none needed.
+8. **Fast user switching.** Create a second local user. Start playback.
+   Switch to the second user (Win+L, then **Switch user**) and sign in
+   with the Bluetooth keyboard. Look at: the first user's stream stops,
+   input works for the second user, and the second user's window connects
+   to the service (or shows its own state if BlueCaster is not installed
+   for that user). Switch back. Look at: no key stays held. Undo: delete
+   the second user.
+9. **Update with a version mismatch.** As the first user, run the newer
+   setup. Look at: Setup asks for no administrator rights. Setup closes
+   the window but leaves the service running: `sc queryex BlueCaster`
+   shows the same process ID as before. Input keeps working during and
+   after Setup. When the window starts again, it says that the service
+   needs an update and shows both versions. Nothing plays yet. Click
+   **Update** and choose **No** in the UAC prompt. Look at: nothing
+   changes, and the window still asks for the update. Click **Update**
+   again and choose **Yes**. Look at: one UAC prompt, then the window
+   connects and playback works. The service folder's `bluecaster-core.exe`
+   has the new version (**Properties > Details**). Undo: restore the
+   snapshot, or remove the service and install the older build again.
+10. **Held key and a killed helper.** Hold down a key on the Bluetooth
+    keyboard, and end `bluecaster-core.exe --input-helper` in Task Manager
+    run as administrator. Look at: the key is released when the next
+    helper starts. Then run `sc stop BlueCaster`. Look at: the service
+    stops within a few seconds, and no key stays held. Undo:
+    `sc start BlueCaster`.
+11. **Remove from the app.** Click **Remove**, leave **Also delete the
+    service's settings and pairings** off, and confirm. Look at: one UAC
+    prompt. `sc query BlueCaster` reports that the service does not exist,
+    the service folder is gone, `%ProgramData%\BlueCaster` remains, and the
+    window starts and uses the per-user core again. Undo: step 2.
+12. **Uninstall with the service present.** Add the service again (step 2).
+    Uninstall BlueCaster in **Settings > Apps**. Look at: the uninstall page
+    lists **Remove the BlueCaster service**, checked, above the other
+    choices. With **Delete user data** checked, the data line also names
+    `%ProgramData%\BlueCaster`. First click **Uninstall** and choose **No**
+    in the UAC prompt. Look at: a message says that BlueCaster was not
+    uninstalled, and the app, its files and the service all remain. Then
+    uninstall again and choose **Yes**. Look at: one UAC prompt for the
+    service, the window closes, the service and its folder are gone, and
+    `%ProgramData%\BlueCaster` is gone too if **Delete user data** was
+    checked. **Restore the original Bluetooth driver** works as it does
+    without the service, except for adapters assigned while the service
+    ran (see "Still to do", item 4). Undo: install again.
+
+Ctrl+Alt+Del from a Bluetooth keyboard works only if a Windows policy lets
+services send it, and BlueCaster never changes that policy. The policy's
+value name and numbers in `win-sys/src/input_desktop.rs` and in "The input
+helper" are unverified. Check them against Microsoft's documentation before
+relying on them.

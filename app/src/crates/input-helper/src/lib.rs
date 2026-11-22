@@ -32,3 +32,4 @@ pub mod queue;
 pub use client::{HelperConfig, HelperSink, Launcher, SessionLauncher};
 pub use helper::{HELPER_ARG, RECORD_ARG};
 pub use hid_input::sink::{HidCounters, InputSink};
+pub use hid_input::sink::{SelfTest, SelfTestFailure};

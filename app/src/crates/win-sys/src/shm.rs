@@ -421,7 +421,13 @@ mod tests {
         o.set();
         assert!(e.wait(100));
         assert!(!e.wait(0), "auto-reset");
-        let mut child = std::process::Command::new("cmd").args(["/C", "exit 0"]).spawn().unwrap();
+        // CREATE_NO_WINDOW: no terminal window pops up on the desktop
+        let mut child = std::os::windows::process::CommandExt::creation_flags(
+            std::process::Command::new("cmd").args(["/C", "exit 0"]),
+            0x0800_0000,
+        )
+        .spawn()
+        .unwrap();
         use std::os::windows::io::AsHandle;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {

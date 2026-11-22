@@ -428,8 +428,28 @@ fn show_balloon(notifier: &TrayNotifier, b: BalloonRequest) {
     }
 }
 
+/// The resident core's exit code when the service add-on is installed:
+/// the service hosts the core, this one does not start
+pub const EXIT_SERVICE_HOSTS: i32 = 6;
+
+/// Whether the service add-on hosts the core, so that this per-user core
+/// must not start the Bluetooth stack: any installed service (running or
+/// not, even one that needs an update or a repair), never for a test
+/// instance (which has pipes and an adapter of its own)
+pub(crate) fn service_hosts_core(state: &ipc::service_state::ServiceState, test_instance: bool) -> bool {
+    !test_instance && matches!(state, ipc::service_state::ServiceState::Installed { .. })
+}
+
 pub fn run(args: &[String]) -> i32 {
     let background = args.iter().any(|a| a == "--background" || a == "--minimized");
+    // The service and a per-user core never share the adapter. The Run
+    // value and the UI's start of this core end here; the service's agent
+    // shows the tray instead.
+    let test_instance = ipc::service_state::test_instance();
+    if !test_instance && service_hosts_core(&ipc::service_state::service_state(), test_instance) {
+        tracing::info!("the service is installed: this core does not start");
+        return EXIT_SERVICE_HOSTS;
+    }
     let _instance = match win_sys::single_instance::SingleInstance::acquire(&ipc::core_mutex_name()) {
         Ok(Some(g)) => g,
         Ok(None) => {
@@ -659,6 +679,21 @@ pub fn run(args: &[String]) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_installed_service_keeps_the_per_user_core_from_starting() {
+        use ipc::service_state::ServiceState;
+        let installed =
+            |running, trusted_path| ServiceState::Installed { version: "3.0.3".into(), running, trusted_path };
+        assert!(!service_hosts_core(&ServiceState::NotInstalled, false));
+        assert!(service_hosts_core(&installed(true, true), false));
+        // Stopped, or registered with another program: still never two
+        // cores on one adapter
+        assert!(service_hosts_core(&installed(false, true), false));
+        assert!(service_hosts_core(&installed(true, false), false));
+        // A test instance has its own adapter and pipes
+        assert!(!service_hosts_core(&installed(true, true), true));
+    }
 
     #[test]
     fn link_samples_from_the_counters() {

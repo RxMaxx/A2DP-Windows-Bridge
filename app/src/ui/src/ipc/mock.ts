@@ -8,7 +8,11 @@
 // on Windows' Bluetooth driver), ?mock=error (the last connection failed),
 // ?mock=offline (update checks and receivers cannot be reached),
 // ?mock=le (LE Audio on, with an LE Audio profile), ?window=flyout (the
-// flyout view).
+// flyout view). The service add-on: ?mock=service (added, running),
+// ?mock=service_stopped, ?mock=service_needs_update, ?mock=service_newer
+// (all three on the connection screen); not added is every other scenario. ?dev turns
+// developer mode on (its Developer screen has the add-on's row);
+// ?servicedecline answers No on the simulated administrator prompt.
 
 import { englishText } from "../i18n";
 import {
@@ -22,6 +26,9 @@ import { FlowTracker, flowView } from "../lib/flow";
 import { leAudioOn as leOn, MIC_PROCESSING_OFF } from "../lib/profile";
 import type {
   ConnStatus,
+  ServiceAction,
+  ServiceSetupResult,
+  ServiceState,
   Transport,
   UpdatePhase,
   WindowKind,
@@ -39,6 +46,8 @@ import type {
   Event,
   FirmwareFile,
   FlowView,
+  HidCheck,
+  HidHealth,
   HidPasskey,
   LinkSample,
   LinkTotals,
@@ -82,7 +91,13 @@ export type MockScenario =
    *  Input) and for the LE Audio earbuds: a stream reports its voice link */
   | "voice"
   /** The core runs as a Windows service: no folder named, app.quit refused */
-  | "service";
+  | "service"
+  /** The service add-on is added but stopped: the connection screen */
+  | "service_stopped"
+  /** The service add-on is an older version than the app: the connection screen */
+  | "service_needs_update"
+  /** The service add-on is newer than the app: the connection screen */
+  | "service_newer";
 
 export interface MockOptions {
   scenario?: MockScenario;
@@ -584,6 +599,9 @@ export function sampleSnapshot(scenario: MockScenario = "normal"): Snapshot {
     hid_devices: [],
     hid_candidates: [],
     hid_passkey: null,
+    hid_checks: [],
+    hid_rolled_back: null,
+    hid_health: null,
     service_mode: scenario === "service",
     vendors: [
       { id: "huawei", name: "Huawei", options: [] },
@@ -1096,6 +1114,12 @@ function sourceOf(mode: string, id: string, name: string): SourceInfo {
   }
 }
 
+/** The service add-on's version in ?mock=service_needs_update: older
+ *  than the app, as after the app's own updater ran */
+export const MOCK_OLD_SERVICE = "1.9.0";
+/** ... and in ?mock=service_newer: newer than the app */
+export const MOCK_NEW_SERVICE = "9.0.0";
+
 export class MockCore implements Transport {
   private mixer = MIXER_APPS;
   /** Addresses paired in Windows' Bluetooth (device.windows_paired) */
@@ -1139,6 +1163,14 @@ export class MockCore implements Transport {
   private hidCounts = { reports: 0, undecoded: 0, events: 0, injected: 0, blocked: 0, refused: 0 };
   /** Ends the wait for the number to be typed (hid.add of MOCK_PASSKEY_KEYBOARD) */
   private hidTyped: (() => void) | null = null;
+  /** What a new device does during its check (hid.add): "input" types
+   *  after 3 s and stays, "silent" sends nothing and is removed when the
+   *  countdown ends, "manual" waits for hidInput / hidCheckTimeout */
+  hidCheckOutcome: "input" | "silent" | "manual" = "input";
+  /** The countdown of a new device, as the core's 30 s */
+  hidCheckWindowMs = 30_000;
+  /** hid.enable's self-test fails for this reason (null: it passes) */
+  hidSelfTestFails: "helper" | "refused" | "timeout" | null = null;
   private logs: LogLevel | null = null;
   private receiverSub = false;
   /** Every line, as the core keeps them, and the flow it follows */
@@ -1190,6 +1222,13 @@ export class MockCore implements Transport {
   private navigate: (route: string) => void = () => {};
   private updatePhase: UpdatePhase = { state: "idle" };
   private onPhase: (p: UpdatePhase) => void = () => {};
+  /** The service add-on (serviceState, serviceSetup) */
+  service: ServiceState = { state: "not_added" };
+  /** The simulated administrator prompt is answered No */
+  serviceDeclines = false;
+  /** The set-up tool's exit code (0: done) */
+  serviceExitCode = 0;
+  private onStatus: (s: ConnStatus) => void = () => {};
 
   constructor(opts: MockOptions = {}) {
     this.scenario = opts.scenario ?? "normal";
@@ -1202,6 +1241,16 @@ export class MockCore implements Transport {
     this.window = opts.window ?? "main";
     this.speed = opts.speed ?? 1;
     this.onCall = opts.onCall;
+    this.service =
+      this.scenario === "service"
+        ? { state: "running", version: this.version }
+        : this.scenario === "service_stopped"
+          ? { state: "stopped", version: this.version }
+          : this.scenario === "service_needs_update"
+            ? { state: "needs_update", version: MOCK_OLD_SERVICE }
+            : this.scenario === "service_newer"
+              ? { state: "app_older", version: MOCK_NEW_SERVICE }
+              : { state: "not_added" };
   }
 
   // ---- Transport ---------------------------------------------------------
@@ -1211,8 +1260,30 @@ export class MockCore implements Transport {
     onStatus: (s: ConnStatus) => void,
   ) {
     this.onMessage = onMessage;
+    this.onStatus = onStatus;
     onStatus({ state: "connecting" });
-    this.later(400, () => {
+    this.later(400, () => this.connectNow());
+  }
+
+  /** What the window's backend does with the service add-on's state:
+   *  connected (to the service or the user's own core), or the screen
+   *  that asks for its update or start */
+  private connectNow() {
+    const onStatus = this.onStatus;
+    const onMessage = this.onMessage;
+    if (this.service.state === "needs_update") {
+      onStatus({ state: "service_needs_update", version: this.service.version, app: this.version });
+      return;
+    }
+    if (this.service.state === "app_older") {
+      onStatus({ state: "service_newer", version: this.service.version, app: this.version });
+      return;
+    }
+    if (this.service.state === "stopped") {
+      onStatus({ state: "service_stopped" });
+      return;
+    }
+    {
       onMessage({
         type: "welcome",
         protocol: 1,
@@ -1228,7 +1299,35 @@ export class MockCore implements Transport {
         rev: this.rev,
         state: structuredClone(this.snap),
       });
-    });
+    }
+  }
+
+  async serviceState(): Promise<ServiceState> {
+    return structuredClone(this.service);
+  }
+
+  /** The administrator prompt and the set-up tool, then the window
+   *  connects to the core that serves now: the service, or (removed) the
+   *  user's own */
+  async serviceSetup(action: ServiceAction, removeData = false): Promise<ServiceSetupResult> {
+    this.onCall?.("service.setup", { action, remove_data: removeData });
+    await new Promise((r) => this.later(600, () => r(undefined)));
+    if (this.serviceDeclines) return { outcome: "declined", service: structuredClone(this.service) };
+    if (this.serviceExitCode !== 0) {
+      return { outcome: "failed", code: this.serviceExitCode, service: structuredClone(this.service) };
+    }
+    const was = this.service.state;
+    this.service = action === "remove" ? { state: "not_added" } : { state: "running", version: this.version };
+    this.snap.service_mode = this.service.state === "running";
+    // The core that served stops (or none served): the window connects again
+    if (was !== this.service.state) {
+      if (was === "running" || was === "not_added") {
+        this.onMessage({ type: "event", rev: this.rev, event: { kind: "bye" } });
+      }
+      this.onStatus({ state: "connecting" });
+      this.later(400, () => this.connectNow());
+    }
+    return { outcome: "done", service: structuredClone(this.service) };
   }
 
   async call(method: string, params?: unknown): Promise<unknown> {
@@ -1796,6 +1895,8 @@ export class MockCore implements Transport {
       case "hid.add":
       case "hid.connect":
       case "hid.remove":
+      case "hid.check_cancel":
+      case "hid.check_dismiss":
         return this.hid(method, p);
       case "app.hidden_to_tray":
         if (!this.trayHintShown) {
@@ -1889,6 +1990,18 @@ export class MockCore implements Transport {
         this.hidCode = null;
         if (!handed || String(p.code).trim() !== handed) throw errorInfo("hid.wrong_code", "error.hid.wrong_code");
         setOn(true);
+        // The self-test right after: a failure turns it off again
+        const failed = this.hidSelfTestFails;
+        this.setHidHealth(failed ? { state: "failed", reason: failed } : { state: "ok", reason: null });
+        if (failed) {
+          setOn(false);
+          const key = {
+            helper: "ui.dev.hid_test_off_start",
+            refused: "ui.dev.hid_test_off_refused",
+            timeout: "ui.dev.hid_test_off_timeout",
+          }[failed];
+          throw errorInfo(key, key);
+        }
         return null;
       }
       case "hid.disable":
@@ -1927,8 +2040,19 @@ export class MockCore implements Transport {
           this.setHidPasskey(null);
         }
         devices(this.snap.hid_devices.map((d) => (d.address === address ? { ...d, connected: true } : d)));
+        // A new device stays only once its input arrives
+        if (!known) this.startHidCheck(address, name, typeof p.le === "number" ? p.le : null);
         return null;
       }
+      case "hid.check_cancel":
+        if (this.snap.hid_checks.some((c) => c.address === address)) this.endHidCheck(address, "cancelled");
+        return null;
+      case "hid.check_dismiss":
+        if (this.snap.hid_rolled_back) {
+          this.snap.hid_rolled_back = null;
+          this.emitHidCheck();
+        }
+        return null;
       case "hid.connect":
         developerOnly();
         if (!on) throw errorInfo("hid.off", "error.hid.off");
@@ -1939,8 +2063,83 @@ export class MockCore implements Transport {
         return null;
       default:
         devices(this.snap.hid_devices.filter((d) => d.address !== address));
+        if (this.snap.hid_checks.some((c) => c.address === address)) {
+          this.snap.hid_checks = this.snap.hid_checks.filter((c) => c.address !== address);
+          this.emitHidCheck();
+        }
         return null;
     }
+  }
+
+  private emitHidCheck() {
+    this.emit({ kind: "hid_check", value: { checks: this.snap.hid_checks, rolled_back: this.snap.hid_rolled_back } });
+  }
+
+  /** The countdown of a device just added (the core's check) */
+  private startHidCheck(address: string, name: string, le: number | null) {
+    const kind = address === MOCK_PASSKEY_KEYBOARD ? "keyboard" : le === 1 ? "mouse" : "";
+    const check: HidCheck = {
+      address,
+      name,
+      kind,
+      waiting: true,
+      remaining_ms: this.hidCheckWindowMs,
+      window_ms: this.hidCheckWindowMs,
+    };
+    this.hidCheckLe.set(address, le);
+    this.snap.hid_rolled_back = null;
+    this.snap.hid_checks = [...this.snap.hid_checks.filter((c) => c.address !== address), check];
+    this.emitHidCheck();
+    if (this.hidCheckOutcome === "input") this.later(3000, () => this.hidInput(address));
+    // Real timers: the countdown is in real time whatever the mock's speed
+    if (this.hidCheckOutcome !== "manual") {
+      const t = setTimeout(() => {
+        this.timers.delete(t);
+        this.hidCheckTimeout(address);
+      }, this.hidCheckWindowMs);
+      this.timers.add(t);
+    }
+  }
+
+  private hidCheckLe = new Map<string, number | null>();
+
+  /** The device's check ends: confirmed, removed after the countdown, or
+   *  removed by the user */
+  private endHidCheck(address: string, outcome: "confirmed" | "no_input" | "cancelled") {
+    const check = this.snap.hid_checks.find((c) => c.address === address);
+    if (!check) return;
+    this.snap.hid_checks = this.snap.hid_checks.filter((c) => c.address !== address);
+    if (outcome !== "confirmed") {
+      this.snap.hid_devices = this.snap.hid_devices.filter((d) => d.address !== address);
+      this.emit({ kind: "hid_devices", value: this.snap.hid_devices });
+      if (outcome === "no_input") {
+        const le = this.hidCheckLe.get(address) ?? null;
+        this.snap.hid_rolled_back = { address, name: check.name, le, reason: outcome };
+      }
+    }
+    this.emitHidCheck();
+  }
+
+  /** Input of the device being added reached Windows: it stays */
+  hidInput(address: string) {
+    this.endHidCheck(address.toUpperCase(), "confirmed");
+  }
+
+  /** The countdown of the device being added ran out: it is removed */
+  hidCheckTimeout(address: string) {
+    this.endHidCheck(address.toUpperCase(), "no_input");
+  }
+
+  /** The self-test's result (the banner warns when it failed) */
+  setHidHealth(h: HidHealth | null) {
+    this.snap.hid_health = h;
+    this.emit({ kind: "hid_health", value: h });
+  }
+
+  /** Developer mode and keyboards and mice on (?hidon) */
+  setHidOn() {
+    this.snap.settings.developer_mode = true;
+    this.snap.settings.hid_host = true;
   }
 
   /** The number to type on a keyboard being added (null: none any more) */
@@ -1999,6 +2198,10 @@ export class MockCore implements Transport {
         vendor_note: { key: "firmware.vendor_mediatek", args: [] },
       },
     ];
+  }
+
+  setDeveloperMode() {
+    this.snap.settings.developer_mode = true;
   }
 
   setLoader(loader: Snapshot["adapter"]["loader"]) {
@@ -3442,9 +3645,28 @@ export function mockFromUrl(): MockCore {
   const scenario = (q.get("mock") as MockScenario | null) ?? "normal";
   const win = q.get("window") === "flyout" ? "flyout" : "main";
   const mock = new MockCore({ scenario, window: win });
+  // ?dev: developer mode on (the Developer screen)
+  if (q.has("dev")) mock.setDeveloperMode();
+  mock.serviceDeclines = q.has("servicedecline");
   mock.noVirtual = q.has("novirtual");
   mock.hifiCable = q.has("hificable");
   mock.captureDrops = q.has("capturedrops");
+  // Keyboards and mice (Developer): ?hidon turns them on; ?hidcheck=silent
+  // or manual: what a new device does during its countdown (default: it
+  // types after 3 s); ?hidwindow=<seconds>: the countdown; ?hidtest=helper,
+  // refused or timeout: turning on fails its self-test; ?hidhealth=failed:
+  // a self-test at start failed (the banner's warning)
+  if (q.has("hidon")) mock.setHidOn();
+  const hidCheck = q.get("hidcheck");
+  if (hidCheck === "silent" || hidCheck === "manual") mock.hidCheckOutcome = hidCheck;
+  const hidWindow = Number(q.get("hidwindow"));
+  if (hidWindow > 0) mock.hidCheckWindowMs = hidWindow * 1000;
+  const hidTest = q.get("hidtest");
+  if (hidTest === "helper" || hidTest === "refused" || hidTest === "timeout") mock.hidSelfTestFails = hidTest;
+  if (q.get("hidhealth") === "failed") {
+    mock.setHidOn();
+    mock.setHidHealth({ state: "failed", reason: "refused" });
+  }
   // ?names=A|B|C: the saved devices' names (long names on Home)
   const names = q.get("names");
   if (names) mock.nameSaved(names.split("|"));

@@ -76,34 +76,15 @@ async fn send(call: Method, ticket: Option<&str>) -> Result<Result<Value, Value>
     let name = ipc::service_pipe_name();
     let mut pipe =
         win_sys::pipe_peer::open_client(&name).map_err(|e| format!("no core serves the service pipe: {e}"))?;
-    // A fixed name can be taken by anyone first: the core beside this
-    // program, and (the real service) in session 0 and the process the
-    // service control manager runs as the service
+    // A fixed name can be taken by anyone first: for the real service the
+    // service folder's core (wherever this helper runs from: an elevated
+    // copy in the user's folder trusts the same server), in session 0, the
+    // process the service control manager runs as the service; for a test
+    // instance the core beside this program
     {
-        use ipc::access::ServiceRecord;
         use std::os::windows::io::AsHandle;
-        use win_sys::service_query::ServiceInfo;
-        let server = win_sys::pipe_peer::server_process(pipe.as_handle()).map_err(|e| e.to_string())?;
         let me = std::env::current_exe().map_err(|e| e.to_string())?;
-        let test_instance = !ipc::instance_suffix().is_empty();
-        // A test instance has no service: not asked
-        let record = if test_instance {
-            ServiceRecord::NotInstalled
-        } else {
-            match win_sys::service_query::query(ipc::access::SERVICE_NAME) {
-                Ok(ServiceInfo::NotInstalled) => ServiceRecord::NotInstalled,
-                Ok(ServiceInfo::Found { command_line, pid }) => ServiceRecord::Installed { command_line, pid },
-                Ok(ServiceInfo::Denied) | Err(_) => ServiceRecord::Unreadable,
-            }
-        };
-        ipc::access::service_server_trusted(
-            server.image.as_deref(),
-            server.session_id,
-            server.pid,
-            &record,
-            &me,
-            test_instance,
-        )?;
+        ipc::service_state::check_service_pipe(pipe.as_handle(), &me)?;
     }
     let version = env!("CARGO_PKG_VERSION");
     let client = match ticket {

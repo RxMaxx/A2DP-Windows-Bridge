@@ -247,6 +247,37 @@ impl Decoder {
         ups.sort_by_key(|p| p.is_modifier());
         ups.into_iter().map(|p| p.event(false)).collect()
     }
+
+    /// What the device's input reports carry: keys, a pointer, or both
+    pub fn kind(&self) -> InputKind {
+        let mut kind = InputKind::default();
+        let page_of = |u: u32| (u >> 16) as u16;
+        let id_of = |u: u32| (u & 0xFFFF) as u16;
+        for field in self.reports.values().flatten().filter(|f| !f.flags.constant) {
+            for spec in &field.usages {
+                let (lo, hi) = match *spec {
+                    crate::descriptor::UsageSpec::Single(u) => (u, u),
+                    crate::descriptor::UsageSpec::Range { min, max } => (min, max),
+                };
+                match page_of(lo) {
+                    PAGE_KEYBOARD => kind.keyboard = true,
+                    PAGE_BUTTON => kind.pointer = true,
+                    PAGE_GENERIC_DESKTOP if id_of(lo) <= GD_Y && id_of(hi) >= GD_X => kind.pointer = true,
+                    _ => {}
+                }
+            }
+        }
+        kind
+    }
+}
+
+/// What a device's reports carry ([`Decoder::kind`])
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct InputKind {
+    /// Keys of the keyboard page
+    pub keyboard: bool,
+    /// Pointer motion or mouse buttons
+    pub pointer: bool,
 }
 
 // Drops one holder of `p`; true when none is left
@@ -367,6 +398,19 @@ mod tests {
         assert_eq!(m.report_len(0), Some(4));
         assert!(!Decoder::boot_keyboard().reports.is_empty());
         assert!(!Decoder::boot_mouse().reports.is_empty());
+    }
+
+    #[test]
+    fn kind_comes_from_the_descriptor() {
+        let kind = |d: &[u8]| Decoder::from_descriptor(d).unwrap().kind();
+        assert_eq!(kind(KEYBOARD), InputKind { keyboard: true, pointer: false });
+        assert_eq!(kind(MOUSE), InputKind { keyboard: false, pointer: true });
+        assert_eq!(kind(COMBO), InputKind { keyboard: true, pointer: true });
+        assert_eq!(Decoder::boot_mouse().kind(), InputKind { keyboard: false, pointer: true });
+        assert_eq!(Decoder::boot_keyboard().kind(), InputKind { keyboard: true, pointer: false });
+        // Consumer keys alone are neither
+        let consumer = [0x05, 0x0C, 0x09, 0x01, 0xA1, 0x01, 0x75, 0x10, 0x95, 0x01, 0x09, 0xE9, 0x81, 0x02, 0xC0];
+        assert_eq!(kind(&consumer), InputKind::default());
     }
 
     #[test]

@@ -23,6 +23,8 @@ use tauri::{AppHandle, Emitter};
 use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::service::{APP_VERSION, Route};
+
 /// Event with every server message (JSON as the core sent it)
 pub const MESSAGE_EVENT: &str = "ipc://message";
 /// Event with the connection [`Status`]
@@ -37,6 +39,9 @@ const ADMIN_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const CORE_START_WAIT: Duration = Duration::from_secs(8);
 /// Starting the core again after it did not come up
 const CORE_RESPAWN_INTERVAL: Duration = Duration::from_secs(30);
+/// Reading the service add-on's state again while it is stopped or needs
+/// an update
+const SERVICE_RECHECK: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -54,6 +59,21 @@ pub enum Status {
     Rejected {
         reason: String,
     },
+    /// The service add-on is another version than this window (or its
+    /// registration is wrong): no core runs for the window until it is
+    /// updated (service.rs)
+    ServiceNeedsUpdate {
+        version: String,
+        app: String,
+    },
+    /// The service add-on is newer than this window: this app needs the
+    /// update
+    ServiceNewer {
+        version: String,
+        app: String,
+    },
+    /// The service add-on is added but stopped
+    ServiceStopped,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -84,6 +104,11 @@ pub struct Ipc {
     updating: AtomicBool,
     /// Connected to the core that runs as a Windows service
     service: AtomicBool,
+    /// The service add-on is being added, updated or removed: the core
+    /// that stops for it says Bye, and the window connects again (to the
+    /// service or the user's own core) instead of ending. Cleared by the
+    /// next Welcome, or when the set-up did not change anything.
+    switching: AtomicBool,
 }
 
 /// A poisoned lock only means another thread panicked while holding it;
@@ -145,7 +170,16 @@ impl Ipc {
             subscriptions: Mutex::new(HashMap::new()),
             updating: AtomicBool::new(false),
             service: AtomicBool::new(false),
+            switching: AtomicBool::new(false),
         })
+    }
+
+    pub fn set_switching(&self, on: bool) {
+        self.switching.store(on, Ordering::Release);
+    }
+
+    fn switching(&self) -> bool {
+        self.switching.load(Ordering::Acquire)
     }
 
     pub fn set_updating(&self, on: bool) {
@@ -316,6 +350,8 @@ async fn run(app: AppHandle, ipc: Arc<Ipc>) {
         match ended {
             // The update's installer runs next and starts the UI again
             Ended::Bye if ipc.updating() => tokio::time::sleep(Duration::from_millis(300)).await,
+            // The service add-on came or went: the other core serves next
+            Ended::Bye if ipc.switching() => tokio::time::sleep(Duration::from_millis(300)).await,
             Ended::Bye => {
                 app.exit(0);
                 return;
@@ -336,6 +372,42 @@ async fn connect(app: &AppHandle, ipc: &Ipc, name: &str) -> NamedPipeClient {
     // The last start failed (its reason is the status already)
     let mut spawn_failed = false;
     loop {
+        // The service add-on decides which core serves the window. Read
+        // again each round: an update, a start or a removal shows at once.
+        match crate::service::current() {
+            Route::NotAdded => {}
+            Route::Running { .. } => {
+                match open_service() {
+                    Service::Pipe(pipe) => {
+                        ipc.service.store(true, Ordering::Release);
+                        return pipe;
+                    }
+                    // Starting: its pipe comes shortly. Never a core of
+                    // our own beside the service.
+                    Service::None | Service::Busy => tokio::time::sleep(Duration::from_millis(200)).await,
+                    Service::Untrusted(reason) => {
+                        ipc.set_status(app, Status::Rejected { reason });
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                    }
+                }
+                continue;
+            }
+            Route::Stopped { .. } => {
+                ipc.set_status(app, Status::ServiceStopped);
+                tokio::time::sleep(SERVICE_RECHECK).await;
+                continue;
+            }
+            Route::NeedsUpdate { version } => {
+                ipc.set_status(app, Status::ServiceNeedsUpdate { version, app: APP_VERSION.into() });
+                tokio::time::sleep(SERVICE_RECHECK).await;
+                continue;
+            }
+            Route::AppOlder { version } => {
+                ipc.set_status(app, Status::ServiceNewer { version, app: APP_VERSION.into() });
+                tokio::time::sleep(SERVICE_RECHECK).await;
+                continue;
+            }
+        }
         match open_service() {
             Service::Pipe(pipe) => {
                 ipc.service.store(true, Ordering::Release);
@@ -390,7 +462,8 @@ async fn connect(app: &AppHandle, ipc: &Ipc, name: &str) -> NamedPipeClient {
 }
 
 /// The service's pipe (a core running as a service), once its server is
-/// the core beside this program and, for the real service, runs in
+/// the service folder's core (a test instance: the core beside this
+/// program) and, for the real service, runs in
 /// session 0 and is the process the service control manager runs as the
 /// installed service (ipc::access::service_server_trusted).
 ///
@@ -404,11 +477,13 @@ fn open_service() -> Service {
         Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) => return Service::Busy,
         Err(_) => return Service::None,
     };
-    let core = match std::env::current_exe() {
-        Ok(exe) => exe.with_file_name("bluecaster-core.exe"),
+    // The real service runs the service folder's copy of the core; only a
+    // test instance's runs beside this program
+    let beside = match std::env::current_exe() {
+        Ok(exe) => exe.with_file_name(ipc::service_state::CORE_EXE),
         Err(e) => return Service::Untrusted(e.to_string()),
     };
-    match check_server(&pipe, &core, !ipc::instance_suffix().is_empty()) {
+    match check_server(&pipe, &beside) {
         Ok(()) => Service::Pipe(pipe),
         Err(why) => Service::Untrusted(why),
     }
@@ -423,32 +498,22 @@ enum Service {
     Untrusted(String),
 }
 
-/// Whether the process serving `pipe` is the core `core` (and, for the
-/// real service, the service's own process)
-fn check_server(pipe: &NamedPipeClient, core: &std::path::Path, test_instance: bool) -> Result<(), String> {
+/// Whether the process serving `pipe` is the service's core (a test
+/// instance: `beside`), checked the one way every client checks it
+fn check_server(pipe: &NamedPipeClient, beside: &std::path::Path) -> Result<(), String> {
     use std::os::windows::io::AsHandle;
-    let server = win_sys::pipe_peer::server_process(pipe.as_handle()).map_err(|e| e.to_string())?;
-    // A test instance has no service: not asked
-    let record = if test_instance { ipc::access::ServiceRecord::NotInstalled } else { service_record() };
-    ipc::access::service_server_trusted(
-        server.image.as_deref(),
-        server.session_id,
-        server.pid,
-        &record,
-        core,
-        test_instance,
-    )
-    .map_err(str::to_owned)
+    ipc::service_state::check_service_pipe(pipe.as_handle(), beside)
 }
 
-/// The service control manager's record of the service (read-only)
-fn service_record() -> ipc::access::ServiceRecord {
-    use ipc::access::ServiceRecord;
-    use win_sys::service_query::ServiceInfo;
-    match win_sys::service_query::query(ipc::access::SERVICE_NAME) {
-        Ok(ServiceInfo::NotInstalled) => ServiceRecord::NotInstalled,
-        Ok(ServiceInfo::Found { command_line, pid }) => ServiceRecord::Installed { command_line, pid },
-        Ok(ServiceInfo::Denied) | Err(_) => ServiceRecord::Unreadable,
+/// The status for a core's reject: the service's version rule (it checks
+/// the window's version too) shows as the add-on's own states
+fn rejected(reason: String, service: bool) -> Status {
+    use ipc::service_state::{APP_OLDER_THAN_SERVICE, SERVICE_NEEDS_UPDATE};
+    let app = APP_VERSION.to_string();
+    match reason.as_str() {
+        SERVICE_NEEDS_UPDATE if service => Status::ServiceNeedsUpdate { version: String::new(), app },
+        APP_OLDER_THAN_SERVICE if service => Status::ServiceNewer { version: String::new(), app },
+        _ => Status::Rejected { reason },
     }
 }
 
@@ -506,6 +571,8 @@ async fn session(app: &AppHandle, ipc: &Ipc, pipe: NamedPipeClient) -> Ended {
             };
             match msg.get("type").and_then(Value::as_str) {
                 Some("welcome") => {
+                    // A set-up that switched cores is over
+                    ipc.set_switching(false);
                     let server = msg.get("server").and_then(Value::as_str).unwrap_or("").to_string();
                     ipc.set_status(app, Status::Connected { server });
                     // A new connection has no subscription yet
@@ -516,7 +583,7 @@ async fn session(app: &AppHandle, ipc: &Ipc, pipe: NamedPipeClient) -> Ended {
                 }
                 Some("reject") => {
                     let reason = msg.get("reason").and_then(Value::as_str).unwrap_or("").to_string();
-                    ipc.set_status(app, Status::Rejected { reason });
+                    ipc.set_status(app, rejected(reason, ipc.service()));
                     return Ended::Rejected;
                 }
                 Some("response") => {
@@ -561,23 +628,36 @@ mod tests {
         assert_eq!(merge([].iter()), Subscription::default());
     }
 
-    /// The service's pipe is trusted only when the core beside the UI
-    /// serves it: here the test program serves a pipe of its own, so it is
-    /// trusted as "the core" only when that is the program expected
+    /// The service's pipe is trusted only when the service folder's core
+    /// serves it as the service: here the test program serves a pipe of its
+    /// own, beside itself, in this session, and is not trusted (the cases of
+    /// the check itself are ipc::service_state's tests)
     #[test]
     fn the_service_pipe_is_checked_before_it_is_trusted() {
+        if !ipc::instance_suffix().is_empty() {
+            return;
+        }
         let name = format!(r"\\.\pipe\bluecaster-test-ui-check-{}", std::process::id());
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         rt.block_on(async {
             let _server = win_sys::pipe_peer::create_service_server(&name, true).unwrap();
             let pipe = win_sys::pipe_peer::open_client(&name).unwrap();
             let me = std::env::current_exe().unwrap();
-            assert_eq!(check_server(&pipe, &me, true), Ok(()));
-            // The real service runs in session 0; this test does not
-            assert!(check_server(&pipe, &me, false).is_err());
-            let core = me.with_file_name("bluecaster-core.exe");
-            assert!(check_server(&pipe, &core, true).is_err());
+            assert!(check_server(&pipe, &me).is_err());
         });
+    }
+
+    #[test]
+    fn the_services_version_rule_shows_as_its_states() {
+        use ipc::service_state::{APP_OLDER_THAN_SERVICE, SERVICE_NEEDS_UPDATE};
+        assert!(matches!(rejected(SERVICE_NEEDS_UPDATE.into(), true), Status::ServiceNeedsUpdate { .. }));
+        assert!(matches!(rejected(APP_OLDER_THAN_SERVICE.into(), true), Status::ServiceNewer { .. }));
+        // Only from the service; any other reject stays as it was
+        assert_eq!(
+            rejected(SERVICE_NEEDS_UPDATE.into(), false),
+            Status::Rejected { reason: SERVICE_NEEDS_UPDATE.into() }
+        );
+        assert_eq!(rejected("protocol 2".into(), true), Status::Rejected { reason: "protocol 2".into() });
     }
 
     #[test]

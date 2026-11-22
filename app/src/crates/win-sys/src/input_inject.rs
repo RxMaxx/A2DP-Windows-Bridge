@@ -138,6 +138,29 @@ fn to_input(inject: Inject) -> INPUT {
     }
 }
 
+/// The system tick count (GetTickCount, milliseconds, wraps after 49 days)
+pub fn tick_now() -> u32 {
+    // SAFETY: plain call without arguments.
+    unsafe { windows::Win32::System::SystemInformation::GetTickCount() }
+}
+
+/// Whether Windows registered input in this session at or after `tick`
+/// (a [`tick_now`] value): GetLastInputInfo's time is not older. None when
+/// the call failed. Microsoft documents the value as per session; it does
+/// not say whether injected input updates it, so this is a hint only.
+pub fn input_since(tick: u32) -> Option<bool> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+    let mut info = LASTINPUTINFO { cbSize: size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    // SAFETY: `info` is a valid LASTINPUTINFO with cbSize set.
+    let ok = unsafe { GetLastInputInfo(&mut info) }.as_bool();
+    ok.then(|| tick_not_older(info.dwTime, tick))
+}
+
+/// `last` is at or after `since`, across the tick count's wrap
+pub fn tick_not_older(last: u32, since: u32) -> bool {
+    (last.wrapping_sub(since) as i32) >= 0
+}
+
 /// Sends `inputs` in order as one uninterrupted batch. Returns how many went
 /// in; when Windows took only part of them, the error says how many.
 pub fn send(inputs: &[Inject]) -> Result<usize, InjectError> {
@@ -187,6 +210,15 @@ mod tests {
         // SAFETY: a mouse INPUT was built, so `mi` is the active field.
         let mi = unsafe { input.Anonymous.mi };
         assert_eq!((mi.dwFlags, mi.mouseData), (MOUSEEVENTF_XDOWN, XBUTTON2));
+    }
+
+    #[test]
+    fn tick_comparison_survives_the_wrap() {
+        assert!(tick_not_older(100, 100));
+        assert!(tick_not_older(101, 100));
+        assert!(!tick_not_older(99, 100));
+        assert!(tick_not_older(5, u32::MAX - 5));
+        assert!(!tick_not_older(u32::MAX - 5, 5));
     }
 
     #[test]
