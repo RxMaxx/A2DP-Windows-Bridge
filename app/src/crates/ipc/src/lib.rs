@@ -196,5 +196,6 @@ mod tests {
         VoiceRxCounters::export_all(&cfg).unwrap();
         HidStatus::export_all(&cfg).unwrap();
         HidCode::export_all(&cfg).unwrap();
+        AuracastMixState::export_all(&cfg).unwrap();
     }
 }

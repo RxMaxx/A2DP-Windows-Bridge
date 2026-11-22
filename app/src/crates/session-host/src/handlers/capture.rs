@@ -40,10 +40,11 @@ impl Handler for Captures {
                 }
                 // A channel number used again replaces its old source
                 self.channels.remove(&channel);
-                let (worker, format) = CaptureWorker::open(&name, &source, &options).map_err(|e| failed("open", &e))?;
+                let (worker, format, channel_mask) =
+                    CaptureWorker::open(&name, &source, &options).map_err(|e| failed("open", &e))?;
                 self.channels.insert(channel, worker);
                 tracing::info!("capture agent: channel opened ({} open)", self.channels.len());
-                reply(Opened { format })
+                reply(Opened { format, channel_mask })
             }
             Request::Start { channel } => {
                 let worker = self

@@ -38,6 +38,8 @@ pub enum Request {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Opened {
     pub format: Format,
+    /// The speakers of the channels (`Capture::channel_mask`)
+    pub channel_mask: u32,
 }
 
 pub trait CaptureHost {
@@ -55,8 +57,8 @@ impl CaptureHost for LocalHost {
 
 impl CaptureHost for RemoteHost {
     fn open_capture(&self, source: &Source, options: &CaptureOptions) -> Result<Capture, CaptureError> {
-        let (format, channel) = open_remote(self.hub(), source, options)?;
-        Ok(Capture::from_agent(format, channel))
+        let (format, channel_mask, channel) = open_remote(self.hub(), source, options)?;
+        Ok(Capture::from_agent(format, channel_mask, channel))
     }
 }
 
@@ -78,7 +80,11 @@ impl RemoteCaptureAgent {
 }
 
 impl CaptureAgent for RemoteCaptureAgent {
-    fn open(&self, source: &Source, options: &CaptureOptions) -> Result<(Format, Box<dyn AgentChannel>), CaptureError> {
+    fn open(
+        &self,
+        source: &Source,
+        options: &CaptureOptions,
+    ) -> Result<(Format, u32, Box<dyn AgentChannel>), CaptureError> {
         open_remote(&self.hub, source, options)
     }
 }
@@ -87,7 +93,7 @@ pub(crate) fn open_remote(
     hub: &Arc<Hub>,
     source: &Source,
     options: &CaptureOptions,
-) -> Result<(Format, Box<dyn AgentChannel>), CaptureError> {
+) -> Result<(Format, u32, Box<dyn AgentChannel>), CaptureError> {
     // The channel is made for the agent the request goes to (in service
     // mode: handles duplicated into that agent)
     let (reply, agent, id, link) = hub
@@ -99,7 +105,7 @@ pub(crate) fn open_remote(
     let state = Arc::new(ChannelState { generation: agent.generation, lost: Arc::new(AtomicBool::new(false)), link });
     hub.register_channel(&state);
     tracing::debug!("capture agent: channel {id} opened");
-    Ok((opened.format, Box::new(RemoteChannel { hub: hub.clone(), id, state })))
+    Ok((opened.format, opened.channel_mask, Box::new(RemoteChannel { hub: hub.clone(), id, state })))
 }
 
 #[derive(Debug)]

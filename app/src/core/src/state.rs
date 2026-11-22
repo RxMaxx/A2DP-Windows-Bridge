@@ -436,6 +436,8 @@ fn to_ipc_settings(s: &CoreSettings) -> Settings {
         bt_chip_pid: s.bt_chip_pid,
         bt_chip_fw_stem: s.bt_chip_fw_stem.clone(),
         realtek_custom_firmware: s.realtek_custom_firmware,
+        adapter_id: s.adapter_id.clone(),
+        auracast_adapter_id: s.auracast_adapter_id.clone(),
         afh: s.afh.clone(),
         remote_sink: s.remote_sink.clone(),
         le_audio_experimental: s.le_audio_experimental,
@@ -453,7 +455,8 @@ fn hifi_cable(devices: &[audio_capture::DeviceInfo]) -> Option<&audio_capture::D
 
 /// Service mode (crate::rules): whether settings.set with `s` changes
 /// anything only an elevated client may change: developer mode and what
-/// it sets, the chip, its firmware and radio settings, the receiver host
+/// it sets, the chip (the adapter to use too), its firmware and radio
+/// settings, the receiver host
 pub(crate) fn admin_settings_change(base: &CoreSettings, s: &Settings) -> bool {
     let m = merge_settings(base, s);
     m.debug_mode != base.debug_mode
@@ -464,6 +467,8 @@ pub(crate) fn admin_settings_change(base: &CoreSettings, s: &Settings) -> bool {
         || m.bt_chip_pid != base.bt_chip_pid
         || m.bt_chip_fw_stem != base.bt_chip_fw_stem
         || m.realtek_custom_firmware != base.realtek_custom_firmware
+        || !m.adapter_id.eq_ignore_ascii_case(&base.adapter_id)
+        || !m.auracast_adapter_id.eq_ignore_ascii_case(&base.auracast_adapter_id)
         || m.afh != base.afh
         || m.remote_sink != base.remote_sink
 }
@@ -574,6 +579,8 @@ fn merge_settings(base: &CoreSettings, s: &Settings) -> CoreSettings {
     c.bt_chip_pid = s.bt_chip_pid;
     c.bt_chip_fw_stem = s.bt_chip_fw_stem.clone();
     c.realtek_custom_firmware = s.realtek_custom_firmware;
+    c.adapter_id = s.adapter_id.trim().to_string();
+    c.auracast_adapter_id = s.auracast_adapter_id.trim().to_string();
     c.afh = s.afh.clone();
     c.remote_sink = s.remote_sink.clone();
     c.le_audio_experimental = s.le_audio_experimental;
@@ -1244,9 +1251,15 @@ pub struct BroadcastStream {
     pub code: Option<String>,
     /// "hq" or "sq"
     pub quality: String,
+    /// A matrix layout's rear: "hq" or "sq"; None: `quality`
+    pub rear_quality: Option<String>,
     pub mono: Option<bool>,
-    /// Left and right as two broadcasts of their own
+    /// Left and right as two broadcasts of their own (layout "split"
+    /// when no `layout` is given)
     pub split: Option<bool>,
+    /// The channels and broadcasts (`BroadcastLayout::as_str`); None:
+    /// stereo (or split)
+    pub layout: Option<String>,
     pub source: String,
     pub source_id: Option<String>,
     pub source_name: Option<String>,
@@ -1256,13 +1269,28 @@ pub struct BroadcastStream {
 /// stream.start_custom, no device, LE Audio with the broadcast
 pub fn broadcast_request(b: &BroadcastStream, legacy_max_media_payload: u16) -> Result<StreamRequest, ErrorInfo> {
     const METHOD: &str = "stream.start_broadcast";
-    let preset = match b.quality.trim().to_ascii_lowercase().as_str() {
-        "" | "hq" => bluecaster_core::BROADCAST_PRESET_HQ,
-        "sq" => bluecaster_core::BROADCAST_PRESET_SQ,
-        other => return Err(bad_request("stream.bad_quality", METHOD, format!("unknown quality \"{other}\""))),
+    let preset_of = |q: &str| match q.trim().to_ascii_lowercase().as_str() {
+        "" | "hq" => Ok(bluecaster_core::BROADCAST_PRESET_HQ),
+        "sq" => Ok(bluecaster_core::BROADCAST_PRESET_SQ),
+        other => Err(bad_request("stream.bad_quality", METHOD, format!("unknown quality \"{other}\""))),
     };
-    // One mono channel, or left and right as broadcasts of their own: not both
-    if b.mono == Some(true) && b.split == Some(true) {
+    let preset = preset_of(&b.quality)?;
+    let rear_preset = b.rear_quality.as_deref().map(preset_of).transpose()?;
+    let layout = match b.layout.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
+        None if b.split == Some(true) => bt_host::BroadcastLayout::Split,
+        None => bt_host::BroadcastLayout::Stereo,
+        Some(l) => bt_host::BroadcastLayout::parse(l).ok_or_else(|| {
+            bad_request(
+                "stream.bad_layout",
+                METHOD,
+                format!("unknown layout \"{l}\" (one of {})", bt_host::BroadcastLayout::NAMES),
+            )
+        })?,
+    };
+    // One mono channel, or left and right as broadcasts of their own (or
+    // any layout of more than one channel): not both
+    let one_channel = matches!(layout, bt_host::BroadcastLayout::Stereo | bt_host::BroadcastLayout::Mono);
+    if b.mono == Some(true) && !one_channel {
         return Err(bad_request("stream.bad_channels", METHOD, "mono and split cannot be used together".into()));
     }
     let c = CustomStream {
@@ -1282,7 +1310,8 @@ pub fn broadcast_request(b: &BroadcastStream, legacy_max_media_payload: u16) -> 
             name: b.name.clone(),
             code: b.code.clone(),
             mono: b.mono.unwrap_or(false),
-            split: b.split.unwrap_or(false),
+            layout,
+            rear_preset: rear_preset.map(Into::into),
         }),
         ..bt_host::LeRequest::default()
     });
@@ -1479,11 +1508,13 @@ fn autostart_changed(before: &CoreSettings, after: &CoreSettings) -> bool {
         || (after.start_with_windows && before.start_minimized != after.start_minimized)
 }
 
-/// The chip or firmware setting changed: the stack must load firmware anew
+/// The chip or firmware setting, or the adapter to use, changed: the stack
+/// must start anew
 fn chip_changed(before: &CoreSettings, after: &CoreSettings) -> bool {
     before.bt_chip_pid != after.bt_chip_pid
         || before.bt_chip_fw_stem != after.bt_chip_fw_stem
         || before.realtek_custom_firmware != after.realtek_custom_firmware
+        || !before.adapter_id.eq_ignore_ascii_case(&after.adapter_id)
 }
 
 /// The codec and what it runs with: "LDAC 990 kbps | 96 kHz | 24-bit | ABR"
@@ -3111,12 +3142,15 @@ impl CoreState {
         Ok(())
     }
 
+    /// Error developer.off while developer mode is off
+    fn developer_only(&self) -> Result<(), ErrorInfo> {
+        if self.service.settings().debug_mode { Ok(()) } else { Err(err("developer.off", "ipc.error.developer_only")) }
+    }
+
     /// stream.start_broadcast (developer mode)
     pub fn start_broadcast(&self, b: &BroadcastStream) -> Result<(), ErrorInfo> {
+        self.developer_only()?;
         let settings = self.service.settings();
-        if !settings.debug_mode {
-            return Err(err("developer.off", "ipc.error.developer_only"));
-        }
         let mut req = broadcast_request(b, settings.legacy_max_media_payload())?;
         req.mute_output = settings.mutes_output();
         tracing::info!("broadcast \"{}\": quality {}, source {}", b.name, b.quality, req.source);
@@ -3781,8 +3815,30 @@ impl CoreState {
                 };
                 self.start_custom(&c).map(|()| Value::Null)
             }
-            Method::StreamStartBroadcast { name, code, quality, mono, split, source, source_id, source_name } => {
-                let b = BroadcastStream { name, code, quality, mono, split, source, source_id, source_name };
+            Method::StreamStartBroadcast {
+                name,
+                code,
+                quality,
+                rear_quality,
+                mono,
+                split,
+                layout,
+                source,
+                source_id,
+                source_name,
+            } => {
+                let b = BroadcastStream {
+                    name,
+                    code,
+                    quality,
+                    rear_quality,
+                    mono,
+                    split,
+                    layout,
+                    source,
+                    source_id,
+                    source_name,
+                };
                 self.start_broadcast(&b).map(|()| Value::Null)
             }
             Method::StreamStop => {
@@ -3909,6 +3965,52 @@ impl CoreState {
                 Ok(Value::Null)
             }
             Method::ProfileSave { profile, original_name } => self.save_profile(&profile, original_name),
+            Method::AuracastSetSource { source } => {
+                self.developer_only()?;
+                let source = match source.trim().to_ascii_lowercase().as_str() {
+                    "tone" => bluecaster_core::stream::SourceRequest::TestTone,
+                    "" | "loopback" => bluecaster_core::stream::SourceRequest::SystemLoopback,
+                    other => {
+                        return Err(bad_request(
+                            "stream.bad_source",
+                            "auracast.set_source",
+                            format!("unknown source \"{other}\""),
+                        ));
+                    }
+                };
+                Ok(Value::Bool(self.service.change_source(source)))
+            }
+            Method::AuracastMixGet { channels, rear } => {
+                self.developer_only()?;
+                Ok(json(&bluecaster_core::auracast_mix::state(&self.config_dir(), channels, rear)))
+            }
+            Method::AuracastMixSet { mix, channels, rear } => {
+                self.developer_only()?;
+                let dir = self.config_dir();
+                bluecaster_core::auracast_mix::set(&dir, &mix).map_err(|e| {
+                    tracing::warn!("Auracast mixer: not saved: {e}");
+                    err("auracast.mix_save_failed", "error.settings_save")
+                })?;
+                Ok(json(&bluecaster_core::auracast_mix::state(&dir, channels, rear)))
+            }
+            Method::AuracastMixPresetSave { name, mix } => {
+                self.developer_only()?;
+                let dir = self.config_dir();
+                bluecaster_core::auracast_mix::save_preset(&dir, &name, &mix).map_err(|e| {
+                    tracing::warn!("Auracast mixer: preset not saved: {e}");
+                    err("auracast.mix_save_failed", "error.settings_save")
+                })?;
+                Ok(json(&bluecaster_core::auracast_mix::state(&dir, None, None)))
+            }
+            Method::AuracastMixPresetDelete { name } => {
+                self.developer_only()?;
+                let dir = self.config_dir();
+                bluecaster_core::auracast_mix::delete_preset(&dir, &name).map_err(|e| {
+                    tracing::warn!("Auracast mixer: preset not deleted: {e}");
+                    err("auracast.mix_save_failed", "error.settings_save")
+                })?;
+                Ok(json(&bluecaster_core::auracast_mix::state(&dir, None, None)))
+            }
             Method::MediaEqPreview { name, eq } => {
                 let (_, s) = self.snapshot();
                 if restart_after_save(&s.stream, &name) {
@@ -4765,7 +4867,9 @@ mod tests {
         for (mono, split) in [(Some(true), Some(false)), (Some(false), Some(true)), (None, None), (Some(true), None)] {
             let req = broadcast_request(&b(mono, split), 0).expect("accepted");
             let le = req.le.and_then(|l| l.broadcast).expect("a broadcast");
-            assert_eq!((le.mono, le.split), (mono.unwrap_or(false), split.unwrap_or(false)));
+            let layout =
+                if split == Some(true) { bt_host::BroadcastLayout::Split } else { bt_host::BroadcastLayout::Stereo };
+            assert_eq!((le.mono, le.layout), (mono.unwrap_or(false), layout));
         }
     }
 
@@ -6323,6 +6427,7 @@ mod tests {
         assert!(chip_changed(&a, &CoreSettings { bt_chip_pid: 0x8771, ..a.clone() }));
         assert!(chip_changed(&a, &CoreSettings { bt_chip_fw_stem: "rtl8761bu".into(), ..a.clone() }));
         assert!(chip_changed(&a, &CoreSettings { realtek_custom_firmware: true, ..a.clone() }));
+        assert!(chip_changed(&a, &CoreSettings { adapter_id: "USB\\VID_8087&PID_0033\\1".into(), ..a.clone() }));
     }
 
     #[test]

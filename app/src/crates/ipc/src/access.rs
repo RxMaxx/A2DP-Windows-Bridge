@@ -73,6 +73,13 @@ pub fn access(m: &Method) -> Access {
         Method::ProfileSetHeadsetMic { .. } | Method::ProfileSetMicMuted { .. } | Method::ProfileSetMediaEq { .. } => {
             Open
         }
+        // Developer mode only, as stream.start_broadcast: the mix of a
+        // broadcast and its source (the test tone or system audio)
+        Method::AuracastMixGet { .. }
+        | Method::AuracastMixSet { .. }
+        | Method::AuracastMixPresetSave { .. }
+        | Method::AuracastMixPresetDelete { .. }
+        | Method::AuracastSetSource { .. } => Open,
         // Developer mode and what it sets, the chip and firmware settings
         Method::SettingsSet { .. } => Depends,
         Method::AdapterList

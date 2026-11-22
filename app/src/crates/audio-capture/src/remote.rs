@@ -32,10 +32,15 @@ use crate::{
 
 /// Opens captures in the session agent (installed by the core)
 pub trait CaptureAgent: Send + Sync + 'static {
-    /// Opens `source` in the agent: the format it delivers and the channel
-    /// to start. Blocks the calling thread until the agent answers (or its
+    /// Opens `source` in the agent: the format it delivers, the speakers
+    /// of its channels ([`Capture::channel_mask`]) and the channel to
+    /// start. Blocks the calling thread until the agent answers (or its
     /// timeout): not for an audio thread.
-    fn open(&self, source: &Source, options: &CaptureOptions) -> Result<(Format, Box<dyn AgentChannel>), CaptureError>;
+    fn open(
+        &self,
+        source: &Source,
+        options: &CaptureOptions,
+    ) -> Result<(Format, u32, Box<dyn AgentChannel>), CaptureError>;
 }
 
 /// One capture channel in the agent. Dropping it closes the channel there
@@ -385,19 +390,20 @@ impl Debug for CaptureWorker {
 
 impl CaptureWorker {
     /// Opens the ring `channel` the core created and `source` (in this
-    /// process, never through an agent): the format it delivers
+    /// process, never through an agent): the format it delivers and the
+    /// speakers of its channels ([`Capture::channel_mask`])
     pub fn open(
         channel: &str,
         source: &Source,
         options: &CaptureOptions,
-    ) -> Result<(CaptureWorker, Format), CaptureError> {
+    ) -> Result<(CaptureWorker, Format, u32), CaptureError> {
         if !valid_channel(channel) {
             return Err(CaptureError::Agent("not a channel name".into()));
         }
         let link = Link::open(channel).map_err(|e| CaptureError::Agent(format!("cannot open the audio link: {e}")))?;
         let capture = Capture::open_local(source, options)?;
-        let format = capture.format();
-        Ok((CaptureWorker { link, opened: Some(capture), monitor: None }, format))
+        let (format, channel_mask) = (capture.format(), capture.channel_mask());
+        Ok((CaptureWorker { link, opened: Some(capture), monitor: None }, format, channel_mask))
     }
 
     /// Starts the source into the ring
@@ -483,7 +489,8 @@ mod tests {
         let ch = channel();
         let link = Link::create(&ch, CAPTURE_RING_BYTES).unwrap();
         let opts = CaptureOptions { preferred_rate: Some(44_100), fill_silence: false };
-        let (mut worker, format) = CaptureWorker::open(&ch, &Source::TestTone, &opts).unwrap();
+        let (mut worker, format, mask) = CaptureWorker::open(&ch, &Source::TestTone, &opts).unwrap();
+        assert_eq!(mask, 0x3, "the test tone is front left and right");
         assert_eq!(format, Format { sample_rate: 44_100, channels: 2, sample_format: SampleFormat::F32 });
         let got = Arc::new(Mutex::new(Got::default()));
         let lost = Arc::new(AtomicBool::new(false));
@@ -589,7 +596,7 @@ mod tests {
         assert!(matches!(err, CaptureError::Agent(_)), "{err}");
         assert!(CaptureWorker::open("x/../y", &Source::TestTone, &CaptureOptions::default()).is_err());
         // Started twice
-        let (mut worker, _) = CaptureWorker::open(&ch, &Source::TestTone, &CaptureOptions::default()).unwrap();
+        let (mut worker, ..) = CaptureWorker::open(&ch, &Source::TestTone, &CaptureOptions::default()).unwrap();
         worker.start().unwrap();
         assert!(matches!(worker.start(), Err(CaptureError::Agent(_))));
     }

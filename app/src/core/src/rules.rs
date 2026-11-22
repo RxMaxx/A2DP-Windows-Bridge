@@ -346,6 +346,8 @@ mod tests {
             ("dev_log", settings_call(|x| x.dev_log.keep_days += 1)),
             ("custom firmware", settings_call(|x| x.realtek_custom_firmware = !x.realtek_custom_firmware)),
             ("chip", settings_call(|x| x.bt_chip_pid = 0x1234)),
+            ("adapter", settings_call(|x| x.adapter_id = "USB/VID_0001&PID_0002/1".into())),
+            ("Auracast adapter", settings_call(|x| x.auracast_adapter_id = "USB/VID_0001&PID_0002/1".into())),
             ("firmware stem", settings_call(|x| x.bt_chip_fw_stem = "x".into())),
             ("afh", settings_call(|x| x.afh = "other".into())),
             ("receiver", settings_call(|x| x.remote_sink = "10.0.0.1".into())),

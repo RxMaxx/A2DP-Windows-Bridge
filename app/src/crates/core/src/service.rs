@@ -584,6 +584,19 @@ impl Drop for SettingsTxGuard<'_> {
     }
 }
 
+/// A broadcast session's claim on the Auracast adapter
+/// ([`Inner::broadcast_wanted`]): dropped when the session ends, so the
+/// next scan or connection goes back on the adapter to use
+pub(crate) struct BroadcastGuard(Arc<Inner>);
+
+impl Drop for BroadcastGuard {
+    fn drop(&mut self) {
+        self.0.broadcast.store(false, Ordering::Release);
+        self.0.broadcast_adapter.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.0.leave_broadcast_adapter();
+    }
+}
+
 pub(crate) struct Inner {
     opts: ServiceOptions,
     pub settings: Mutex<Settings>,
@@ -624,6 +637,16 @@ pub(crate) struct Inner {
     pub mic_dsp: voice_link::MicDsp,
     /// The running stack was started with LE Audio
     le_active: AtomicBool,
+    /// A broadcast session wants the stack (le_stream::run_broadcast): it
+    /// opens the Auracast adapter (adapter::adapter_for)
+    broadcast: AtomicBool,
+    /// The adapter the running stack was started for (adapter::adapter_for;
+    /// empty: automatic)
+    host_adapter: Mutex<String>,
+    /// The adapter the running broadcast's stack opened (its instance ID):
+    /// a broadcast set up again goes on the same one, also when none is
+    /// chosen; empty: no broadcast, or none opened yet
+    broadcast_adapter: Mutex<String>,
     /// A device scan runs
     scanning: AtomicBool,
     /// The LE Audio stream being sent (le_stream)
@@ -642,6 +665,10 @@ pub(crate) struct Inner {
     turned_off: AtomicBool,
     /// The source the running A2DP session changes to at its next tick
     source_change: Mutex<Option<SourceRequest>>,
+    /// The source a broadcast went on with after the one it was changed to
+    /// could not be captured: the request is put back to it
+    /// ([`Service::change_source`], [`Service::restart_adapter`])
+    source_kept: Mutex<Option<SourceRequest>>,
     /// Other bitpools for the session to take in place
     /// ([`Service::change_bitpools`])
     bitpool_change: Mutex<Option<stream::Bitpools>>,
@@ -691,6 +718,12 @@ impl Inner {
 
     pub fn take_source_change(&self) -> Option<SourceRequest> {
         self.source_change.lock().unwrap_or_else(|e| e.into_inner()).take()
+    }
+
+    /// The session could not capture the source it was changed to and plays
+    /// `source` again
+    pub fn keep_source(&self, source: SourceRequest) {
+        *self.source_kept.lock().unwrap_or_else(|e| e.into_inner()) = Some(source);
     }
 
     pub fn take_bitpool_change(&self) -> Option<stream::Bitpools> {
@@ -810,8 +843,90 @@ impl Inner {
         self.le_active.load(Ordering::Acquire)
     }
 
+    /// The adapter the next stack opens first: the Auracast adapter while a
+    /// broadcast wants the stack, else the adapter to use
+    fn wanted_adapter(&self) -> String {
+        let s = self.settings.lock().unwrap_or_else(|e| e.into_inner());
+        crate::adapter::adapter_for(&s, self.broadcast.load(Ordering::Acquire)).to_string()
+    }
+
+    /// The adapter a broadcast set up again goes on: the chosen one, else
+    /// the one its stack opened before (empty: none opened yet)
+    fn broadcast_adapter(&self) -> String {
+        let wanted = self.wanted_adapter();
+        if wanted.is_empty() {
+            self.broadcast_adapter.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        } else {
+            wanted
+        }
+    }
+
+    /// The adapter the broadcast's next stack opens first is there (always,
+    /// when none is chosen and none was opened yet, or with a virtual
+    /// controller)
+    pub(crate) fn wanted_adapter_present(&self) -> bool {
+        self.opts.hci_tcp.is_some() || crate::adapter::chosen_present(&self.broadcast_adapter())
+    }
+
+    /// The Auracast adapter is set and not there: a broadcast would go on
+    /// the first other adapter found
+    pub(crate) fn auracast_adapter_missing(&self) -> bool {
+        if self.opts.hci_tcp.is_some() {
+            return false;
+        }
+        let id = {
+            let s = self.settings.lock().unwrap_or_else(|e| e.into_inner());
+            if s.debug_mode { s.auracast_adapter_id.trim().to_string() } else { String::new() }
+        };
+        !id.is_empty() && !crate::adapter::chosen_present(&id)
+    }
+
+    /// The broadcast's stack is up: the adapter it opened is the one a
+    /// set-up after a loss waits for and opens again
+    pub(crate) fn note_broadcast_adapter(&self) {
+        if self.opts.hci_tcp.is_none()
+            && let Some(id) = hci_transport::usb::last_opened_instance()
+        {
+            *self.broadcast_adapter.lock().unwrap_or_else(|e| e.into_inner()) = id;
+        }
+    }
+
+    /// A broadcast session wants the stack, until the guard drops: the
+    /// next stack started or checked (ensure_host) is the Auracast
+    /// adapter's
+    pub(crate) fn broadcast_wanted(self: &Arc<Self>) -> BroadcastGuard {
+        self.broadcast_adapter.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.broadcast.store(true, Ordering::Release);
+        BroadcastGuard(self.clone())
+    }
+
+    /// The broadcast ended on an adapter of its own: that stack is shut
+    /// down, so the Auracast adapter is free and not shown as in use; the
+    /// next scan or connection starts one on the adapter to use
+    fn leave_broadcast_adapter(&self) {
+        let mut slot = self.host.lock().unwrap_or_else(|e| e.into_inner());
+        let same =
+            self.host_adapter.lock().unwrap_or_else(|e| e.into_inner()).eq_ignore_ascii_case(&self.wanted_adapter());
+        if same {
+            return;
+        }
+        if let Some(h) = slot.take() {
+            tracing::info!("Auracast: the broadcast ended, leaving the Auracast adapter");
+            h.shutdown();
+            self.adapter_changed(false);
+        }
+    }
+
     fn host_config(&self, le_on: bool) -> HostConfig {
-        let s = self.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let mut s = self.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        // The Auracast adapter for a broadcast: configure opens it first
+        s.adapter_id = self.wanted_adapter();
+        *self.host_adapter.lock().unwrap_or_else(|e| e.into_inner()) = s.adapter_id.clone();
+        // A broadcast set up again with no adapter chosen: the one it ran on
+        // before, not the first one found (host_adapter stays "automatic")
+        if self.broadcast.load(Ordering::Acquire) {
+            s.adapter_id = self.broadcast_adapter();
+        }
         let transport = match &self.opts.hci_tcp {
             Some(addr) => TransportConfig::Tcp(addr.clone()),
             // bt-host adds the adapters it knows to `known`
@@ -1061,6 +1176,18 @@ impl Inner {
                 // Turned on or off while streaming or scanning: applied now,
                 // before the next scan or connection (v1)
                 Some(if le_wanted { "LE Audio was turned on" } else { "LE Audio was turned off" })
+            } else if !self
+                .host_adapter
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .eq_ignore_ascii_case(&self.wanted_adapter())
+            {
+                // A broadcast on the Auracast adapter, or back from it
+                Some(if self.broadcast.load(Ordering::Acquire) {
+                    "the broadcast goes on the Auracast adapter"
+                } else {
+                    "back on the adapter to use after a broadcast"
+                })
             } else if (self.voice_wanted.load(Ordering::Acquire) || self.mic_test.needs_voice()) && !h.voice_enabled() {
                 Some("headset mode needs the stack with voice")
             } else if self.hid_wanted() != h.hid_enabled() {
@@ -1506,6 +1633,9 @@ impl Service {
             hid: Default::default(),
             mic_dsp: voice_link::MicDsp::new(),
             le_active: AtomicBool::new(false),
+            broadcast: AtomicBool::new(false),
+            host_adapter: Mutex::new(String::new()),
+            broadcast_adapter: Mutex::new(String::new()),
             scanning: AtomicBool::new(false),
             le_stream: Mutex::new(None),
             le_support: Mutex::new(None),
@@ -1513,6 +1643,7 @@ impl Service {
             waiting: AtomicBool::new(false),
             turned_off: AtomicBool::new(false),
             source_change: Mutex::new(None),
+            source_kept: Mutex::new(None),
             bitpool_change: Mutex::new(None),
             unlisted_keeps: Mutex::new(None),
         });
@@ -1704,22 +1835,40 @@ impl Service {
         }
     }
 
-    /// Changes the source of the running A2DP stream: the link stays up.
-    /// False when none is streaming (it connects or reconnects, a start or
-    /// stop is under way, LE Audio has its own capture path): the caller
+    /// Changes the source of the running A2DP stream or Auracast broadcast:
+    /// the link (the BIGs) stays up. False when none is streaming (it
+    /// connects or reconnects, a start or stop is under way, an LE Audio
+    /// unicast stream, application capture for a broadcast): the caller
     /// starts it again instead.
     pub fn change_source(&self, source: SourceRequest) -> bool {
         let Ok(_control) = self.control.try_lock() else { return false };
         if !self.is_running() || self.state() != StreamState::Streaming {
             return false;
         }
+        self.follow_kept_source();
         match self.last_request.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
             Some(req) if req.le.is_none() => req.source = source.clone(),
+            Some(req)
+                if req.le.as_ref().is_some_and(|l| l.broadcast.is_some())
+                    && !matches!(source, SourceRequest::Application { .. }) =>
+            {
+                req.source = source.clone()
+            }
             _ => return false,
         }
         *self.inner.source_change.lock().unwrap_or_else(|e| e.into_inner()) = Some(source);
         self.inner.tick.1.notify_all();
         true
+    }
+
+    /// A change of source the session could not make
+    /// ([`Inner::keep_source`]): the request names the source that plays
+    fn follow_kept_source(&self) {
+        let kept = self.inner.source_kept.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let (Some(source), Some(req)) = (kept, self.last_request.lock().unwrap_or_else(|e| e.into_inner()).as_mut())
+        {
+            req.source = source;
+        }
     }
 
     /// Headset mode off, on or auto, its output and the best call codec
@@ -1964,6 +2113,7 @@ impl Service {
     /// Disconnect, and not when the headphones were turned off: a session
     /// that waits for them just ends (issue #86).
     pub fn restart_adapter(&self) -> Option<StreamRequest> {
+        self.follow_kept_source();
         let last = self.last_request.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let again = reconnect_after_restart(
             self.is_running() && self.inner.stop_requested(),
@@ -2567,6 +2717,33 @@ mod tests {
     }
 
     #[test]
+    fn a_broadcast_set_up_again_goes_on_the_adapter_it_ran_on() {
+        const OPENED: &str = r"USB\VID_1234&PID_5678\NOT-THERE";
+        const AURACAST: &str = r"USB\VID_1234&PID_5678\NOT-THERE-EITHER";
+        let s = service();
+        let inner = &s.inner;
+        // Nothing chosen, none opened yet: automatic, nothing to wait for
+        assert_eq!(inner.broadcast_adapter(), "");
+        assert!(inner.wanted_adapter_present());
+        assert!(!inner.auracast_adapter_missing());
+        let guard = inner.broadcast_wanted();
+        // The adapter the stack opened is the one to wait for
+        *inner.broadcast_adapter.lock().unwrap() = OPENED.into();
+        assert_eq!(inner.broadcast_adapter(), OPENED);
+        assert!(!inner.wanted_adapter_present());
+        // The Auracast adapter comes first, in developer mode only
+        inner.settings.lock().unwrap().auracast_adapter_id = AURACAST.into();
+        assert!(!inner.auracast_adapter_missing());
+        assert_eq!(inner.broadcast_adapter(), OPENED);
+        inner.settings.lock().unwrap().debug_mode = true;
+        assert!(inner.auracast_adapter_missing());
+        assert_eq!(inner.broadcast_adapter(), AURACAST);
+        // The session ended: the next broadcast starts anew
+        drop(guard);
+        assert_eq!(*inner.broadcast_adapter.lock().unwrap(), "");
+    }
+
+    #[test]
     fn the_output_mute_takes_developer_mode_and_spares_the_test_tone() {
         let settings = |debug_mode, volume_mixer, mute_output| crate::settings::Settings {
             debug_mode,
@@ -2756,6 +2933,18 @@ mod tests {
         *s.last_request.lock().unwrap() = Some(StreamRequest { le: Some(le), ..request() });
         assert!(!s.change_source(tone()));
         assert_eq!(s.inner.take_source_change(), None);
+        // An Auracast broadcast: in place too, but not to an application
+        let b = bt_host::LeRequest { broadcast: Some(bt_host::LeBroadcast::default()), ..Default::default() };
+        *s.last_request.lock().unwrap() = Some(StreamRequest { le: Some(b), ..request() });
+        assert!(!s.change_source(SourceRequest::Application { exe: "a.exe".into() }));
+        assert!(s.change_source(tone()));
+        assert_eq!(s.inner.take_source_change(), Some(tone()));
+        // The broadcast could not capture it and kept the old source: so
+        // does the request
+        s.inner.keep_source(SourceRequest::SystemLoopback);
+        s.follow_kept_source();
+        let kept = s.last_request.lock().unwrap().as_ref().map(|r| r.source.clone());
+        assert_eq!(kept, Some(SourceRequest::SystemLoopback));
         // A start or stop under way
         *s.last_request.lock().unwrap() = Some(request());
         let control = s.control.lock().unwrap();

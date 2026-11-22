@@ -238,6 +238,7 @@ enum Backend {
 /// delivered. Dropping it closes the source.
 pub struct Capture {
     format: Format,
+    channel_mask: u32,
     backend: Option<Backend>,
 }
 
@@ -246,48 +247,54 @@ impl Capture {
     /// ([`use_capture_agent`]), else in this process
     pub fn open(source: &Source, options: &CaptureOptions) -> Result<Capture, CaptureError> {
         if let Some(agent) = remote::agent() {
-            let (format, channel) = agent.open(source, options)?;
-            return Ok(Capture { format, backend: Some(Backend::Remote(channel)) });
+            let (format, channel_mask, channel) = agent.open(source, options)?;
+            return Ok(Capture { format, channel_mask, backend: Some(Backend::Remote(channel)) });
         }
         Capture::open_local(source, options)
     }
 
     /// Opens `source` in this process, whether or not an agent is installed
     pub fn open_local(source: &Source, options: &CaptureOptions) -> Result<Capture, CaptureError> {
-        let (format, backend) = match source {
+        let (format, channel_mask, backend) = match source {
             Source::SystemLoopback => {
                 let o = loopback::Opened::open(loopback::Target::Device(None), options)?;
-                (o.format, Backend::Loopback(o))
+                (o.format, o.channel_mask, Backend::Loopback(o))
             }
             Source::RenderDevice { id } => {
                 if id.is_empty() {
                     return Err(CaptureError::DeviceNotFound(String::new()));
                 }
                 let o = loopback::Opened::open(loopback::Target::Device(Some(id.clone())), options)?;
-                (o.format, Backend::Loopback(o))
+                (o.format, o.channel_mask, Backend::Loopback(o))
             }
             Source::Application { process_id } => {
                 let o = loopback::Opened::open(loopback::Target::Process(*process_id), options)?;
-                (o.format, Backend::Loopback(o))
+                (o.format, o.channel_mask, Backend::Loopback(o))
             }
             Source::TestTone => {
                 let rate = options.preferred_rate.filter(|&r| r >= 100).unwrap_or(DEFAULT_RATE);
                 tracing::debug!("audio source: test tone, requested {:?}, using {rate} Hz", options.preferred_rate);
-                (tone::format(rate), Backend::Tone)
+                (tone::format(rate), loopback::STEREO_MASK, Backend::Tone)
             }
         };
-        Ok(Capture { format, backend: Some(backend) })
+        Ok(Capture { format, channel_mask, backend: Some(backend) })
     }
 
     /// A source the session agent opened ([`CaptureAgent::open`]), not
-    /// started yet
-    pub fn from_agent(format: Format, channel: Box<dyn AgentChannel>) -> Capture {
-        Capture { format, backend: Some(Backend::Remote(channel)) }
+    /// started yet. `channel_mask`: as [`Capture::channel_mask`].
+    pub fn from_agent(format: Format, channel_mask: u32, channel: Box<dyn AgentChannel>) -> Capture {
+        Capture { format, channel_mask, backend: Some(Backend::Remote(channel)) }
     }
 
     /// The format the source will deliver
     pub fn format(&self) -> Format {
         self.format
+    }
+
+    /// The speakers of the delivered channels, in their interleaved order
+    /// (WAVEFORMATEXTENSIBLE dwChannelMask bits; 0 = not stated)
+    pub fn channel_mask(&self) -> u32 {
+        self.channel_mask
     }
 
     /// Start delivering to `sink` on the capture thread
