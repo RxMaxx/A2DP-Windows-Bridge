@@ -1444,13 +1444,26 @@ impl Service {
             settings.debug_mode
         );
         apply_dev_overrides(&settings);
-        let host = self.host();
-        if let Some(h) = &host {
-            h.set_media_keys(settings.media_keys);
-            h.set_afh_policy(self.inner.opts.afh.as_deref().unwrap_or(afh_policy(&settings)));
-        }
+        let media_keys = settings.media_keys;
+        let afh = self.inner.opts.afh.clone().unwrap_or_else(|| afh_policy(&settings).to_owned());
         let old = std::mem::replace(&mut *self.inner.settings.lock().unwrap_or_else(|e| e.into_inner()), settings);
         let new_le = self.inner.settings.lock().unwrap_or_else(|e| e.into_inner()).le_audio();
+        // A stack starting or stopping holds the slot, for up to tens of
+        // seconds with an adapter that does not answer: the settings are not
+        // kept waiting. A stack that starts reads them once it is up, and
+        // the next scan or connection checks LE Audio (ensure_host)
+        let host = match self.inner.host.try_lock() {
+            Ok(slot) => slot.clone(),
+            Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner().clone(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                tracing::debug!("settings applied: the stack is starting or stopping, it reads them when up");
+                None
+            }
+        };
+        if let Some(h) = &host {
+            h.set_media_keys(media_keys);
+            h.set_afh_policy(&afh);
+        }
         if old.le_audio() != new_le && host.is_some() && self.inner.le_active() != self.inner.le_wanted() {
             if self.is_running() || self.is_scanning() {
                 tracing::info!(
