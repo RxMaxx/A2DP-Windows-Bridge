@@ -56,6 +56,7 @@ pub use btstack_sys::{CtkdOutcome, ImportedLeBond, LeBondAdded, LeKeys, expect_t
 pub use capture::HciCapture;
 pub use events::{addr_str, parse_addr};
 pub use hid::{HidConfig, HidCounters, HidEvent, Passkey};
+pub use le::api::LE_NO_LINK;
 pub use le::bap::{CigOverrides, set_cig_overrides};
 pub use le::gatt_cache as le_gatt_cache;
 pub use le::iso_recv::{

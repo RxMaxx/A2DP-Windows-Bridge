@@ -34,6 +34,8 @@ const RUN_TIMEOUT: Duration = Duration::from_secs(3);
 const START_TIMEOUT: Duration = Duration::from_secs(45);
 const STOP_TIMEOUT: Duration = Duration::from_secs(8);
 const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+/// [`BtHost::le_connect_within`]: the link did not come up
+pub const LE_NO_LINK: &str = "no answer at that address";
 /// Waits look at the cancel this often
 const POLL: Duration = Duration::from_millis(50);
 const FIND_POLL: Duration = Duration::from_millis(100);
@@ -185,13 +187,41 @@ impl BtHost {
     /// once. `addr` may be an RPA or the identity of a bonded device: the id
     /// is the same for both. Err: why, for the log.
     pub fn le_connect(&self, addr: LeAddr, name: &str, timeout: Duration) -> Result<LeDeviceId, String> {
+        self.le_connect_within(addr, name, timeout, timeout)
+    }
+
+    /// [`BtHost::le_connect`] that gives up ([`LE_NO_LINK`]) when the link
+    /// is not up after `link`: the private address of an earbud seen a moment
+    /// ago may be gone already (a WF-1000XM6 gave no answer for 30 s). To be
+    /// looked for again then.
+    pub fn le_connect_within(
+        &self,
+        addr: LeAddr,
+        name: &str,
+        link: Duration,
+        timeout: Duration,
+    ) -> Result<LeDeviceId, String> {
         if !self.le_ready() {
             return Err("LE Audio is not running".into());
         }
         tracing::info!("LE Audio: connecting to {addr} (address type {})", addr.addr_type);
         let result = Arc::new(Mutex::new(ConnectResult::default()));
         let (r, name) = (result.clone(), name.to_string());
-        let ok = self.le_wait(timeout, true, move |ctx, done| ctx.start_connect(addr, name, r, done));
+        let up = || {
+            let r = result.clone();
+            self.le_run(RUN_TIMEOUT, move |ctx| {
+                let id = r.lock().unwrap_or_else(|e| e.into_inner()).id;
+                id.is_some_and(|i| ctx.device(LeDeviceId(i)).is_some_and(|d| d.connected()))
+            })
+            .unwrap_or(false)
+        };
+        let mut no_link = false;
+        let ok = self.le_wait_link(
+            timeout,
+            true,
+            move |ctx, done| ctx.start_connect(addr, name, r, done),
+            Some((link, &up, &mut no_link)),
+        );
         let (id, error) = {
             let r = result.lock().unwrap_or_else(|e| e.into_inner());
             (r.id, r.error.clone())
@@ -206,6 +236,8 @@ impl BtHost {
                     error
                 } else if self.le_cancelled() {
                     "cancelled".into()
+                } else if no_link {
+                    LE_NO_LINK.into()
                 } else {
                     "no answer (timeout)".into()
                 };
@@ -476,16 +508,29 @@ impl BtHost {
         self.le.stream_lost.swap(false, Ordering::AcqRel)
     }
 
-    /// Members of the last stream's coordinated sets left out (not found,
-    /// or down): it plays on the others, e.g. one earbud of two
     /// Devices of the running stream that went away while the others play
-    /// on (an earbud put in its case); cleared when a stream starts
+    /// on (an earbud put in its case), and one that ended the stream with
+    /// its ASE; cleared when a stream starts
     pub fn le_stream_dropped(&self) -> Vec<LeDeviceId> {
         self.le.stream_dropped.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    /// Members of the last stream's coordinated sets left out (not found,
+    /// or down): it plays on the others, e.g. one earbud of two
     pub fn le_set_members_missing(&self) -> u32 {
         self.le.set_members_missing.load(Ordering::Acquire)
+    }
+
+    /// How long the stream set-ups from now on look for the members of a
+    /// coordinated set that are not connected: None, CSIP's own 10 s; zero,
+    /// not at all (the stream goes to the members connected). Per BtHost.
+    pub fn le_set_member_wait(&self, wait: Option<Duration>) {
+        tracing::debug!("LE Audio: look for missing set members: {wait:?}");
+        *self.le.set_member_wait.lock().unwrap_or_else(|e| e.into_inner()) = wait;
+    }
+
+    pub(crate) fn le_member_wait(&self) -> Option<Duration> {
+        *self.le.set_member_wait.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// CSIP: `n` members of a set are left out of the stream being set up
@@ -567,9 +612,22 @@ impl BtHost {
         cancellable: bool,
         f: impl FnOnce(&mut LeCtx<'_>, LeDone) + Send + 'static,
     ) -> bool {
+        self.le_wait_link(timeout, cancellable, f, None)
+    }
+
+    /// [`BtHost::le_wait`] that ends early, noting it, when `link`'s check
+    /// is false after its time
+    fn le_wait_link(
+        &self,
+        timeout: Duration,
+        cancellable: bool,
+        f: impl FnOnce(&mut LeCtx<'_>, LeDone) + Send + 'static,
+        mut link: Option<(Duration, &dyn Fn() -> bool, &mut bool)>,
+    ) -> bool {
         if !self.le_core_on {
             return false;
         }
+        let start = Instant::now();
         let signal = Arc::new(Signal::default());
         let s = signal.clone();
         let done: LeDone = Box::new(move |ok| s.set(ok));
@@ -585,6 +643,13 @@ impl BtHost {
             }
             if cancellable && self.le_cancelled() {
                 tracing::debug!("LE Audio: wait cancelled");
+                return false;
+            }
+            if let Some((_, up, none)) = link.take_if(|(after, ..)| *after < timeout && start.elapsed() >= *after)
+                && !up()
+            {
+                tracing::debug!("LE Audio: no link within {} ms", start.elapsed().as_millis());
+                *none = true;
                 return false;
             }
             if Instant::now() >= deadline {

@@ -385,7 +385,8 @@ reach `IsoSender::on_hci_event` through `LeCore::on_hci`).
 - Watchdog: a CIS without a completion for 2 s while SDUs wait in the
   controller is stalled ("CIS 0x....: no SDU completed for 2 s"). All CIS
   stalled -> the stream is reported lost and set up again; some -> the
-  others play on, `LeStreamStats::cis_stalled` and `status.le_set_partial`.
+  others play on, `LeStreamStats::cis_stalled` and `status.le_no_audio`. A
+  CIS stalled from the start has the session set the stream up again once.
 - Logs: every LE CIS Established ("CIS 0x.... parameters: NSE, BN, FT, max
   PDU, ISO interval, transport latency, PHY"), every 10 s "LE stream health"
   (per CIS: SDUs/s, late, completion delay p50 / p90, queue peak), and at the

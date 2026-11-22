@@ -542,6 +542,9 @@ pub trait UnicastEnv {
     /// A device of the running stream lost its link (or its CIS) while
     /// another one plays on (BtHost::le_stream_dropped)
     fn member_lost(&mut self, device: u32, why: &str);
+    /// The last device that streamed ended its ASE, its link still up
+    /// (BtHost::le_stream_dropped has it too); stream_lost comes next
+    fn device_left(&mut self, device: u32);
     /// Audio flows (true) or stopped (false): the modules' on_stream_state
     fn stream_state(&mut self, plan: &StreamPlan, streaming: bool);
     fn arm(&mut self, timer: UnicastTimer, ms: u32);
@@ -1629,6 +1632,7 @@ impl Unicast {
                 if others_stream {
                     env.member_lost(dev.0, "its ASE left the Streaming state");
                 } else {
+                    env.device_left(dev.0);
                     env.stream_lost("an ASE left the Streaming state");
                 }
                 return;
@@ -1923,6 +1927,9 @@ mod tests {
         }
         fn member_lost(&mut self, device: u32, why: &str) {
             self.log.push(format!("member lost {device}: {why}"));
+        }
+        fn device_left(&mut self, device: u32) {
+            self.log.push(format!("device left {device}"));
         }
         fn stream_state(&mut self, _plan: &StreamPlan, streaming: bool) {
             self.log.push(format!("streaming {streaming}"));

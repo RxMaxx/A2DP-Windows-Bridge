@@ -310,6 +310,9 @@ pub(crate) struct LeShared {
     /// Members of the stream's coordinated sets that were not found or
     /// went down: the stream plays on the others (CSIP prepare_group)
     pub set_members_missing: AtomicU32,
+    /// How long CSIP prepare_group looks for the members of a set not
+    /// connected (None: its own time; zero: not at all)
+    pub set_member_wait: Mutex<Option<std::time::Duration>>,
     /// Devices of the running stream that lost their link or CIS while
     /// the others play on
     pub stream_dropped: Mutex<Vec<LeDeviceId>>,
@@ -2478,6 +2481,10 @@ impl UnicastEnv for LeCtx<'_> {
     fn member_lost(&mut self, device: u32, why: &str) {
         let addr = self.core.devices.get(device as usize).map(|d| d.addr.to_string()).unwrap_or_default();
         tracing::warn!("LE Audio: {addr} left the stream ({why}), the others play on");
+        self.device_left(device);
+    }
+
+    fn device_left(&mut self, device: u32) {
         let mut dropped = self.core.shared.stream_dropped.lock().unwrap_or_else(|e| e.into_inner());
         if !dropped.contains(&LeDeviceId(device)) {
             dropped.push(LeDeviceId(device));
