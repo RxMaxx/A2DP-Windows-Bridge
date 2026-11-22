@@ -137,13 +137,25 @@ impl BtHost {
     /// its index in `addrs` and what was found. None on timeout / cancel or
     /// when `addrs` is empty.
     pub fn le_find_any(&self, addrs: &[[u8; 6]], timeout: Duration) -> Option<(usize, LeScanResult)> {
+        self.find_any(addrs, timeout, false)
+    }
+
+    /// [`BtHost::le_find_any`] with a scan that leaves the radio to a
+    /// running stream most of the time (a short window every
+    /// 200 ms, [`QUIET_SCAN_INTERVAL`](super::core::QUIET_SCAN_INTERVAL)): the other earbud of a set looked for while
+    /// one plays
+    pub fn le_find_any_quietly(&self, addrs: &[[u8; 6]], timeout: Duration) -> Option<(usize, LeScanResult)> {
+        self.find_any(addrs, timeout, true)
+    }
+
+    fn find_any(&self, addrs: &[[u8; 6]], timeout: Duration, quiet: bool) -> Option<(usize, LeScanResult)> {
         if !self.le_ready() || addrs.is_empty() {
             return None;
         }
         self.le_fresh_operation();
         let wants: Vec<LeAddr> = addrs.iter().map(|&addr| LeAddr { addr, addr_type: LeAddr::RANDOM }).collect();
         let w = wants.clone();
-        self.le_run(RUN_TIMEOUT, move |ctx| ctx.start_find(&w));
+        self.le_run(RUN_TIMEOUT, move |ctx| ctx.start_find(&w, quiet));
         let end = Instant::now() + timeout;
         let mut found = None;
         let shown = wants.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
@@ -258,6 +270,7 @@ impl BtHost {
         }
         self.le.stream_lost.store(false, Ordering::Release);
         self.le.set_members_missing.store(0, Ordering::Release);
+        self.le.stream_dropped.lock().unwrap_or_else(|e| e.into_inner()).clear();
         let hooks = self.le.hooks();
         let cancelled = || self.le_cancelled();
         for h in &hooks {
@@ -302,6 +315,8 @@ impl BtHost {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .configure(queue_depth(iso_count, sending).max(1), silence(&plan));
+        // Those the plan streams to (one gone meanwhile is left out)
+        devices.retain(|d| plan.cis.iter().any(|c| c.device_id == d.0));
         let status = LeStreamStatus { active: false, plan: plan.clone(), devices, summary: plan.describe() };
 
         // The microphone's SDUs: a lock-free ring from the BTstack thread
@@ -463,6 +478,12 @@ impl BtHost {
 
     /// Members of the last stream's coordinated sets left out (not found,
     /// or down): it plays on the others, e.g. one earbud of two
+    /// Devices of the running stream that went away while the others play
+    /// on (an earbud put in its case); cleared when a stream starts
+    pub fn le_stream_dropped(&self) -> Vec<LeDeviceId> {
+        self.le.stream_dropped.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     pub fn le_set_members_missing(&self) -> u32 {
         self.le.set_members_missing.load(Ordering::Acquire)
     }

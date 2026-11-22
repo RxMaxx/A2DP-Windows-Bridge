@@ -57,6 +57,11 @@ const RECONNECT_ATTEMPTS: u32 = 3;
 const RECONNECT_WAIT: Duration = Duration::from_secs(3);
 /// One scan for headphones that were turned off; short to see a stop
 const OFF_FIND: Duration = Duration::from_secs(2);
+/// [`Rejoin`]: the look for a set member missing from the stream
+const REJOIN_FIRST: Duration = Duration::from_secs(3);
+const REJOIN_EVERY: Duration = Duration::from_secs(4);
+const REJOIN_MAX: Duration = Duration::from_secs(60);
+const REJOIN_SCAN: Duration = Duration::from_millis(1500);
 /// Broadcast presets of stream.start_broadcast's qualities: high (48 kHz)
 /// and standard (24 kHz)
 pub use le_audio::broadcast::{DEFAULT_PRESET as BROADCAST_PRESET_HQ, STANDARD_PRESET as BROADCAST_PRESET_SQ};
@@ -215,6 +220,14 @@ impl LeAudioPath {
     /// The captured speakers (dwChannelMask)
     pub fn channel_mask(&self) -> u32 {
         self.channel_mask
+    }
+
+    /// Both channels' mix on every channel (the earbud left alone) or the
+    /// plan's channels again
+    pub fn set_mono(&self, on: bool) {
+        if let Some(p) = &self.pipeline {
+            p.set_mono(on);
+        }
     }
 
     /// The captured format
@@ -655,6 +668,10 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
     // CIS of the stream that get no SDU through while the others play (an
     // earbud whose controller queue never empties)
     let mut shown_stalled = 0;
+    // Devices of the stream that went away while the others play on (an
+    // earbud put in its case), and when to look for the missing ones
+    let mut shown_dropped = 0;
+    let mut rejoin = Rejoin::new();
     while !stopped() {
         inner.wait_tick(Duration::from_millis(200));
         if stopped() {
@@ -691,8 +708,76 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
             mic_note = Some(Msg::new("status.headset_mic_output_failed"));
             inner.notify(StreamState::Streaming, Msg::new("status.headset_mic_output_failed"));
         }
-        if !host.le_stream_lost() {
+        let dropped = host.le_stream_dropped();
+        if dropped.len() != shown_dropped {
+            shown_dropped = dropped.len();
+            let playing = started.status.devices.iter().filter(|d| !dropped.contains(d)).count();
+            tracing::info!("LE Audio: {shown_dropped} device(s) left the stream, {playing} play on");
+            // The one left alone gets both channels
+            if let Some(a) = audio.as_ref() {
+                a.set_mono(playing <= 1);
+            }
+            // One whose link stayed up (its CIS or ASE ended) is let go: it
+            // comes back advertising, as one taken out of its case
+            for d in host.le_devices().iter().filter(|d| d.connected && dropped.contains(&d.id)) {
+                tracing::info!("LE Audio: disconnecting {}, it left the stream", d.addr);
+                host.le_disconnect(d.id);
+            }
+            inner.notify(StreamState::Streaming, Msg::new("status.le_set_partial"));
+            rejoin.look_soon();
+        }
+        let lost = host.le_stream_lost();
+        let member_back = if !lost
+            && inner.auto_reconnect()
+            && (shown_dropped > 0 || host.le_set_members_missing() > 0)
+            && rejoin.due()
+        {
+            let back = member_back(inner, &host, req.device, &devices, &started, &dropped);
+            rejoin.looked(back.is_some());
+            back
+        } else {
+            None
+        };
+        if !lost && member_back.is_none() {
             continue;
+        }
+
+        if let Some(back) = member_back {
+            // The other earbud is out of its case again: the stream is set
+            // up again with both (a short gap on the one that played)
+            tracing::info!("LE Audio: {} of the set is back, setting the stream up with it", bt_host::addr_str(&back));
+            inner.notify(StreamState::Connecting, Msg::new("status.le_set_member_back"));
+            if let Some(a) = audio.take() {
+                a.stop();
+            }
+            host.le_stop_stream();
+            stop_mic(inner, &mut mic);
+            match connect_and_stream() {
+                Ok(s) => {
+                    started = s;
+                    shown_dropped = 0;
+                    rejoin.restored(host.le_set_members_missing() == 0);
+                    tracing::info!("LE Audio stream set up with the member back: {}", started.status.summary);
+                    mic_streams += 1;
+                    mic = open_mic(inner, &mut started, mic_target.as_ref(), mic_streams, &mut mic_note);
+                    audio = match LeAudioPath::start(&req.source, &started, host.stats().clone(), None) {
+                        Ok(a) => Some(a),
+                        Err(e) => {
+                            tracing::error!("LE Audio: audio capture: {e}");
+                            inner.notify(StreamState::Error, Msg::new("error.wasapi_init"));
+                            lost_for_good = true;
+                            break;
+                        }
+                    };
+                    report(&started, audio.as_ref(), mic_note.as_ref());
+                    continue;
+                }
+                Err(m) => {
+                    // As a stream lost: the reconnect attempts below
+                    tracing::warn!("LE Audio: the stream with the member back failed: {}", m.english());
+                    rejoin.restored(false);
+                }
+            }
         }
 
         // A device or CIS went away: tear down and set it up again
@@ -772,6 +857,7 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
             break;
         };
         started = s;
+        shown_dropped = 0;
         tracing::info!("LE Audio stream restored: {}", started.status.summary);
         mic_streams += 1;
         mic = open_mic(inner, &mut started, mic_target.as_ref(), mic_streams, &mut mic_note);
@@ -1212,6 +1298,71 @@ fn device_turned_off(inner: &Inner, host: &BtHost, devices: &[[u8; 6]]) -> bool 
         }
         inner.wait_tick(Duration::from_millis(100));
     }
+}
+
+/// When the stream that plays on part of its set looks for the missing
+/// members (a quiet scan, [`REJOIN_SCAN`] long): [`REJOIN_FIRST`] after
+/// one went, then every [`REJOIN_EVERY`]; a member found that did not
+/// make it into the stream doubles the wait, up to [`REJOIN_MAX`] (no gap
+/// every few seconds for an earbud that advertises but does not stream)
+struct Rejoin {
+    next: Instant,
+    wait: Duration,
+}
+
+impl Rejoin {
+    fn new() -> Rejoin {
+        Rejoin { next: Instant::now() + REJOIN_FIRST, wait: REJOIN_EVERY }
+    }
+
+    fn look_soon(&mut self) {
+        self.next = Instant::now() + REJOIN_FIRST;
+    }
+
+    fn due(&self) -> bool {
+        Instant::now() >= self.next
+    }
+
+    /// A look ended (found: the stream is set up again now)
+    fn looked(&mut self, found: bool) {
+        if !found {
+            self.next = Instant::now() + self.wait;
+        }
+    }
+
+    /// The stream was set up with the member found: `complete`, every
+    /// member in it
+    fn restored(&mut self, complete: bool) {
+        self.wait = if complete { REJOIN_EVERY } else { (self.wait * 2).min(REJOIN_MAX) };
+        self.next = Instant::now() + self.wait;
+    }
+}
+
+/// A member of the set missing from the stream that advertises again (out
+/// of its case): its address
+fn member_back(
+    inner: &Inner,
+    host: &BtHost,
+    device: [u8; 6],
+    devices: &[[u8; 6]],
+    started: &LeStreamStarted,
+    dropped: &[LeDeviceId],
+) -> Option<[u8; 6]> {
+    let mut members = devices.to_vec();
+    members.extend(other_set_members(inner, host, device, devices));
+    let playing: Vec<[u8; 6]> = host
+        .le_devices()
+        .into_iter()
+        .filter(|d| d.connected && started.status.devices.contains(&d.id) && !dropped.contains(&d.id))
+        .map(|d| d.addr.addr)
+        .collect();
+    let missing: Vec<[u8; 6]> = members.into_iter().filter(|a| !playing.contains(a)).collect();
+    if missing.is_empty() {
+        return None;
+    }
+    let (i, found) = host.le_find_any_quietly(&missing, REJOIN_SCAN)?;
+    tracing::debug!("le stream: set member {} seen again as {}", bt_host::addr_str(&missing[i]), found.addr);
+    Some(missing[i])
 }
 
 /// The other members of `device`'s coordinated set (the other earbud), not

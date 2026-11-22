@@ -1231,6 +1231,7 @@
   "status.headset_mic_failed": "The headphones did not open their microphone. Playback continues normally.",
   "status.headset_mic_output_failed": "The microphone output could not be opened. Playback continues normally.",
   "status.le_set_partial": "Connected to one earbud only. Check that the other earbud is out of the case and turned on.",
+  "status.le_set_member_back": "The other earbud is back. Connecting it...",
   "ui.diag.tab_mic": "Microphone",
   "ui.mic_test.record": "Record",
   "ui.mic_test.stop": "Stop",

@@ -1231,6 +1231,7 @@
   "status.headset_mic_failed": "Los auriculares no abrieron su micrófono. La reproducción continúa con normalidad.",
   "status.headset_mic_output_failed": "No se pudo abrir la salida del micrófono. La reproducción continúa con normalidad.",
   "status.le_set_partial": "Conectado solo a un auricular. Compruebe que el otro esté fuera del estuche y encendido.",
+  "status.le_set_member_back": "El otro auricular ha vuelto. Conectándolo...",
   "ui.diag.tab_mic": "Micrófono",
   "ui.mic_test.record": "Grabar",
   "ui.mic_test.stop": "Detener",

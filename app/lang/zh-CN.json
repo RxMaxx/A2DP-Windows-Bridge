@@ -1231,6 +1231,7 @@
   "status.headset_mic_failed": "耳机没有打开麦克风。播放不受影响。",
   "status.headset_mic_output_failed": "无法打开麦克风输出。播放不受影响。",
   "status.le_set_partial": "仅连接了一只耳机。请确认另一只已从充电盒中取出并已开机。",
+  "status.le_set_member_back": "另一只耳机已回来，正在连接...",
   "ui.diag.tab_mic": "麦克风",
   "ui.mic_test.record": "录音",
   "ui.mic_test.stop": "停止",

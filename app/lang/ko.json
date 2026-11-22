@@ -1231,6 +1231,7 @@
   "status.headset_mic_failed": "헤드폰이 마이크를 열지 않았습니다. 재생은 정상적으로 계속됩니다.",
   "status.headset_mic_output_failed": "마이크 출력을 열지 못했습니다. 재생은 정상적으로 계속됩니다.",
   "status.le_set_partial": "한쪽 이어버드에만 연결되었습니다. 다른 쪽 이어버드를 케이스에서 꺼냈는지, 전원이 켜져 있는지 확인하세요.",
+  "status.le_set_member_back": "다른 쪽 이어버드가 돌아왔습니다. 연결하는 중...",
   "ui.diag.tab_mic": "마이크",
   "ui.mic_test.record": "녹음",
   "ui.mic_test.stop": "정지",

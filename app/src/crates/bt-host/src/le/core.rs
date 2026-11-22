@@ -73,6 +73,12 @@ const SMP_NEEDS_MORE_THAN_JUST_WORKS: [u8; 3] = [0x01, 0x03, 0x05];
 const RPA_FRESH_MS: u32 = 5 * 60 * 1000;
 const RPA_CACHE_MAX: usize = 512;
 
+/// The quiet scan of [`BtHost::le_find_any_quietly`](crate::BtHost): a
+/// 20 ms window every 200 ms (0.625 ms units), the rest of the radio time
+/// left to a running stream
+pub const QUIET_SCAN_INTERVAL: u16 = 0x0140;
+pub const QUIET_SCAN_WINDOW: u16 = 0x0020;
+
 /// What a failed re-encryption with the stored LE keys leads to
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReencryptionFailure {
@@ -304,6 +310,9 @@ pub(crate) struct LeShared {
     /// Members of the stream's coordinated sets that were not found or
     /// went down: the stream plays on the others (CSIP prepare_group)
     pub set_members_missing: AtomicU32,
+    /// Devices of the running stream that lost their link or CIS while
+    /// the others play on
+    pub stream_dropped: Mutex<Vec<LeDeviceId>>,
     /// Counters of the running (or last) stream, published by the sender
     pub stats: Arc<Mutex<LeStreamStats>>,
     /// The modules' worker / any-thread parts (registry order)
@@ -1013,11 +1022,15 @@ impl<'a> LeCtx<'a> {
     }
 
     /// le_find: a saved RPA of a bonded device is looked for by its identity
-    pub(crate) fn start_find(&mut self, wants: &[LeAddr]) {
+    pub(crate) fn start_find(&mut self, wants: &[LeAddr], quiet: bool) {
         for &want in wants {
             self.lookup_rpa(want, false);
         }
-        self.start_scan();
+        if quiet {
+            self.start_scan_with(QUIET_SCAN_INTERVAL, QUIET_SCAN_WINDOW);
+        } else {
+            self.start_scan();
+        }
     }
 
     /// le_find: an advertiser matching `want` (the address itself, one
@@ -2023,13 +2036,26 @@ impl<'a> LeCtx<'a> {
     // Streaming
     // ======================================================================
 
-    /// The plan for these devices (connected and ready)
+    /// The plan for these devices (connected and ready). One that went
+    /// away since the group was put together (an earbud put back in its
+    /// case) is left out while another one is ready: the stream plays on
+    /// the others, as for a set member not found.
     pub(crate) fn plan_for(&self, ids: &[LeDeviceId], request: &LeStreamRequest) -> Result<StreamPlan, String> {
+        let ready: Vec<LeDeviceId> =
+            ids.iter().copied().filter(|&id| self.device(id).is_some_and(|d| d.ready)).collect();
+        if ready.is_empty() {
+            return Err("a device of the group is not connected".into());
+        }
+        if ready.len() < ids.len() {
+            let gone = ids.len() - ready.len();
+            tracing::warn!(
+                "LE Audio: {gone} device(s) of the group went away before the stream: streaming without them"
+            );
+            self.core.shared.set_members_missing.fetch_add(gone as u32, Ordering::AcqRel);
+        }
         let mut devs = Vec::new();
-        for &id in ids {
-            let Some(d) = self.device(id).filter(|d| d.ready) else {
-                return Err("a device of the group is not connected".into());
-            };
+        for &id in &ready {
+            let Some(d) = self.device(id) else { continue };
             devs.push(PlanDevice {
                 id: d.id.0,
                 name: if d.name.is_empty() { d.addr.to_string() } else { d.name.clone() },
@@ -2447,6 +2473,15 @@ impl UnicastEnv for LeCtx<'_> {
         }
         self.core.iso.stop(self.stack);
         self.core.rx = None;
+    }
+
+    fn member_lost(&mut self, device: u32, why: &str) {
+        let addr = self.core.devices.get(device as usize).map(|d| d.addr.to_string()).unwrap_or_default();
+        tracing::warn!("LE Audio: {addr} left the stream ({why}), the others play on");
+        let mut dropped = self.core.shared.stream_dropped.lock().unwrap_or_else(|e| e.into_inner());
+        if !dropped.contains(&LeDeviceId(device)) {
+            dropped.push(LeDeviceId(device));
+        }
     }
 
     fn stream_state(&mut self, plan: &StreamPlan, streaming: bool) {

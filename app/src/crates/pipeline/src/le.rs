@@ -23,7 +23,7 @@
 //! preallocated and the sets are encoded into spare sets of the queue
 //! ([`SduSink::spare`]).
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -473,6 +473,9 @@ struct FrameEncoder {
     sets: u64,
     errors: u64,
     clock: crate::EncodeClock,
+    /// Every channel gets the mono mix (an earbud left alone while the
+    /// other one is gone), whatever its plan says
+    all_mono: Arc<AtomicBool>,
 }
 
 impl FrameEncoder {
@@ -495,10 +498,12 @@ impl FrameEncoder {
         };
         let started = Instant::now();
         let ns = self.layout.frame_samples;
+        let all_mono = self.all_mono.load(Ordering::Relaxed);
         let Self { layout, encoders, rates, lanes, mono, pcm16, errors, .. } = self;
         for ((slot, enc), rate) in layout.channels.iter().zip(encoders.iter_mut()).zip(rates.iter_mut()) {
             let [l, r, rl, rr] = &*lanes;
-            let lane: &[f32] = match slot.source {
+            let source = if all_mono { ChannelSource::Mono } else { slot.source };
+            let lane: &[f32] = match source {
                 ChannelSource::Left => l,
                 ChannelSource::Right => r,
                 ChannelSource::RearLeft => rl,
@@ -640,6 +645,7 @@ impl LeEncoder {
                 sets: 0,
                 errors: 0,
                 clock: crate::EncodeClock::default(),
+                all_mono: Arc::new(AtomicBool::new(false)),
             },
             eq: None,
             eq_buf: Vec::new(),
@@ -690,6 +696,12 @@ impl LeEncoder {
 
     pub fn layout(&self) -> &SduLayout {
         &self.frame.layout
+    }
+
+    /// Turns every channel to the mono mix (true) or back to the plan's
+    /// channels; [`LePipeline::set_mono`] for a running pipeline
+    pub fn set_mono(&self, on: bool) {
+        self.frame.all_mono.store(on, Ordering::Relaxed);
     }
 
     /// SDU sets encoded so far
@@ -795,6 +807,7 @@ pub struct LePipeline {
     control: Arc<Control>,
     thread: Option<JoinHandle<()>>,
     layout: SduLayout,
+    all_mono: Arc<AtomicBool>,
 }
 
 impl LePipeline {
@@ -814,6 +827,7 @@ impl LePipeline {
             encoder = encoder.with_eq(h);
         }
         let layout = encoder.layout().clone();
+        let all_mono = encoder.frame.all_mono.clone();
         let ring = buffer.ring_bytes(&input);
         tracing::debug!(
             "LE pipeline: start, buffer {buffer:?}: capture ring {ring} bytes ({} ms)",
@@ -836,11 +850,19 @@ impl LePipeline {
             control: control.clone(),
             frame_bytes: input.frame_bytes(),
         };
-        Ok((LePipeline { control, thread: Some(thread), layout }, capture))
+        Ok((LePipeline { control, thread: Some(thread), layout, all_mono }, capture))
     }
 
     pub fn layout(&self) -> &SduLayout {
         &self.layout
+    }
+
+    /// Every channel gets the mono mix (true: the other earbud of a set went
+    /// away) or the plan's channels again (false), from the next frame on
+    pub fn set_mono(&self, on: bool) {
+        if self.all_mono.swap(on, Ordering::Relaxed) != on {
+            tracing::info!("LE pipeline: {}", if on { "mono on every channel" } else { "the planned channels again" });
+        }
     }
 
     /// Drops audio buffered for the old stream (after the stream was set up
@@ -1092,6 +1114,35 @@ mod tests {
         fn push(&self, set: SduSet) {
             self.0.lock().unwrap().push(set);
         }
+    }
+
+    /// Mono on: the left and the right CIS carry the mono mix (as a mono
+    /// channel's own encoder gives it), off again: their own channels
+    #[test]
+    fn mono_switch_gives_every_channel_the_mix() {
+        let rate = 48000;
+        let p = plan(preset(rate, 10000, 100), vec![cis(1, &[L]), cis(2, &[R])]);
+        let input = InputFormat { sample_rate: rate, channels: 2, sample: SampleType::F32 };
+        let encode = |mono: bool| {
+            let mut enc = LeEncoder::new(&p, input).unwrap();
+            enc.set_mono(mono);
+            let sink = Collect::default();
+            let pcm: Vec<f32> = (0..480).flat_map(|n| [(n as f32 * 0.13).sin() * 0.5, 0.0]).collect();
+            enc.push(&f32_bytes(&pcm), &sink);
+            let sets = sink.0.lock().unwrap().clone();
+            assert_eq!(sets.len(), 1);
+            sets[0].clone()
+        };
+        let mono = encode(true);
+        assert_eq!(mono[0], mono[1], "both earbuds get the same mix");
+        let mut reference =
+            Lc3ChannelEncoder::new(Lc3Params { sample_rate: rate, frame_us: 10000, octets: 100 }).unwrap();
+        let m: Vec<i16> = (0..480).map(|n| to_i16(0.5 * (n as f32 * 0.13).sin() * 0.5)).collect();
+        let mut fm = [0u8; 100];
+        reference.encode(&m, &mut fm).unwrap();
+        assert_eq!(mono[0], fm.to_vec());
+        let stereo = encode(false);
+        assert_ne!(stereo[0], stereo[1], "a tone on the left, silence on the right");
     }
 
     /// Each CIS's SDU carries its channels' frames in location order: what
