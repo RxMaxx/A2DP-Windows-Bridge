@@ -602,7 +602,13 @@ it.
   BIG -> GAP_SUBEVENT_BIG_TERMINATED -> advertising removed ("Auracast:
   stopped"). A BIG the controller ends counts as a lost stream
   (error.auracast). `BtHost::le_start_broadcast` / `le_stop_broadcast`.
-- core `le_stream::run_broadcast`: no device; capture as for unicast.
+- core `le_stream::run_broadcast`: no device; capture as for unicast. An
+  adapter that stops working under the broadcast (reset, unplugged, sleep:
+  `BtHost::stalled`, a stale stack) ends no BIG the stack hears of, so the
+  session checks for it: with reconnecting on, the state goes to
+  Reconnecting and the broadcast is set up again on a new stack (up to 5
+  attempts, 3 s apart, same name, Broadcast_ID and source); otherwise, or
+  when the adapter does not come back, error.auracast.
 - Layouts (`le_audio::broadcast::BroadcastLayout`; `--auracast-layout`,
   the Auracast tab's channel choice, `stream.start_broadcast`'s `layout`):
   stereo, mono, split and `matrix_<front>_<rear>` (older names for some of

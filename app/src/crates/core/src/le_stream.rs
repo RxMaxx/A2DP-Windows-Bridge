@@ -893,10 +893,34 @@ pub fn broadcast_config(le: &LeRequest) -> Result<BroadcastConfig, String> {
     })
 }
 
+/// Set-ups of a broadcast after its adapter stopped working: a reset or
+/// replugged adapter (an nRF5340 DK) is back within a few seconds
+const BROADCAST_ATTEMPTS: u32 = 5;
+/// error.auracast's reason when the adapter went away under the broadcast
+const ADAPTER_LOST: &str = "the adapter stopped working";
+/// ... and did not come back for the attempts
+const ADAPTER_NOT_BACK: &str = "the adapter stopped working and did not come back";
+
+/// How one broadcast on one stack ended
+#[derive(Debug)]
+enum BroadcastEnd {
+    /// Stopped by a request
+    Stopped,
+    /// It did not start: no stack, no LE, the controller refused the BIGs
+    NotStarted(Msg),
+    /// It ended for good: the capture failed, or the controller ended it
+    Failed(Msg),
+    /// The adapter stopped working under it (reset, unplugged, sleep): the
+    /// stack is dead, a new one can carry the broadcast again
+    AdapterLost,
+}
+
 /// The session of a broadcast (Auracast source, developer mode): no device
 /// to connect; BTstack up with LE, `le_start_broadcast`, capture into the
 /// LE encode thread as for a unicast stream, until stopped. A broadcast the
-/// controller ends is an error (error.auracast).
+/// controller ends is an error (error.auracast). One whose adapter stopped
+/// working (reset, unplugged) starts again on a new stack, as a lost
+/// unicast stream reconnects (when reconnecting is on).
 fn run_broadcast(inner: &Arc<Inner>, req: StreamRequest) {
     let le = req.le.clone().unwrap_or_default();
     let stopped = || inner.stop_requested();
@@ -917,44 +941,106 @@ fn run_broadcast(inner: &Arc<Inner>, req: StreamRequest) {
     };
 
     inner.notify(StreamState::Connecting, Msg::new("status.initializing_btstack"));
+    // A source switched in place (stream.start_broadcast's choice changed
+    // while it runs) was asked for before this one started: not again
+    inner.take_source_change();
+    let mut source = req.source.clone();
+    let mut end = broadcast_once(inner, &req, &config, &mut source);
+    loop {
+        match end {
+            BroadcastEnd::Stopped => return ready(),
+            BroadcastEnd::NotStarted(m) | BroadcastEnd::Failed(m) => {
+                return if stopped() { ready() } else { inner.notify(StreamState::Error, m) };
+            }
+            BroadcastEnd::AdapterLost if stopped() => return ready(),
+            BroadcastEnd::AdapterLost => {}
+        }
+        if !inner.auto_reconnect() {
+            tracing::info!("Auracast: the adapter stopped working, reconnecting is off: the broadcast ends");
+            return inner.notify(StreamState::Error, Msg::with("error.auracast", &[&ADAPTER_LOST]));
+        }
+        tracing::warn!("Auracast: the adapter stopped working, starting the broadcast again");
+        inner.notify(StreamState::Reconnecting, Msg::new("status.connection_lost"));
+        let mut attempt = 1;
+        end = loop {
+            inner.notify(
+                StreamState::Reconnecting,
+                Msg::with("status.reconnect_attempt", &[&attempt, &BROADCAST_ATTEMPTS]),
+            );
+            tracing::debug!("broadcast: attempt {attempt}/{BROADCAST_ATTEMPTS} in {} ms", RECONNECT_WAIT.as_millis());
+            let until = Instant::now() + RECONNECT_WAIT;
+            while Instant::now() < until && !stopped() {
+                inner.wait_tick(Duration::from_millis(100));
+            }
+            if stopped() {
+                break BroadcastEnd::Stopped;
+            }
+            if inner.power.suspending() {
+                // The next round waits through the sleep
+                tracing::debug!("broadcast: going to sleep, attempt {attempt} not counted");
+                continue;
+            }
+            // A source chosen meanwhile is the one to broadcast now
+            if let Some(next) = inner.take_source_change() {
+                source = next;
+            }
+            match broadcast_once(inner, &req, &config, &mut source) {
+                BroadcastEnd::NotStarted(m) => {
+                    tracing::warn!("Auracast: attempt {attempt}/{BROADCAST_ATTEMPTS} failed: {}", m.english());
+                    if attempt == BROADCAST_ATTEMPTS {
+                        break BroadcastEnd::Failed(Msg::with("error.auracast", &[&ADAPTER_NOT_BACK]));
+                    }
+                    attempt += 1;
+                }
+                other => break other,
+            }
+        };
+    }
+}
+
+/// One broadcast on the running stack, or a new one when that stopped
+/// working, until it ends
+fn broadcast_once(
+    inner: &Arc<Inner>,
+    req: &StreamRequest,
+    config: &BroadcastConfig,
+    source: &mut SourceRequest,
+) -> BroadcastEnd {
+    let stopped = || inner.stop_requested();
     let host = match inner.ensure_host() {
         Ok(h) => h,
-        Err(m) => return inner.notify(StreamState::Error, m),
+        Err(m) => return BroadcastEnd::NotStarted(m),
     };
     let until = Instant::now() + READY_WAIT;
     while !host.le_ready() && Instant::now() < until && !stopped() {
         inner.wait_tick(Duration::from_millis(100));
     }
     if stopped() {
-        return ready();
+        return BroadcastEnd::Stopped;
     }
     if !host.le_ready() {
-        return inner.notify(StreamState::Error, Msg::new("error.le_audio_unavailable"));
+        return BroadcastEnd::NotStarted(Msg::new("error.le_audio_unavailable"));
     }
 
     let started = match host.le_start_broadcast(config.clone(), &le_silence_set) {
         Ok(s) => s,
         Err(e) => {
             return if stopped() {
-                ready()
+                BroadcastEnd::Stopped
             } else {
-                inner.notify(StreamState::Error, Msg::with("error.auracast", &[&e]))
+                BroadcastEnd::NotStarted(Msg::with("error.auracast", &[&e]))
             };
         }
     };
     // The matrix mixer feeds a matrix layout only; stereo, mono and split
     // keep the fixed downmix
     let mix = config.layout.is_matrix().then(crate::auracast_mix::handle);
-    // A source switched in place (stream.start_broadcast's choice changed
-    // while it runs) was asked for before this one started: not again
-    inner.take_source_change();
-    let mut source = req.source.clone();
-    let mut audio = match LeAudioPath::start(&source, &started, host.stats().clone(), mix.clone()) {
+    let mut audio = match LeAudioPath::start(source, &started, host.stats().clone(), mix.clone()) {
         Ok(a) => a,
         Err(e) => {
             tracing::error!("Auracast: audio capture: {e}");
             host.le_stop_broadcast();
-            return inner.notify(StreamState::Error, Msg::new("error.wasapi_init"));
+            return BroadcastEnd::Failed(Msg::new("error.wasapi_init"));
         }
     };
 
@@ -993,17 +1079,21 @@ fn run_broadcast(inner: &Arc<Inner>, req: StreamRequest) {
             details: None,
         });
     };
-    show(&audio, &source);
+    show(&audio, source);
 
-    let mut mutes_output = req.mutes_output(&source);
+    let mut mutes_output = req.mutes_output(source);
     let mut output_mute = OutputMute::new();
     output_mute.tick(mutes_output);
     let mut discontinuities = DiscontinuityLog::default();
+    // The transport lost the adapter (a reset or unplugged one), or the PC
+    // slept: the stack reports no end of the broadcast, it just stops
+    let adapter_gone = || host.stalled() || inner.power.stale();
     let mut lost = false;
+    let mut adapter_lost = false;
     let mut capture_failed = false;
     while !stopped() {
         inner.wait_tick(Duration::from_millis(200));
-        if let Some(next) = inner.take_source_change().filter(|n| *n != source) {
+        if let Some(next) = inner.take_source_change().filter(|n| n != source) {
             // The BIGs stay: the old capture stops, the new one encodes into
             // the same queue (silence goes out in between)
             tracing::info!("Auracast: source {:?} -> {:?}", source, next);
@@ -1011,12 +1101,12 @@ fn run_broadcast(inner: &Arc<Inner>, req: StreamRequest) {
             match LeAudioPath::start(&next, &started, host.stats().clone(), mix.clone()) {
                 Ok(a) => {
                     audio = a;
-                    source = next;
+                    *source = next;
                     discontinuities = DiscontinuityLog::default();
                 }
                 Err(e) => {
                     tracing::error!("Auracast: audio capture of the new source: {e}");
-                    match LeAudioPath::start(&source, &started, host.stats().clone(), mix.clone()) {
+                    match LeAudioPath::start(source, &started, host.stats().clone(), mix.clone()) {
                         Ok(a) => {
                             audio = a;
                             // The request says the new source: back to this one
@@ -1030,18 +1120,28 @@ fn run_broadcast(inner: &Arc<Inner>, req: StreamRequest) {
                     }
                 }
             }
-            mutes_output = req.mutes_output(&source);
-            show(&audio, &source);
+            mutes_output = req.mutes_output(source);
+            show(&audio, source);
         }
         output_mute.tick(mutes_output);
         discontinuities.tick(audio.discontinuities());
+        if adapter_gone() {
+            adapter_lost = true;
+            break;
+        }
         if host.le_stream_lost() {
             lost = true;
+            // A transport that failed may say so a moment after the BIG went
+            let until = Instant::now() + Duration::from_secs(1);
+            while !adapter_gone() && Instant::now() < until && !stopped() {
+                inner.wait_tick(Duration::from_millis(100));
+            }
+            adapter_lost = adapter_gone();
             break;
         }
     }
     tracing::debug!(
-        "broadcast: ended (stop requested {}, lost {lost}), {}",
+        "broadcast: ended (stop requested {}, lost {lost}, adapter lost {adapter_lost}), {}",
         stopped(),
         le_stats_line(&host.le_stream_stats())
     );
@@ -1049,15 +1149,22 @@ fn run_broadcast(inner: &Arc<Inner>, req: StreamRequest) {
         audio.stop();
     }
     crate::auracast_mix::set_live(None);
-    host.le_stop_broadcast();
+    // A stack without its adapter would only wait out the stop
+    if !adapter_lost {
+        host.le_stop_broadcast();
+    }
     drop(output_mute);
     inner.set_le_stream(None);
     if capture_failed {
-        inner.notify(StreamState::Error, Msg::new("error.wasapi_init"));
-    } else if lost && !stopped() {
-        inner.notify(StreamState::Error, Msg::with("error.auracast", &[&"the adapter ended the broadcast"]));
+        BroadcastEnd::Failed(Msg::new("error.wasapi_init"))
+    } else if stopped() {
+        BroadcastEnd::Stopped
+    } else if adapter_lost {
+        BroadcastEnd::AdapterLost
+    } else if lost {
+        BroadcastEnd::Failed(Msg::with("error.auracast", &[&"the adapter ended the broadcast"]))
     } else {
-        ready();
+        BroadcastEnd::Stopped
     }
 }
 

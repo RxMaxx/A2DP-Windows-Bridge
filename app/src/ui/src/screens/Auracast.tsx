@@ -110,7 +110,8 @@ export function Auracast() {
   const live = () => {
     const st = stream();
     if (st.state === "streaming") return st.message.key === "status.broadcasting";
-    return st.state === "connecting" && s.mine() && st.profile === null;
+    // Setting up, or starting again after the adapter stopped working
+    return (st.state === "connecting" || st.state === "reconnecting") && s.mine() && st.profile === null;
   };
   /** What to show under the form: the broadcast's state, or why it ended */
   const status = () => {

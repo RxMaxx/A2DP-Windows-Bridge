@@ -546,6 +546,41 @@ describe("Auracast tab", () => {
     expect(screen.queryByText(t("status.broadcasting"))).toBeNull();
   });
 
+  it("keeps a broadcast whose adapter stopped working while it starts again", async () => {
+    const { core } = await open();
+    await core.request("settings.set", {
+      settings: { ...core.state.snap!.settings, developer_mode: true },
+    });
+    fireEvent.click(
+      await screen.findByRole("tab", { name: t("ui.dev.auracast") }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: t("receiver.start") }),
+    );
+    await screen.findByText(t("status.broadcasting"));
+
+    // The core's state while it sets the broadcast up on a new stack
+    const fake = mock as unknown as {
+      setStream(state: string, key: string, args?: string[]): void;
+    };
+    fake.setStream("reconnecting", "status.reconnect_attempt", ["1", "5"]);
+    expect(
+      await screen.findByText(t("status.reconnect_attempt", "1", "5")),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: t("receiver.stop") }),
+    ).toBeEnabled();
+    expect(screen.getByLabelText(t("ui.dev.auracast_name"))).toBeDisabled();
+
+    fake.setStream("streaming", "status.broadcasting");
+    expect(
+      await screen.findByText(t("status.broadcasting")),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: t("receiver.stop") }),
+    ).toBeEnabled();
+  });
+
   it("shows why a broadcast did not start", async () => {
     const { core } = await open();
     // The core refuses a broadcast while developer mode is off
