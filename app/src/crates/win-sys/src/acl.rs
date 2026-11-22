@@ -199,7 +199,10 @@ mod tests {
         assert_eq!(list.len(), 3, "{sddl}");
         let mut who: Vec<&str> = list.iter().map(|a| trustee(a)).collect();
         who.sort_unstable();
-        let mut want = vec!["BA", "SY", sid.as_str()];
+        // The built-in Administrator account (RID 500, the user of some
+        // build machines) is written as "LA", not as its SID
+        let own = if sid.ends_with("-500") { "LA" } else { sid.as_str() };
+        let mut want = vec!["BA", "SY", own];
         want.sort_unstable();
         assert_eq!(who, want, "{sddl}");
         // Full access, inherited by folders and files, nothing denied
