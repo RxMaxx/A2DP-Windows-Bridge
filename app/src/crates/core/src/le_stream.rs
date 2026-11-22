@@ -29,7 +29,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use audio_capture::{Capture, CaptureOptions, Format, Running, Sink, Source};
-use bt_host::{BtHost, LeAddr, LeDeviceId, LeRequest, LeRxHandle, LeStreamRequest, LeStreamStarted, LinkStats};
+use bt_host::{
+    BtHost, LeAddr, LeDeviceId, LeRequest, LeRxHandle, LeScanResult, LeStreamRequest, LeStreamStarted, LinkStats,
+};
 use le_audio::broadcast::{self, BroadcastConfig};
 use le_audio::plan::StreamPlan;
 use le_audio::sdu_queue::SduSet;
@@ -742,10 +744,26 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
             continue;
         }
 
-        if let Some(back) = member_back {
-            // The other earbud is out of its case again: the stream is set
-            // up again with both (a short gap on the one that played)
-            tracing::info!("LE Audio: {} of the set is back, setting the stream up with it", bt_host::addr_str(&back));
+        if let Some((back, seen)) = member_back {
+            // The other earbud is out of its case again: connected while
+            // the one there plays on (a failed connection costs it
+            // nothing), then the stream is set up again with both (a short
+            // gap on the one that played)
+            tracing::info!("LE Audio: {} of the set is back, connecting it", bt_host::addr_str(&back));
+            let t = Instant::now();
+            if let Err(e) = host.le_connect(seen.addr, &seen.name, CONNECT_TIMEOUT) {
+                tracing::warn!("LE Audio: connecting {} failed ({e}), the stream plays on", bt_host::addr_str(&back));
+                rejoin.restored(false);
+                continue;
+            }
+            if stopped() {
+                break;
+            }
+            tracing::info!(
+                "LE Audio: {} connected in {} ms, setting the stream up with it",
+                bt_host::addr_str(&back),
+                t.elapsed().as_millis()
+            );
             inner.notify(StreamState::Connecting, Msg::new("status.le_set_member_back"));
             if let Some(a) = audio.take() {
                 a.stop();
@@ -1286,10 +1304,11 @@ fn broadcast_once(
 fn device_turned_off(inner: &Inner, host: &BtHost, devices: &[[u8; 6]]) -> bool {
     let until = Instant::now() + Duration::from_millis(1500);
     loop {
-        let off = host
-            .le_devices()
-            .iter()
-            .any(|d| devices.contains(&d.addr.addr) && !d.connected && matches!(d.last_error, 0x13 | 0x15));
+        // Off: one ended its link itself and none is connected any more (an
+        // earbud in its case while the other is connected is not)
+        let ours: Vec<_> = host.le_devices().into_iter().filter(|d| devices.contains(&d.addr.addr)).collect();
+        let off = !ours.iter().any(|d| d.connected)
+            && ours.iter().any(|d| !d.connected && matches!(d.last_error, 0x13 | 0x15));
         if off {
             return true;
         }
@@ -1339,7 +1358,7 @@ impl Rejoin {
 }
 
 /// A member of the set missing from the stream that advertises again (out
-/// of its case): its address
+/// of its case): its address and what the scan saw
 fn member_back(
     inner: &Inner,
     host: &BtHost,
@@ -1347,7 +1366,7 @@ fn member_back(
     devices: &[[u8; 6]],
     started: &LeStreamStarted,
     dropped: &[LeDeviceId],
-) -> Option<[u8; 6]> {
+) -> Option<([u8; 6], LeScanResult)> {
     let mut members = devices.to_vec();
     members.extend(other_set_members(inner, host, device, devices));
     let playing: Vec<[u8; 6]> = host
@@ -1362,7 +1381,7 @@ fn member_back(
     }
     let (i, found) = host.le_find_any_quietly(&missing, REJOIN_SCAN)?;
     tracing::debug!("le stream: set member {} seen again as {}", bt_host::addr_str(&missing[i]), found.addr);
-    Some(missing[i])
+    Some((missing[i], found))
 }
 
 /// The other members of `device`'s coordinated set (the other earbud), not
@@ -1420,7 +1439,19 @@ fn connect_devices(
         if i == 0 {
             look_for.extend_from_slice(others);
         }
-        if let Some((which, found)) = host.le_find_any(&look_for, FIND_TIMEOUT) {
+        // One connected already (the earbud that played on, one connected
+        // while it did) advertises no more: no scan for it
+        let linked = host.le_devices();
+        let linked = linked
+            .iter()
+            .filter(|d| d.connected)
+            .find(|d| d.addr.addr == asked)
+            .or_else(|| linked.iter().filter(|d| d.connected).find(|d| look_for.contains(&d.addr.addr)));
+        if let Some(d) = linked {
+            addr = d.addr.addr;
+            target = d.addr;
+            tracing::debug!("le connect: {} connected already as {:?}", bt_host::addr_str(&addr), d.id);
+        } else if let Some((which, found)) = host.le_find_any(&look_for, FIND_TIMEOUT) {
             if which > 0 {
                 addr = look_for[which];
                 tracing::info!(
