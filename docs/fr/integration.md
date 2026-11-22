@@ -187,6 +187,8 @@ Disponible quand `welcome.features` contient `"media_button"`. Chaque fois qu'un
 
 Disponibles quand `welcome.features` contient `"tool_controls"`. Chaque méthode modifie un seul réglage : un outil n'a donc jamais besoin d'envoyer un profil complet.
 
+**Expérimental jusqu'à BlueCaster 3.1.** Les noms des méthodes et leurs paramètres peuvent encore changer selon les retours. Une modification incompatible remplacera `"tool_controls"` par un nouveau nom de fonctionnalité : un outil peut ainsi savoir quelle version le cœur prend en charge.
+
 - `name` est le nom d'un profil enregistré. Sans `name`, c'est le profil en cours de diffusion qui est utilisé, ou le profil actif si rien n'est diffusé. Un nom inconnu renvoie `profile.not_found`.
 - La modification est enregistrée dans le profil et appliquée au flux, comme une modification faite dans la fenêtre de BlueCaster. Tous les clients reçoivent un événement `profiles`.
 - Envoyer la valeur actuelle ne change rien.
