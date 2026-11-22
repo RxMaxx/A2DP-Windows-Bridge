@@ -171,6 +171,11 @@ pub(crate) fn bad_request(code: &str, method: &str, why: String) -> ErrorInfo {
     }
 }
 
+/// Developer mode is on (the HID host's requests)
+fn developer(state: &CoreState) -> Result<(), ErrorInfo> {
+    if state.service.settings().debug_mode { Ok(()) } else { Err(err("developer.off", "ipc.error.developer_only")) }
+}
+
 /// A result as JSON (plain data: it cannot fail)
 fn json<T: serde::Serialize>(v: &T) -> Value {
     serde_json::to_value(v).unwrap_or(Value::Null)
@@ -436,6 +441,7 @@ fn to_ipc_settings(s: &CoreSettings) -> Settings {
         le_audio_experimental: s.le_audio_experimental,
         le_audio_low_latency: s.le_audio_low_latency,
         auto_codec: s.auto_codec,
+        hid_host: s.hid_host,
     }
 }
 
@@ -443,6 +449,33 @@ fn to_ipc_settings(s: &CoreSettings) -> Settings {
 /// microphone's cable (issue #86)
 fn hifi_cable(devices: &[audio_capture::DeviceInfo]) -> Option<&audio_capture::DeviceInfo> {
     devices.iter().find(|d| profiles::is_hifi_cable(&d.name))
+}
+
+/// Service mode (crate::rules): whether settings.set with `s` changes
+/// anything only an elevated client may change: developer mode and what
+/// it sets, the chip, its firmware and radio settings, the receiver host
+pub(crate) fn admin_settings_change(base: &CoreSettings, s: &Settings) -> bool {
+    let m = merge_settings(base, s);
+    m.debug_mode != base.debug_mode
+        || m.dev_overrides != base.dev_overrides
+        || m.dev_vendors != base.dev_vendors
+        || m.dev_log != base.dev_log
+        || m.dev_debug != base.dev_debug
+        || m.bt_chip_pid != base.bt_chip_pid
+        || m.bt_chip_fw_stem != base.bt_chip_fw_stem
+        || m.realtek_custom_firmware != base.realtek_custom_firmware
+        || m.afh != base.afh
+        || m.remote_sink != base.remote_sink
+}
+
+#[cfg(test)]
+pub(crate) fn test_ipc_settings(s: &CoreSettings) -> Settings {
+    to_ipc_settings(s)
+}
+
+#[cfg(test)]
+pub(crate) fn test_ipc_profile() -> Profile {
+    to_ipc_profile(&CoreProfile::default(), 0)
 }
 
 fn merge_settings(base: &CoreSettings, s: &Settings) -> CoreSettings {
@@ -546,7 +579,26 @@ fn merge_settings(base: &CoreSettings, s: &Settings) -> CoreSettings {
     c.le_audio_experimental = s.le_audio_experimental;
     c.le_audio_low_latency = s.le_audio_low_latency;
     c.auto_codec = s.auto_codec;
+    // Keyboards and mice through BlueCaster: only hid.enable turns them on
+    // (issue #413). Developer mode off turns them off for good, so that
+    // turning it on again later does not bring them back unasked.
+    c.hid_host = base.hid_host && s.hid_host && c.debug_mode;
     c
+}
+
+fn to_ipc_hid_devices(list: Vec<bluecaster_core::HidDevice>) -> Vec<ipc::HidDevice> {
+    list.into_iter()
+        .map(|d| ipc::HidDevice { address: d.address, name: d.name, connected: d.connected, le: d.le })
+        .collect()
+}
+
+fn to_ipc_hid_passkey(p: Option<(String, String)>) -> Option<ipc::HidPasskey> {
+    p.map(|(address, passkey)| ipc::HidPasskey { address, passkey })
+}
+
+/// A Msg error of crate::hid ("error.hid.off") with its code ("hid.off")
+fn hid_err(m: &bluecaster_core::Msg) -> ErrorInfo {
+    ErrorInfo { code: m.key.strip_prefix("error.").unwrap_or(m.key).to_string(), message: msg(m) }
 }
 
 /// What the UI tells about an adapter's firmware besides Realtek's files.
@@ -843,9 +895,11 @@ fn saved_devices(
             codecs_on_request: Vec::new(),
             le_audio: d.le_audio,
             le_audio_set: false,
+            hid_le: None,
         })
         .collect();
-    for s in scanned {
+    // A Bluetooth LE keyboard or mouse is never an audio device (issue #413)
+    for s in scanned.iter().filter(|s| s.hid_le.is_none()) {
         match list.iter_mut().find(|d| d.le_audio == s.le_audio && d.address.eq_ignore_ascii_case(&s.address)) {
             Some(d) => {
                 d.rssi = s.rssi;
@@ -932,7 +986,17 @@ fn scanned_device(d: &ScannedDevice) -> Device {
         codecs_on_request: Vec::new(),
         le_audio: d.le_audio,
         le_audio_set: d.le_audio_set,
+        hid_le: d.hid_le,
     }
+}
+
+/// A scan's entries as the UI gets them: the device list the audio screens
+/// use, and apart from it the Bluetooth LE keyboards and mice for the HID
+/// host (issue #413), so that those never reach a stream, a profile or the
+/// saved devices
+fn split_scan(found: &[ScannedDevice]) -> (Vec<Device>, Vec<Device>) {
+    let (hid, audio): (Vec<&ScannedDevice>, Vec<&ScannedDevice>) = found.iter().partition(|d| d.hid_le.is_some());
+    (audio.into_iter().map(scanned_device).collect(), hid.into_iter().map(scanned_device).collect())
 }
 
 /// The codec the UI shows for an LE Audio (experimental) stream
@@ -1254,15 +1318,16 @@ fn effective_volume_sync(global: bool, _profile: VolumeSync) -> VolumeSync {
 }
 
 /// HKCU Run value of v2: the resident core, which opens the UI unless
-/// started with --background (start_minimized: only the tray at logon)
+/// started with --background (start_minimized: only the tray at logon).
+/// Written by the session host: the agent's user's HKCU when the agent
+/// does the session's work.
 fn apply_autostart(enabled: bool, minimized: bool) -> Result<(), String> {
-    use win_sys::autostart;
+    use win_sys::autostart::{VALUE_NAME, command_line};
     if enabled {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        autostart::set(autostart::VALUE_NAME, &autostart::command_line(&exe, autostart_args(minimized)))
-            .map_err(|e| e.to_string())
+        session_host::autostart::set(VALUE_NAME, &command_line(&exe, autostart_args(minimized)))
     } else {
-        autostart::remove(autostart::VALUE_NAME).map(|_| ()).map_err(|e| e.to_string())
+        session_host::autostart::remove(VALUE_NAME).map(|_| ())
     }
 }
 
@@ -1623,7 +1688,7 @@ fn default_mic_output(p: &mut CoreProfile, stream: &StreamStatus, list: &[CorePr
     if !p.mic_device_id.is_empty() || HeadsetMic::parse(&p.headset_mic) == HeadsetMic::Off {
         return;
     }
-    let devices = audio_capture::render_devices().unwrap_or_default();
+    let devices = session_host::devices::render_devices().unwrap_or_default();
     let default_output = default_output_for_cables(&devices, stream, list);
     if profiles::fill_mic_outputs(std::slice::from_mut(p), &cables(&devices), default_output) > 0 {
         tracing::info!("profile \"{}\": microphone output {} by default", p.name, p.mic_device_name);
@@ -1921,6 +1986,7 @@ impl CoreState {
         let active = Some(settings.last_profile.clone()).filter(|n| profiles.iter().any(|p| &p.name == n));
         let (adapters, hung) = adapter_infos(&dir, &settings);
         warn_invalid_firmware(&dir, &firmware_change(&[], &adapters).invalid);
+        let service_mode = paths::service_mode();
         let snapshot = Snapshot {
             adapter: AdapterState {
                 status: AdapterStatus::Stopped,
@@ -1941,9 +2007,12 @@ impl CoreState {
             active_profile: active,
             settings: to_ipc_settings(&settings),
             update: UpdateState { current_version: env!("CARGO_PKG_VERSION").into(), ..Default::default() },
-            config_dir: dir.display().to_string(),
+            // Service mode: a protected folder the user cannot open, so
+            // none is named (files come through crate::handover)
+            config_dir: if service_mode { String::new() } else { dir.display().to_string() },
             // Where main.rs has the log files written
-            log_dir: paths::log_dir(&dir).display().to_string(),
+            log_dir: if service_mode { String::new() } else { paths::log_dir(&dir).display().to_string() },
+            service_mode,
             capture: None,
             // Set by logging::init, first thing in main
             clock_ms: crate::logging::hub().clock(),
@@ -1952,6 +2021,9 @@ impl CoreState {
             verbose: crate::logging::verbose(),
             crashes: crate::crashes::unseen(&dir, &settings),
             audio_endpoints: 0,
+            hid_devices: to_ipc_hid_devices(service.hid_devices()),
+            hid_candidates: Vec::new(),
+            hid_passkey: to_ipc_hid_passkey(service.hid_passkey()),
             vendors: bluecaster_core::vendor::VENDORS
                 .iter()
                 .map(|v| ipc::VendorInfo {
@@ -2042,6 +2114,9 @@ impl CoreState {
                 Event::Verbose(v) => s.verbose = *v,
                 Event::Crashes(c) => s.crashes = c.clone(),
                 Event::AudioEndpoints(n) => s.audio_endpoints = *n,
+                Event::HidDevices(d) => s.hid_devices = d.clone(),
+                Event::HidCandidates(d) => s.hid_candidates = d.clone(),
+                Event::HidPasskey(p) => s.hid_passkey = p.clone(),
                 // Not state: no revision
                 Event::Link(_)
                 | Event::Log(_)
@@ -2049,6 +2124,7 @@ impl CoreState {
                 | Event::RfcommData(_)
                 | Event::RfcommClosed(_)
                 | Event::MediaButton(_)
+                | Event::UiClose
                 | Event::Bye => {
                     let _ = self.events.send((g.0, Arc::new(event)));
                     return;
@@ -2107,7 +2183,7 @@ impl CoreState {
     /// Windows' audio devices changed (resident.rs: watch_audio_endpoints):
     /// a cable that came is taken into use, and the UI reads its lists again
     pub fn audio_endpoints_changed(&self) {
-        if let Ok(devices) = audio_capture::render_devices() {
+        if let Ok(devices) = session_host::devices::render_devices() {
             self.watch_cables(&devices);
         }
         let n = self.with_snapshot(|s| s.audio_endpoints).wrapping_add(1);
@@ -2358,6 +2434,20 @@ impl CoreState {
                 self.publish(Event::MediaButton(b));
                 return;
             }
+            ServiceEvent::HidDevices => {
+                let list = to_ipc_hid_devices(self.service.hid_devices());
+                if list != s.hid_devices {
+                    self.publish(Event::HidDevices(list));
+                }
+                return;
+            }
+            ServiceEvent::HidPasskey => {
+                let p = to_ipc_hid_passkey(self.service.hid_passkey());
+                if p != s.hid_passkey {
+                    self.publish(Event::HidPasskey(p));
+                }
+                return;
+            }
             // Another saved device connected while the one streamed was off
             // (issue #86): its own profile starts, as a connect on Home
             ServiceEvent::OtherDeviceBack(addr) => {
@@ -2432,6 +2522,22 @@ impl CoreState {
         if list != s.devices {
             self.publish(Event::Devices(list));
         }
+    }
+
+    /// Service mode, after the one-time move of the user's data (when the
+    /// first agent connected): settings, profiles and devices read again
+    /// from the folder and published, as if the core had started with them
+    pub(crate) fn reload_from_disk(&self) {
+        let settings = self.service.reload_saved();
+        crate::logging::set_dev(&settings.log());
+        self.publish(Event::Settings(to_ipc_settings(&settings)));
+        let legacy = settings.legacy_max_media_payload();
+        let profiles: Vec<Profile> =
+            profiles::load(&self.config_dir()).iter().map(|p| to_ipc_profile(p, legacy)).collect();
+        let active = Some(settings.last_profile.clone()).filter(|n| profiles.iter().any(|p| &p.name == n));
+        self.publish(Event::Profiles { profiles, active_profile: active });
+        self.refresh_devices();
+        self.update_tray();
     }
 
     /// A connection learned a coordinated set: saved entries of it become
@@ -2644,9 +2750,33 @@ impl CoreState {
         s.save(&self.config_dir()).map_err(|_| err("settings.save_failed", "error.settings_save"))?;
         crate::logging::set_dev(&s.log());
         let ui = to_ipc_settings(&s);
+        let hid_on = s.hid_host();
         self.service.set_settings(s);
         self.publish(Event::Settings(ui));
+        // Turned off: the keyboards and mice found are out of date
+        if !hid_on && !self.snapshot().1.hid_candidates.is_empty() {
+            self.publish(Event::HidCandidates(Vec::new()));
+        }
         Ok(())
+    }
+
+    /// The Bluetooth LE keyboards and mice of a scan; published if they
+    /// changed (each name or signal update of a scan calls this)
+    fn publish_hid_candidates(&self, list: Vec<Device>) {
+        if list != self.snapshot().1.hid_candidates {
+            self.publish(Event::HidCandidates(list));
+        }
+    }
+
+    /// hid.enable (after the confirmation) and hid.disable: the setting
+    /// saved and applied as settings.set does
+    fn set_hid_host(&self, on: bool) -> Result<Value, ErrorInfo> {
+        let mut s = self.service.settings();
+        if s.hid_host != on {
+            s.hid_host = on;
+            self.save_settings(s)?;
+        }
+        Ok(Value::Null)
     }
 
     fn set_active_profile(&self, name: Option<String>) {
@@ -2927,9 +3057,12 @@ impl CoreState {
     /// or names a copy of the core that is gone (the program moved). One
     /// naming another copy of the core that exists (the installed copy while
     /// a test build runs) is left alone; the settings toggle still writes
-    /// it. See autostart_plan.
+    /// it. See autostart_plan. The values are read and written by the
+    /// session host (the agent's user's when the agent does the session's
+    /// work).
     pub fn refresh_autostart(&self, replaces_v1: bool) {
-        use win_sys::autostart::{OLD_VALUE_NAME, VALUE_NAME, get};
+        use session_host::autostart::get;
+        use win_sys::autostart::{OLD_VALUE_NAME, VALUE_NAME};
         let s = self.service.settings();
         let (current, old) = match (get(VALUE_NAME), get(OLD_VALUE_NAME)) {
             (Ok(c), Ok(o)) => (c, o),
@@ -2952,11 +3085,11 @@ impl CoreState {
         }
         if plan.remove_old {
             tracing::info!("old start with Windows entry {OLD_VALUE_NAME} removed: was {}", old.unwrap_or_default());
-            if let Err(e) = win_sys::autostart::remove(OLD_VALUE_NAME) {
+            if let Err(e) = session_host::autostart::remove(OLD_VALUE_NAME) {
                 tracing::warn!("cannot remove the old start with Windows entry {OLD_VALUE_NAME}: {e}");
             }
             // Disabled in Task Manager's Startup tab stays disabled
-            match win_sys::autostart::carry_startup_approved(OLD_VALUE_NAME, VALUE_NAME) {
+            match session_host::autostart::carry_startup_approved(OLD_VALUE_NAME, VALUE_NAME) {
                 Ok(true) => {
                     tracing::info!("Task Manager's startup state of {OLD_VALUE_NAME} carried over to {VALUE_NAME}")
                 }
@@ -3132,11 +3265,11 @@ impl CoreState {
     fn start_capture(&self) -> Result<String, ErrorInfo> {
         let capture = self.service.capture();
         if let Some(p) = capture.path() {
-            return Ok(p.display().to_string());
+            return Ok(capture_shown(&p));
         }
         let path = paths::capture_file(&self.config_dir(), &local_stamp());
         capture.start(&path).map_err(|_| err("diag.capture_failed", "error.capture_start"))?;
-        let path = path.display().to_string();
+        let path = capture_shown(&path);
         self.publish(Event::Capture(Some(CaptureState {
             path: path.clone(),
             bytes: capture.bytes_written(),
@@ -3153,7 +3286,7 @@ impl CoreState {
         capture.stop();
         let done = match path {
             Some(p) => Some(CaptureState {
-                path: p.display().to_string(),
+                path: capture_shown(&p),
                 bytes: capture.bytes_written(),
                 started_ms: known.as_ref().map_or(0, |k| k.started_ms),
             }),
@@ -3299,10 +3432,12 @@ impl CoreState {
                     let codecs = me.service.device_codecs();
                     if !me.service.is_running() {
                         me.publish(Event::Devices(saved_devices(&dir, &[], &codecs)));
+                        me.publish(Event::HidCandidates(Vec::new()));
                     }
                     let mut on_found = |found: &[ScannedDevice]| {
-                        let scanned: Vec<Device> = found.iter().map(scanned_device).collect();
+                        let (scanned, hid) = split_scan(found);
                         me.publish(Event::Devices(saved_devices(&dir, &scanned, &codecs)));
+                        me.publish_hid_candidates(hid);
                     };
                     // Classic, then (LE Audio on) the LE Audio devices
                     let r = me.service.scan_devices(seconds.clamp(3, ipc::MAX_SCAN_SECONDS), &mut on_found);
@@ -3311,9 +3446,10 @@ impl CoreState {
                     }
                     me.publish(Event::Scanning(false));
                     let found = r.map_err(|m| ErrorInfo { code: "adapter.init_failed".into(), message: msg(&m) })?;
-                    let scanned: Vec<Device> = found.iter().map(scanned_device).collect();
+                    let (scanned, hid) = split_scan(&found);
                     let list = saved_devices(&me.config_dir(), &scanned, &me.service.device_codecs());
                     me.publish(Event::Devices(list.clone()));
+                    me.publish_hid_candidates(hid);
                     Ok(json(&list))
                 }))
                 .await
@@ -3807,7 +3943,12 @@ impl CoreState {
                         ..s.adapter
                     }));
                     let summary = bluecaster_core::probe_report::summary_line(&report);
-                    tracing::info!("chip probe of {instance_id}: {summary}");
+                    // The service's log names no device
+                    if bluecaster_core::paths::service_mode() {
+                        tracing::info!("chip probe: {summary}");
+                    } else {
+                        tracing::info!("chip probe of {instance_id}: {summary}");
+                    }
                     let version = env!("CARGO_PKG_VERSION");
                     let path =
                         bluecaster_core::probe_report::save(&me.config_dir(), &report, Some(&instance_id), version)
@@ -3817,7 +3958,14 @@ impl CoreState {
                             })?;
                     let report =
                         bluecaster_core::probe_report::to_json(&report, Some(&instance_id), version).to_string();
-                    Ok(json(&ProbeResult { path: path.display().to_string(), summary, report }))
+                    // Service mode: the user's copy (the core's folder is
+                    // protected)
+                    let saved = std::fs::read(&path).unwrap_or_default();
+                    let path =
+                        crate::handover::for_user(session_host::handover::Kind::ProbeReport, &path, &saved, || {
+                            err("adapter.probe_failed", "error.probe_save")
+                        })?;
+                    Ok(json(&ProbeResult { path, summary, report }))
                 }))
                 .await
             }
@@ -3836,10 +3984,12 @@ impl CoreState {
                         Err(_) => return Err(invalid("error.script_invalid", &check.errors)),
                     };
                     let total = parsed.lines.len();
-                    tracing::info!(
-                        "chip script on {instance_id}: {total} lines, {} that may change the chip",
-                        check.writes.len()
-                    );
+                    let on = if bluecaster_core::paths::service_mode() {
+                        String::new()
+                    } else {
+                        format!(" on {instance_id}")
+                    };
+                    tracing::info!("chip script{on}: {total} lines, {} that may change the chip", check.writes.len());
                     let report = me
                         .service
                         .run_script(Some(instance_id.clone()), parsed)
@@ -3867,8 +4017,13 @@ impl CoreState {
                         err("adapter.script_failed", "error.probe_save")
                     })?;
                     let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+                    let saved = std::fs::read(&path).unwrap_or_default();
+                    let path =
+                        crate::handover::for_user(session_host::handover::Kind::ScriptReport, &path, &saved, || {
+                            err("adapter.script_failed", "error.probe_save")
+                        })?;
                     Ok(json(&ScriptResult {
-                        path: path.display().to_string(),
+                        path,
                         summary,
                         lines: bt_host::script::report_text(&report),
                         other_events: report.other_events.iter().map(|e| hex(e)).collect(),
@@ -3912,7 +4067,7 @@ impl CoreState {
             }
             Method::AudioDevices => {
                 blocking(Box::new(|me| {
-                    let devices = audio_capture::render_devices();
+                    let devices = session_host::devices::render_devices();
                     if let Ok(d) = &devices {
                         me.watch_cables(d);
                     }
@@ -3920,7 +4075,7 @@ impl CoreState {
                         .unwrap_or_default()
                         .into_iter()
                         .map(|d| {
-                            let mix = audio_capture::mix_format(Some(&d.id));
+                            let mix = session_host::devices::mix_format(Some(&d.id));
                             AudioDevice {
                                 mix_rate: mix.map(|m| m.rate),
                                 mix_channels: mix.map(|m| m.channels),
@@ -3945,7 +4100,7 @@ impl CoreState {
                 blocking(Box::new(|me| {
                     let found = crate::vb_cable::install()?;
                     // Taken into use as any VB-CABLE that comes (watch_cables)
-                    if let Ok(d) = audio_capture::render_devices() {
+                    if let Ok(d) = session_host::devices::render_devices() {
                         me.watch_cables(&d);
                     }
                     Ok(json(&found))
@@ -3961,7 +4116,7 @@ impl CoreState {
             }
             Method::AudioApps => {
                 blocking(Box::new(|_| {
-                    let list: Vec<AudioApp> = audio_capture::audio_apps()
+                    let list: Vec<AudioApp> = session_host::endpoints::audio_apps()
                         .into_iter()
                         .map(|a| AudioApp { exe: a.exe, name: a.name })
                         .collect();
@@ -3971,7 +4126,7 @@ impl CoreState {
             }
             Method::AudioMixer => {
                 blocking(Box::new(|_| {
-                    let list: Vec<MixerApp> = audio_capture::mixer_apps()
+                    let list: Vec<MixerApp> = session_host::volume::mixer_apps()
                         .into_iter()
                         .map(|a| MixerApp { key: a.key, name: a.name, volume: a.volume, muted: a.muted })
                         .collect();
@@ -3981,7 +4136,7 @@ impl CoreState {
             }
             Method::AudioMixerSet { app, volume, muted } => {
                 blocking(Box::new(move |_| {
-                    audio_capture::set_mixer_app(&app, volume, muted);
+                    session_host::volume::set_mixer_app(&app, volume, muted);
                     Ok(Value::Null)
                 }))
                 .await
@@ -4144,6 +4299,53 @@ impl CoreState {
                 self.service.mic_test_end();
                 Ok(Value::Null)
             }
+            Method::HidCode => {
+                developer(self)?;
+                Ok(json(&ipc::HidCode { code: self.service.hid_code() }))
+            }
+            Method::HidEnable { code, other_input_at_hand, risk_understood } => {
+                developer(self)?;
+                blocking(Box::new(move |me| {
+                    me.service.hid_confirm(&code, other_input_at_hand, risk_understood).map_err(|m| hid_err(&m))?;
+                    me.set_hid_host(true)
+                }))
+                .await
+            }
+            Method::HidDisable => blocking(Box::new(|me| me.set_hid_host(false))).await,
+            Method::HidStatus => Ok(json(&ipc::HidStatus {
+                devices: to_ipc_hid_devices(self.service.hid_devices()),
+                counts: self.service.hid_counts().map(|c| ipc::HidCounts {
+                    reports: c.reports,
+                    undecoded: c.undecoded,
+                    events: c.events,
+                    injected: c.injected,
+                    blocked: c.blocked,
+                    refused: c.refused,
+                }),
+            })),
+            Method::HidAdd { address, name, le } => {
+                developer(self)?;
+                blocking(Box::new(move |me| {
+                    me.service.hid_add(&address, &name, le).map_err(|m| hid_err(&m))?;
+                    Ok(Value::Null)
+                }))
+                .await
+            }
+            Method::HidConnect { address } => {
+                developer(self)?;
+                blocking(Box::new(move |me| {
+                    me.service.hid_connect(&address).map_err(|m| hid_err(&m))?;
+                    Ok(Value::Null)
+                }))
+                .await
+            }
+            Method::HidRemove { address } => {
+                blocking(Box::new(move |me| {
+                    me.service.hid_remove(&address);
+                    Ok(Value::Null)
+                }))
+                .await
+            }
             Method::AppCheckUpdate => blocking(Box::new(|me| me.check_update().map(|u| json(&u)))).await,
             Method::AppHiddenToTray => {
                 self.hidden_to_tray();
@@ -4152,6 +4354,19 @@ impl CoreState {
             Method::AppQuit => {
                 self.quit();
                 Ok(Value::Null)
+            }
+            // Service mode: the core stays (crate::headless)
+            Method::AppClose => {
+                if paths::service_mode() {
+                    crate::headless::close_for_user(self);
+                } else {
+                    self.quit();
+                }
+                Ok(Value::Null)
+            }
+            Method::AppRunAsAdmin { call } => {
+                let service = bluecaster_core::paths::service_mode();
+                blocking(Box::new(move |me| crate::rules::run_as_admin(&call, &**me, service))).await
             }
             Method::AppQuitForUpdate => match self.service.state() {
                 CoreStreamState::Connecting | CoreStreamState::Streaming | CoreStreamState::Reconnecting => {
@@ -4224,6 +4439,16 @@ impl CoreState {
     pub fn link_subscribed(&self) -> bool {
         self.link_subscribers.load(Ordering::Acquire) > 0
     }
+}
+
+/// A capture's file as the UI shows it: its path, or in service mode its
+/// name only (the folder is protected; the capture reaches the user in a
+/// diagnostic bundle, crate::handover)
+fn capture_shown(path: &Path) -> String {
+    if paths::service_mode() {
+        return path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    }
+    path.display().to_string()
 }
 
 /// yyyyMMdd_HHmmss of the local time, for file names (as v1)
@@ -4561,6 +4786,7 @@ mod tests {
             codecs_on_request: Vec::new(),
             le_audio,
             le_audio_set: false,
+            hid_le: None,
         };
         let core = CoreProfile {
             name: "EarFun Air Pro 4+ | aptX Adaptive".into(),
@@ -5895,6 +6121,7 @@ mod tests {
             codecs_on_request: Vec::new(),
             le_audio: false,
             le_audio_set: false,
+            hid_le: None,
         }];
         let mut codecs = BTreeMap::new();
         let sbc = bluecaster_core::SbcDeviceCaps {
@@ -6115,6 +6342,7 @@ mod tests {
                 audio: true,
                 le_audio: false,
                 le_audio_set: false,
+                hid_le: None,
             },
             ScannedDevice {
                 address: "AA:BB:CC:DD:EE:FF".into(),
@@ -6124,6 +6352,7 @@ mod tests {
                 audio: true,
                 le_audio: true,
                 le_audio_set: false,
+                hid_le: None,
             },
             ScannedDevice {
                 address: "C0:11:22:33:44:55".into(),
@@ -6133,6 +6362,7 @@ mod tests {
                 audio: true,
                 le_audio: true,
                 le_audio_set: true,
+                hid_le: None,
             },
         ];
         let scanned: Vec<Device> = scan.iter().map(scanned_device).collect();
@@ -6157,6 +6387,49 @@ mod tests {
         let list = saved_devices(&dir, &[], &codecs);
         assert_eq!(list.len(), 1);
         assert!(!list[0].le_audio);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Bluetooth LE keyboards and mice (issue #413) stay out of the device
+    /// list the audio screens use, also when a saved device has their address
+    #[test]
+    fn le_keyboards_and_mice_stay_out_of_the_audio_devices() {
+        let dir = std::env::temp_dir().join(format!("bluecaster-state-hid-le-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        devices::save(&dir, "AA:BB:CC:DD:EE:FF", "Phones").unwrap();
+        let entry = |address: &str, name: &str, audio: bool, hid_le: Option<u8>| ScannedDevice {
+            address: address.into(),
+            name: name.into(),
+            rssi: -50,
+            class_of_device: 0,
+            audio,
+            le_audio: false,
+            le_audio_set: false,
+            hid_le,
+        };
+        let scan = [
+            entry("AA:BB:CC:DD:EE:FF", "Phones", true, None),
+            entry("11:22:33:44:55:66", "Classic keyboard", false, None),
+            entry("C0:11:22:33:44:55", "LE mouse", false, Some(1)),
+            // The saved headphones' address: still not that device
+            entry("AA:BB:CC:DD:EE:FF", "LE keyboard", false, Some(0)),
+        ];
+        let (scanned, hid) = split_scan(&scan);
+        let names = |l: &[Device]| l.iter().map(|d| d.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&scanned), ["Phones", "Classic keyboard"]);
+        assert_eq!(names(&hid), ["LE mouse", "LE keyboard"]);
+        assert_eq!(hid.iter().map(|d| d.hid_le).collect::<Vec<_>>(), [Some(1), Some(0)]);
+        assert!(hid.iter().all(|d| !d.audio && !d.le_audio && !d.saved));
+        let list = saved_devices(&dir, &scanned, &BTreeMap::new());
+        assert_eq!(names(&list), ["Phones", "Classic keyboard"]);
+        assert_eq!(list[0].rssi, Some(-50));
+        // Even when handed one, the device list leaves it out, and nothing is saved
+        let all: Vec<Device> = scan.iter().map(scanned_device).collect();
+        let list = saved_devices(&dir, &all, &BTreeMap::new());
+        assert_eq!(names(&list), ["Phones", "Classic keyboard"]);
+        assert!(list.iter().all(|d| d.hid_le.is_none()));
+        assert_eq!(devices::load_all(&dir).len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -6392,6 +6665,37 @@ mod tests {
         let intel = active_adapter(0x8087, 0x0033, &[]);
         assert_eq!((intel.vendor.as_str(), intel.chip, intel.windows_name), ("Intel", None, None));
         assert!(intel.display_name.contains("0x8087:0x0033"), "{}", intel.display_name);
+    }
+
+    /// settings.set can turn keyboards and mice off, never on; developer
+    /// mode off turns them off for good (issue #413)
+    #[test]
+    fn settings_set_never_turns_the_hid_host_on() {
+        let off = CoreSettings { debug_mode: true, hid_host: false, ..CoreSettings::default() };
+        let mut ui = to_ipc_settings(&off);
+        ui.hid_host = true;
+        assert!(!merge_settings(&off, &ui).hid_host);
+
+        let on = CoreSettings { debug_mode: true, hid_host: true, ..CoreSettings::default() };
+        let mut ui = to_ipc_settings(&on);
+        assert!(merge_settings(&on, &ui).hid_host);
+        ui.hid_host = false;
+        assert!(!merge_settings(&on, &ui).hid_host);
+    }
+
+    #[test]
+    fn developer_mode_off_turns_the_hid_host_off_for_good() {
+        let on = CoreSettings { debug_mode: true, hid_host: true, ..CoreSettings::default() };
+        let mut ui = to_ipc_settings(&on);
+        ui.developer_mode = false;
+        let merged = merge_settings(&on, &ui);
+        assert!(!merged.debug_mode && !merged.hid_host);
+        // Developer mode on again: still off
+        let mut ui = to_ipc_settings(&merged);
+        ui.developer_mode = true;
+        ui.hid_host = true;
+        let again = merge_settings(&merged, &ui);
+        assert!(again.debug_mode && !again.hid_host && !again.hid_host());
     }
 
     #[test]

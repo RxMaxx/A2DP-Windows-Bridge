@@ -10,7 +10,7 @@ pub mod compat;
 pub mod default_input;
 pub mod devices;
 mod health;
-mod le_media;
+pub mod hid;
 pub mod le_sets;
 mod le_stream;
 pub mod link;
@@ -21,11 +21,13 @@ pub mod migrate;
 pub mod paths;
 pub mod profiles;
 mod service;
+pub mod service_data;
 pub mod settings;
 pub mod stream;
 pub mod vendor;
 mod voice;
 
+pub use hid::{HidCounts, HidDevice};
 pub use le_stream::{
     BROADCAST_PRESET_HQ, BROADCAST_PRESET_SQ, LeAudioPath, LeMicPath, LeStreamDetails, broadcast_config, le_mic_target,
     le_silence_set, le_stats_line, start_mic,

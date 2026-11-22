@@ -90,6 +90,9 @@ pub enum Source {
     /// SCO data (HCI_SCO_DATA_PACKET: handle and packet status flag,
     /// length, payload) and HCI_EVENT_SCO_CAN_SEND_NOW (event packets)
     Sco,
+    /// HID host events (HCI_EVENT_HID_META: connections, descriptors and
+    /// input reports), after [`Stack::hid_host_init`]
+    Hid,
 }
 
 impl Source {
@@ -109,6 +112,7 @@ impl Source {
             12 => Source::SdpClient,
             13 => Source::SdpServices,
             14 => Source::Sco,
+            15 => Source::Hid,
             _ => Source::Hci,
         }
     }

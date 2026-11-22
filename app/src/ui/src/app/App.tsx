@@ -25,6 +25,7 @@ import { Setup, needsSetup } from "../screens/Setup";
 import { applyTheme, followAccent } from "../theme";
 import { AppProvider, useApp, type RouteName } from "./context";
 import { mixerShown, saveSettings } from "./settings";
+import { HidNotice } from "../components/HidHost";
 import { CaptureSign, CrashNotice, UpdateNotice } from "./indicators";
 import "./shell.css";
 
@@ -206,6 +207,7 @@ function MainWindow() {
           </nav>
           <main class="content" id="main" tabindex="-1" lang={lang()}>
             <div class="app-notices">
+              <HidNotice />
               <CrashNotice />
               <UpdateNotice />
             </div>

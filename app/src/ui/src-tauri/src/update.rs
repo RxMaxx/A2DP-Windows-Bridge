@@ -16,6 +16,12 @@
 //! Only an installed copy with an updater key updates itself. The portable
 //! copy (no unins000.exe next to it) and builds without a key show the
 //! release page instead (Phase::Unavailable).
+//!
+//! Neither does a UI connected to a core that runs as a Windows service
+//! ([`SERVICE`]): `app.quit_for_update` is refused there (Windows starts
+//! and stops the service), step 3 would wait for a core that never exits,
+//! and a per-user installer cannot replace a service's program. The
+//! all-users installer brings its own update path.
 
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -33,6 +39,8 @@ const MANIFEST_PREFIX: &str = "https://github.com/SeiyaFunaokaJP/BlueCaster/rele
 const RETRY_INTERVAL: Duration = Duration::from_secs(3);
 /// Stopping a stream and resetting the adapter takes a few seconds
 const CORE_EXIT_TIMEOUT: Duration = Duration::from_secs(20);
+/// Phase::Unavailable's reason while the core runs as a service
+pub const SERVICE: &str = "service";
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -125,6 +133,9 @@ impl Updates {
 /// Ok also when one is already under way.
 pub fn start(app: &AppHandle, manifest_url: String) -> Result<(), String> {
     let updates = app.state::<Arc<Updates>>().inner().clone();
+    if app.state::<Arc<Ipc>>().service() {
+        return Err(format!("no in-app update ({SERVICE})"));
+    }
     match updates.phase() {
         Phase::Unavailable { reason } => return Err(format!("no in-app update ({reason})")),
         Phase::Downloading { .. } | Phase::Waiting { .. } | Phase::Installing { .. } => return Ok(()),
@@ -210,6 +221,8 @@ async fn install(app: &AppHandle, updates: &Updates, ipc: &Ipc) -> Result<bool, 
             ipc.set_updating(false);
             return Ok(true);
         }
+        // The core became a service meanwhile: it does not exit
+        Err(e) if e.code == ipc::access::NOT_IN_SERVICE => return Err(("update.service", e.code)),
         // Not running (or gone while answering): nothing to stop
         Err(e) if e.code.starts_with("ipc.") => {}
         Err(e) => return Err(("update.core", e.code)),

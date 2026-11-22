@@ -173,7 +173,12 @@ pub async fn save_text_file(window: WebviewWindow, name: String, text: String) -
 
 /// The in-app update's state (also sent as `update://phase`)
 #[tauri::command]
-pub fn update_status(updates: State<'_, Arc<Updates>>) -> Phase {
+pub fn update_status(updates: State<'_, Arc<Updates>>, ipc: State<'_, Arc<Ipc>>) -> Phase {
+    // The core runs as a Windows service: the update cannot stop it
+    // (update.rs), so the release page is offered instead
+    if ipc.service() {
+        return Phase::Unavailable { reason: update::SERVICE };
+    }
     updates.phase()
 }
 

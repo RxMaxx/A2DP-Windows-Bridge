@@ -22,7 +22,7 @@ use win_sys::notify::{Balloon, BalloonIcon, ClickAction, TrayNotifier};
 use crate::state::{BalloonRequest, CoreState, TrayView};
 
 /// Profiles listed in the tray menu (as v1)
-const TRAY_PROFILES: usize = 10;
+pub(crate) const TRAY_PROFILES: usize = 10;
 
 enum UserEvent {
     Tray(TrayView),
@@ -237,7 +237,7 @@ fn link_sample(
 /// Link samples while a UI subscribes; every second the stream's rates (the
 /// flow's Audio step) and the receiver test's state; every two seconds the
 /// HCI capture's size
-async fn sampler(state: Arc<CoreState>) {
+pub(crate) async fn sampler(state: Arc<CoreState>) {
     let stats = state.service.stats();
     let mut tick = tokio::time::interval(SAMPLE);
     let mut last_link: Option<SampleCounters> = None;
@@ -316,7 +316,7 @@ const V1_EXIT_WAIT: Duration = Duration::from_secs(10);
 /// waited for, so that the adapter is free), then v1's mutex is held so
 /// that a v1 started later quits at once. None if v1 still runs (it did not
 /// exit, or runs elevated): [`watch_v1`] then takes the mutex once it exits.
-fn replace_v1() -> Option<win_sys::single_instance::SingleInstance> {
+pub(crate) fn replace_v1() -> Option<win_sys::single_instance::SingleInstance> {
     use win_sys::single_instance::{SingleInstance, V1_MUTEX_NAME, ask_v1_to_exit, is_held};
     if is_held(V1_MUTEX_NAME) {
         let asked = ask_v1_to_exit();
@@ -352,7 +352,7 @@ const OLD_CORE_CHECK: Duration = Duration::from_secs(5);
 /// later (an old shortcut) quits at once and its UI talks to this core over
 /// the old pipe name. None if it still runs: [`hold_old_core_mutex`] takes
 /// the mutex once it has exited.
-fn replace_old_core() -> Option<win_sys::single_instance::SingleInstance> {
+pub(crate) fn replace_old_core() -> Option<win_sys::single_instance::SingleInstance> {
     crate::quit::stop_old_core(OLD_CORE_EXIT_WAIT);
     match win_sys::single_instance::SingleInstance::acquire(&ipc::old_core_mutex_name()) {
         Ok(g) => g,
@@ -364,7 +364,7 @@ fn replace_old_core() -> Option<win_sys::single_instance::SingleInstance> {
 }
 
 /// Takes the 2.0.x core's mutex once it is free and holds it from then on
-async fn hold_old_core_mutex() {
+pub(crate) async fn hold_old_core_mutex() {
     let name = ipc::old_core_mutex_name();
     let mut tick = tokio::time::interval(OLD_CORE_CHECK);
     loop {
@@ -379,7 +379,7 @@ async fn hold_old_core_mutex() {
 
 /// While v1 still runs (it did not exit when asked): the UI asks the user to
 /// exit it. Once it has exited, v1's mutex is taken and held from then on.
-async fn watch_v1(state: Arc<CoreState>) {
+pub(crate) async fn watch_v1(state: Arc<CoreState>) {
     use win_sys::single_instance::{SingleInstance, V1_MUTEX_NAME};
     let mut tick = tokio::time::interval(V1_CHECK);
     loop {
@@ -397,24 +397,18 @@ async fn watch_v1(state: Arc<CoreState>) {
 /// Windows' audio devices: the cables there at start, then every change
 /// (a cable installed by its own setup, outside BlueCaster), a burst of
 /// them (one install adds several devices) taken as one
-fn watch_audio_endpoints(state: &Arc<CoreState>) {
-    if let Ok(devices) = audio_capture::render_devices() {
+pub(crate) fn watch_audio_endpoints(state: &Arc<CoreState>) {
+    if let Ok(devices) = session_host::devices::render_devices() {
         state.watch_cables(&devices);
     }
-    let _com = match win_sys::audio_policy::ComApartment::init_mta() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("audio endpoints: COM: HRESULT 0x{:08x}", e.code().0 as u32);
-            return;
-        }
-    };
     let (tx, rx) = mpsc::channel::<()>();
-    let _watch = match win_sys::audio_notify::EndpointWatch::new(move || {
+    // In this process, or in the session agent (watched again by each new one)
+    let _watch = match session_host::endpoints::watch_endpoints(move || {
         let _ = tx.send(());
     }) {
         Ok(w) => w,
         Err(e) => {
-            tracing::warn!("audio endpoints: not watched: HRESULT 0x{:08x}", e.code().0 as u32);
+            tracing::warn!("audio endpoints: not watched: {e}");
             return;
         }
     };
@@ -481,6 +475,11 @@ pub fn run(args: &[String]) -> i32 {
         ServiceOptions { config_dir, hci_tcp: None, capture, afh: None, usb: Default::default() },
         tx,
     ));
+    // Keyboards and mice (experimental): this executable is the guard that
+    // releases held keys if the core dies
+    if let Ok(exe) = std::env::current_exe() {
+        service.enable_hid_guard(exe);
+    }
     let state = {
         let (p1, p2, p3) = (proxy.clone(), proxy.clone(), proxy.clone());
         CoreState::new(

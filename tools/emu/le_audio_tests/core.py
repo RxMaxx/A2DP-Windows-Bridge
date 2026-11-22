@@ -11,6 +11,11 @@ CIS_REFUSED = r'(?s)CIG 1 removed.*cannot stream: CIS 0x[0-9a-f]+ could not be e
 CASES = [
     # One headset, one 2-channel ASE: 1 CIS, LC3 48_6_2 (the best media preset)
     Case('stereo', 'stereo', r'LC3 48000 Hz 10 ms 155 octets, 2 channel\(s\) over 1 CIS'),
+    # The same with the capture in the session agent (--capture-agent, the
+    # first name of --session-agent): the tone checked over the whole stream
+    # shows the PCM arrives intact
+    Case('stereo-agent', 'stereo', r'LC3 48000 Hz 10 ms 155 octets, 2 channel\(s\) over 1 CIS',
+         bluecaster_args=['--capture-agent']),
     # One headset, two 1-channel ASEs: 2 CIS on one link
     Case('two-ase', 'two-ase', r'LC3 48000 Hz 10 ms 155 octets, 2 channel\(s\) over 2 CIS'),
     # Two earbuds (Front Left / Front Right), one ASE each: 2 CIS on two links

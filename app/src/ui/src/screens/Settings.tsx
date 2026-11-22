@@ -191,7 +191,8 @@ export function Settings() {
                 <Match when={phase().state === "unavailable" && phase()}>
                   {(p) => {
                     const reason = (p() as Extract<UpdatePhase, { state: "unavailable" }>).reason;
-                    return <div class="hint">{t(reason === "unsigned" ? "ui.update.unsigned" : "ui.update.portable")}</div>;
+                    // "service": the core runs as a Windows service, which this build cannot update
+                    return <div class="hint">{t(reason === "portable" ? "ui.update.portable" : "ui.update.unsigned")}</div>;
                   }}
                 </Match>
                 <Match when={phase().state === "downloading" && phase()}>
@@ -233,15 +234,18 @@ export function Settings() {
           checked={s().developer_mode}
           onChange={(v) => set({ developer_mode: v })}
         />
-        <div class="row">
-          <span class="row-text">
-            <span class="row-label">{t("ui.settings.config_folder")}</span>
-            <span class="hint mono">{snap().config_dir}</span>
-          </span>
-          <Button icon="folder_open" onClick={() => core.transport.openFolder(snap().config_dir)}>
-            {t("ui.settings.open_config_folder")}
-          </Button>
-        </div>
+        {/* A core that runs as a service keeps its folder protected */}
+        <Show when={!snap().service_mode}>
+          <div class="row">
+            <span class="row-text">
+              <span class="row-label">{t("ui.settings.config_folder")}</span>
+              <span class="hint mono">{snap().config_dir}</span>
+            </span>
+            <Button icon="folder_open" onClick={() => core.transport.openFolder(snap().config_dir)}>
+              {t("ui.settings.open_config_folder")}
+            </Button>
+          </div>
+        </Show>
         <div class="row">
           <span class="row-text">
             <span class="row-label">{t("ui.setup.title")}</span>
@@ -265,7 +269,16 @@ export function Settings() {
         danger
         onConfirm={() => {
           setQuitting(false);
-          void app.run(() => core.request("app.quit"));
+          void app.run(async () => {
+            try {
+              await core.request("app.quit");
+            } catch (e) {
+              // A core that runs as a service stays: app.close closes the
+              // window and the tray icon instead
+              if (IpcError.from(e).code !== "ipc.not_in_service") throw e;
+              await core.request("app.close");
+            }
+          });
         }}
         onCancel={() => setQuitting(false)}
       >

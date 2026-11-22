@@ -39,6 +39,7 @@ import type {
   Event,
   FirmwareFile,
   FlowView,
+  HidPasskey,
   LinkSample,
   LinkTotals,
   LogLevel,
@@ -79,7 +80,9 @@ export type MockScenario =
   | "realtek_driver"
   /** Headset microphone on for the WH-1000XM5 (to CABLE
    *  Input) and for the LE Audio earbuds: a stream reports its voice link */
-  | "voice";
+  | "voice"
+  /** The core runs as a Windows service: no folder named, app.quit refused */
+  | "service";
 
 export interface MockOptions {
   scenario?: MockScenario;
@@ -259,6 +262,7 @@ export function sampleSettings(over: Partial<Settings> = {}): Settings {
     le_audio_low_latency: false,
     // Off, as schema 5 sets it: WH-1000XM5 chose LDAC
     auto_codec: false,
+    hid_host: false,
     ...over,
   };
 }
@@ -278,6 +282,7 @@ export function sampleDevice(
     codecs_on_request: [],
     le_audio: false,
     le_audio_set: false,
+    hid_le: null,
     ...over,
   };
 }
@@ -556,8 +561,8 @@ export function sampleSnapshot(scenario: MockScenario = "normal"): Snapshot {
       current_version: "2.0.0-alpha.1",
       error: null,
     },
-    config_dir,
-    log_dir: `${config_dir}\\logs`,
+    config_dir: scenario === "service" ? "" : config_dir,
+    log_dir: scenario === "service" ? "" : `${config_dir}\\logs`,
     capture: null,
     clock_ms: null,
     v1_running: false,
@@ -576,6 +581,10 @@ export function sampleSnapshot(scenario: MockScenario = "normal"): Snapshot {
           ]
         : [],
     audio_endpoints: 0,
+    hid_devices: [],
+    hid_candidates: [],
+    hid_passkey: null,
+    service_mode: scenario === "service",
     vendors: [
       { id: "huawei", name: "Huawei", options: [] },
       { id: "oppo", name: "OPPO", options: ["every_connection"] },
@@ -603,6 +612,16 @@ const SCAN_RESULTS: Device[] = [
     rssi: -70,
   }),
 ];
+
+/** The Bluetooth LE keyboards and mice a scan finds (HID host on): the
+ *  classic MX Keys' LE side, and a mouse found only over LE */
+const HID_LE_RESULTS: Device[] = [
+  sampleDevice({ address: "38:18:4C:55:66:77", name: "MX Keys", audio: false, rssi: -72, hid_le: 0 }),
+  sampleDevice({ address: "E1:5A:2B:3C:4D:5E", name: "LE Mouse", audio: false, rssi: -66, hid_le: 1 }),
+];
+
+/** The keyboard whose pairing shows a number to type (hid.add) */
+export const MOCK_PASSKEY_KEYBOARD = "38:18:4C:55:66:77";
 
 /** What the scan's LE Audio part finds (LE Audio on): the dual-mode
  *  earbuds' LE Audio entry (a coordinated set) and an LE Audio speaker */
@@ -1114,6 +1133,12 @@ export class MockCore implements Transport {
   /** Ends the running scan (device.scan_stop) */
   private scanStop: (() => void) | null = null;
   private connectFailure: string | null = null;
+  /** The HID host's code handed out last (hid.code; one use) */
+  private hidCode: string | null = null;
+  /** What the HID host counted (hid.status) */
+  private hidCounts = { reports: 0, undecoded: 0, events: 0, injected: 0, blocked: 0, refused: 0 };
+  /** Ends the wait for the number to be typed (hid.add of MOCK_PASSKEY_KEYBOARD) */
+  private hidTyped: (() => void) | null = null;
   private logs: LogLevel | null = null;
   private receiverSub = false;
   /** Every line, as the core keeps them, and the flow it follows */
@@ -1192,7 +1217,7 @@ export class MockCore implements Transport {
         type: "welcome",
         protocol: 1,
         server: "bluecaster-core/2.0.0-alpha.1 (mock)",
-        features: ["rfcomm"],
+        features: ["rfcomm", "hid-host"],
       });
       onStatus({
         state: "connected",
@@ -1469,6 +1494,9 @@ export class MockCore implements Transport {
           // As the core's serde default for a client that sends none
           setup_done: next.setup_done ?? true,
           cables_dialog_shown: next.cables_dialog_shown ?? true,
+          // As the core: settings.set only turns it off, developer mode
+          // off turns it off for good
+          hid_host: before.hid_host && !!next.hid_host && !!next.developer_mode,
         };
         this.emit({ kind: "settings", value: this.snap.settings });
         let le_audio_deferred = false;
@@ -1761,6 +1789,14 @@ export class MockCore implements Transport {
         this.emit({ kind: "update", value: this.snap.update });
         return this.snap.update;
       }
+      case "hid.code":
+      case "hid.enable":
+      case "hid.disable":
+      case "hid.status":
+      case "hid.add":
+      case "hid.connect":
+      case "hid.remove":
+        return this.hid(method, p);
       case "app.hidden_to_tray":
         if (!this.trayHintShown) {
           this.trayHintShown = true;
@@ -1768,6 +1804,9 @@ export class MockCore implements Transport {
         }
         return null;
       case "app.quit":
+        if (this.snap.service_mode) throw errorInfo("ipc.not_in_service", "error.not_in_service");
+        return null;
+      case "app.close":
         return null;
       default:
         throw errorInfo("ipc.bad_request", "ipc.error.bad_request", [
@@ -1821,6 +1860,99 @@ export class MockCore implements Transport {
   captureDrops = false;
   /** Windows' default output (audio.devices), if not the speakers */
   defaultOutput: string | null = null;
+
+  /** The HID host's requests, as the core answers them */
+  private async hid(method: string, p: Record<string, unknown>): Promise<unknown> {
+    const s = this.snap.settings;
+    const on = s.developer_mode && s.hid_host;
+    const developerOnly = () => {
+      if (!s.developer_mode) throw errorInfo("developer.off", "ipc.error.developer_only");
+    };
+    const setOn = (v: boolean) => {
+      this.snap.settings = { ...this.snap.settings, hid_host: v };
+      this.emit({ kind: "settings", value: this.snap.settings });
+    };
+    const devices = (list: typeof this.snap.hid_devices) => {
+      this.snap.hid_devices = list;
+      this.emit({ kind: "hid_devices", value: list });
+    };
+    const address = String(p.address ?? "").toUpperCase();
+    switch (method) {
+      case "hid.code":
+        developerOnly();
+        this.hidCode = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
+        return { code: this.hidCode };
+      case "hid.enable": {
+        developerOnly();
+        if (!p.other_input_at_hand || !p.risk_understood) throw errorInfo("hid.not_confirmed", "error.hid.not_confirmed");
+        const handed = this.hidCode;
+        this.hidCode = null;
+        if (!handed || String(p.code).trim() !== handed) throw errorInfo("hid.wrong_code", "error.hid.wrong_code");
+        setOn(true);
+        return null;
+      }
+      case "hid.disable":
+        if (s.hid_host) setOn(false);
+        this.snap.hid_candidates = [];
+        this.emit({ kind: "hid_candidates", value: [] });
+        devices(this.snap.hid_devices.map((d) => ({ ...d, connected: false })));
+        return null;
+      case "hid.status":
+        if (on) {
+          this.hidCounts.reports += 12;
+          this.hidCounts.events += 10;
+          this.hidCounts.injected += 10;
+        }
+        return { devices: this.snap.hid_devices, counts: on ? { ...this.hidCounts } : null };
+      case "hid.add": {
+        developerOnly();
+        if (!on) throw errorInfo("hid.off", "error.hid.off");
+        const known = this.snap.hid_devices.some((d) => d.address === address);
+        if (!known && this.snap.hid_devices.length >= 8) throw errorInfo("hid.too_many", "error.hid.too_many");
+        const name = String(p.name ?? "");
+        const le = typeof p.le === "number";
+        if (!known) devices([...this.snap.hid_devices, { address, name, connected: false, le }]);
+        // Pairing takes a while
+        await new Promise((r) => this.later(1500, () => r(undefined)));
+        if (address === MOCK_PASSKEY_KEYBOARD) {
+          // This keyboard asks for a number: shown until the user types it
+          // (typeHidPasskey) or a while has passed
+          const passkey = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
+          this.setHidPasskey({ address, passkey });
+          await new Promise<void>((r) => {
+            this.hidTyped = r;
+            this.later(8000, r);
+          });
+          this.hidTyped = null;
+          this.setHidPasskey(null);
+        }
+        devices(this.snap.hid_devices.map((d) => (d.address === address ? { ...d, connected: true } : d)));
+        return null;
+      }
+      case "hid.connect":
+        developerOnly();
+        if (!on) throw errorInfo("hid.off", "error.hid.off");
+        if (!this.snap.hid_devices.some((d) => d.address === address))
+          throw errorInfo("hid.connect_failed", "error.hid.connect_failed");
+        await new Promise((r) => this.later(800, () => r(undefined)));
+        devices(this.snap.hid_devices.map((d) => (d.address === address ? { ...d, connected: true } : d)));
+        return null;
+      default:
+        devices(this.snap.hid_devices.filter((d) => d.address !== address));
+        return null;
+    }
+  }
+
+  /** The number to type on a keyboard being added (null: none any more) */
+  setHidPasskey(p: HidPasskey | null) {
+    this.snap.hid_passkey = p;
+    this.emit({ kind: "hid_passkey", value: p });
+  }
+
+  /** The user typed the number on the keyboard and pressed Enter */
+  typeHidPasskey() {
+    this.hidTyped?.();
+  }
 
   /** Windows' audio devices changed (a cable installed by its own setup) */
   audioEndpointsChanged() {
@@ -2679,6 +2811,10 @@ export class MockCore implements Transport {
         this.snap.devices = merged;
         this.snap.scanning = false;
         this.emit({ kind: "devices", value: merged });
+        // Kept apart from the device list, as the core does
+        const s = this.snap.settings;
+        this.snap.hid_candidates = s.developer_mode && s.hid_host ? HID_LE_RESULTS : [];
+        this.emit({ kind: "hid_candidates", value: this.snap.hid_candidates });
         this.emit({ kind: "scanning", value: false });
         resolve(found);
       };

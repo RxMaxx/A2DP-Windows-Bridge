@@ -13,7 +13,7 @@ export type WindowKind = "main" | "flyout";
 
 /** The in-app update (src-tauri/src/update.rs) */
 export type UpdatePhase =
-  | { state: "unavailable"; reason: "portable" | "unsigned" }
+  | { state: "unavailable"; reason: "portable" | "unsigned" | "service" }
   | { state: "idle" }
   | { state: "downloading"; version: string; downloaded: number; total: number | null }
   | { state: "waiting"; version: string }

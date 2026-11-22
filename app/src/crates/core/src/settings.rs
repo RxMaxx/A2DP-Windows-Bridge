@@ -192,6 +192,10 @@ pub struct Settings {
     /// the Output and Input Source lists offer every output, the 16-channel
     /// cable and the other side's cable too (only with debug_mode on)
     pub all_audio_devices: bool,
+    /// Developer > "Keyboard and mouse through BlueCaster" (experimental,
+    /// dangerous; issue #413): in force only with debug_mode on
+    /// ([`Settings::hid_host`]). Only crate::hid's confirmation turns it on.
+    pub hid_host: bool,
 
     pub debug_mode: bool,
     /// Developer mode: overrides of the codec and media path (in force only
@@ -400,6 +404,7 @@ impl Default for Settings {
             mute_output: false,
             volume_mixer: false,
             all_audio_devices: false,
+            hid_host: false,
             debug_mode: false,
             dev_overrides: codec::dev::DevOverrides::default(),
             dev_vendors: Default::default(),
@@ -504,6 +509,12 @@ impl Settings {
     /// #86: off for everyone else until a later version)
     pub fn le_audio(&self) -> bool {
         self.le_audio_experimental && self.debug_mode
+    }
+
+    /// Keyboards and mice through BlueCaster in force: only in developer
+    /// mode (issue #413; turning developer mode off turns it off)
+    pub fn hid_host(&self) -> bool {
+        self.hid_host && self.debug_mode
     }
 
     /// Whether a stream mutes the default output device

@@ -17,6 +17,7 @@ mod format;
 mod gaps;
 mod loopback;
 mod mixer;
+mod remote;
 mod silence;
 mod tone;
 
@@ -34,12 +35,16 @@ pub use devices::{
 };
 pub use format::{DEFAULT_RATE, Format, SampleFormat};
 pub use mixer::{MixerApp, SYSTEM_SOUNDS, mixer_apps, set_mixer_app};
+pub use remote::{
+    AgentChannel, CAPTURE_RING_BYTES, CaptureAgent, CaptureWireError, CaptureWorker, Link, capture_agent_in_use,
+    use_capture_agent, valid_channel,
+};
 pub use tone::RIGHT_HZ as TEST_TONE_RIGHT_HZ;
 pub use tone::{AMPLITUDE as TEST_TONE_AMPLITUDE, LEFT_HZ as TEST_TONE_LEFT_HZ};
 pub use win_sys::audio_policy::EndpointRole;
 
 /// Where the audio comes from (v1 CaptureMode, plus the test tone)
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Source {
     /// Loopback of the default render device (Console role), as it is when
     /// the capture is opened. A later change of the default device is not
@@ -56,7 +61,7 @@ pub enum Source {
     TestTone,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CaptureOptions {
     /// Capture at this rate instead of the device's mix rate (WASAPI
     /// resamples); for Application capture and the test tone, their rate.
@@ -101,6 +106,9 @@ pub enum EndReason {
     Error(u32),
     /// The sink panicked
     Panicked,
+    /// The session agent that ran the source was lost (see
+    /// [`use_capture_agent`]); opening the source again uses the next one
+    AgentLost,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -127,6 +135,12 @@ pub enum CaptureError {
     Thread(String),
     #[error("the capture thread stopped unexpectedly")]
     ThreadGone,
+    /// The capture agent failed (it did not start, answer or stay)
+    #[error("capture agent: {0}")]
+    Agent(String),
+    /// An error the capture agent's source reported, as its text
+    #[error("{message}")]
+    Remote { hresult: Option<u32>, message: String },
 }
 
 impl CaptureError {
@@ -134,6 +148,7 @@ impl CaptureError {
     pub fn hresult(&self) -> Option<u32> {
         match self {
             CaptureError::Activation { hresult, .. } | CaptureError::Windows { hresult, .. } => Some(*hresult),
+            CaptureError::Remote { hresult, .. } => *hresult,
             _ => None,
         }
     }
@@ -215,6 +230,8 @@ pub(crate) fn register_mmcss() -> Option<win_sys::mmcss::MmcssGuard> {
 enum Backend {
     Loopback(loopback::Opened),
     Tone,
+    /// Opened in the session agent (another process)
+    Remote(Box<dyn AgentChannel>),
 }
 
 /// An opened source, not started yet: the format is known, nothing is
@@ -225,7 +242,18 @@ pub struct Capture {
 }
 
 impl Capture {
+    /// Opens `source`: in the session agent once one is installed
+    /// ([`use_capture_agent`]), else in this process
     pub fn open(source: &Source, options: &CaptureOptions) -> Result<Capture, CaptureError> {
+        if let Some(agent) = remote::agent() {
+            let (format, channel) = agent.open(source, options)?;
+            return Ok(Capture { format, backend: Some(Backend::Remote(channel)) });
+        }
+        Capture::open_local(source, options)
+    }
+
+    /// Opens `source` in this process, whether or not an agent is installed
+    pub fn open_local(source: &Source, options: &CaptureOptions) -> Result<Capture, CaptureError> {
         let (format, backend) = match source {
             Source::SystemLoopback => {
                 let o = loopback::Opened::open(loopback::Target::Device(None), options)?;
@@ -251,6 +279,12 @@ impl Capture {
         Ok(Capture { format, backend: Some(backend) })
     }
 
+    /// A source the session agent opened ([`CaptureAgent::open`]), not
+    /// started yet
+    pub fn from_agent(format: Format, channel: Box<dyn AgentChannel>) -> Capture {
+        Capture { format, backend: Some(Backend::Remote(channel)) }
+    }
+
     /// The format the source will deliver
     pub fn format(&self) -> Format {
         self.format
@@ -261,6 +295,7 @@ impl Capture {
         let format = self.format;
         let (thread, shared) = match self.backend.take().expect("backend present until start") {
             Backend::Loopback(o) => o.start(sink)?,
+            Backend::Remote(channel) => return remote::start(channel, format, sink),
             Backend::Tone => {
                 let shared = Arc::new(Shared::default());
                 let thread_shared = shared.clone();
@@ -276,7 +311,7 @@ impl Capture {
                 (thread, shared)
             }
         };
-        Ok(Running { format, shared, thread: Some(thread) })
+        Ok(Running { format, shared, thread: Some(thread), remote: None })
     }
 }
 
@@ -301,6 +336,8 @@ pub struct Running {
     format: Format,
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
+    /// The agent's channel, closed after the pump thread is joined
+    remote: Option<Box<dyn AgentChannel>>,
 }
 
 impl Running {
@@ -372,6 +409,8 @@ impl Drop for Running {
                 self.shared.end_reason.get()
             );
         }
+        // Then the agent's channel (its capture stops there)
+        drop(self.remote.take());
     }
 }
 

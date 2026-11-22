@@ -28,8 +28,9 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// The Welcome's `features`: "rfcomm" for rfcomm.open / send / close and
 /// their events (2.0.2), "media_button" for the [`Event::MediaButton`]
-/// events (after 3.0.2)
-pub const FEATURES: &[&str] = &["rfcomm", "media_button"];
+/// events (after 3.0.2), "hid-host" for the hid.* methods and the
+/// [`Event::HidDevices`] events (experimental, issue #413)
+pub const FEATURES: &[&str] = &["rfcomm", "media_button", "hid-host"];
 
 /// The longest `device.scan` (seconds); a longer one is cut to it
 pub const MAX_SCAN_SECONDS: u32 = 600;
@@ -301,6 +302,11 @@ pub struct Device {
     /// both earbuds stream together)
     #[serde(default)]
     pub le_audio_set: bool,
+    /// Keyboards and mice (experimental, issue #413): a Bluetooth LE
+    /// keyboard or mouse with its address type for hid.add. Such entries
+    /// are only in Snapshot.hid_candidates, never in the device list.
+    #[serde(default)]
+    pub hid_le: Option<u8>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
@@ -1148,6 +1154,11 @@ pub struct Settings {
     /// each with the codec chosen for it (read when the next stream starts)
     #[serde(default = "yes")]
     pub auto_codec: bool,
+    /// Developer mode: keyboards and mice through BlueCaster (experimental,
+    /// issue #413), in force while developer_mode is on. settings.set can
+    /// only turn it off; hid.enable turns it on.
+    #[serde(default)]
+    pub hid_host: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
@@ -1227,6 +1238,24 @@ pub struct Snapshot {
     /// The vendors with protocols of their own (developer mode's overrides)
     #[serde(default)]
     pub vendors: Vec<VendorInfo>,
+    /// The keyboards and mice added for the HID host (experimental)
+    #[serde(default)]
+    pub hid_devices: Vec<HidDevice>,
+    /// The Bluetooth LE keyboards and mice the last scan found (HID host
+    /// on): kept apart from `devices`, which the audio screens use
+    #[serde(default)]
+    pub hid_candidates: Vec<Device>,
+    /// The number the user types on the keyboard being added (hid.add),
+    /// while its pairing shows one
+    #[serde(default)]
+    pub hid_passkey: Option<HidPasskey>,
+    /// The core runs as a Windows service: its data folder is protected.
+    /// `config_dir` and `log_dir` are empty, results name files in the
+    /// user's folder (handed over through the session agent), and
+    /// `app.quit` is refused (`app.close` ends the user's session of the
+    /// app instead).
+    #[serde(default)]
+    pub service_mode: bool,
 }
 
 /// A crash report (logs\crash\<process>-<stamp>.txt): a panic or a crash
@@ -1788,8 +1817,20 @@ pub enum Event {
     /// A headphone button arrived (to every connection, not part of the
     /// state), also with the "media keys" setting off
     MediaButton(ButtonPress),
+    /// A keyboard or mouse was added, removed, connected or went away
+    /// (state, hid_devices)
+    HidDevices(Vec<HidDevice>),
+    /// The Bluetooth LE keyboards and mice a scan found (state,
+    /// hid_candidates)
+    HidCandidates(Vec<Device>),
+    /// Pairing the keyboard being added shows a number to type on it, or
+    /// no longer does (state, hid_passkey)
+    HidPasskey(Option<HidPasskey>),
     /// The core is shutting down
     Bye,
+    /// Service mode: the user chose Exit (app.close, the tray). The UI
+    /// closes; the core keeps running. Not state, no revision.
+    UiClose,
 }
 
 // ---------------------------------------------------------------------------
@@ -2156,6 +2197,41 @@ pub enum Method {
     /// rfcomm.timeout.
     #[serde(rename = "rfcomm.close")]
     RfcommClose { channel_id: u32 },
+    /// Keyboards and mice through BlueCaster (experimental, developer mode,
+    /// feature "hid-host"): a new code the user has to type into hid.enable,
+    /// valid for 120 s and once -> HidCode
+    #[serde(rename = "hid.code")]
+    HidCode,
+    /// Turns the HID host on: the code of hid.code, and the user's two
+    /// statements -> null. Errors ipc.error.developer_only,
+    /// error.hid.not_confirmed, error.hid.wrong_code (a new code is needed).
+    #[serde(rename = "hid.enable")]
+    HidEnable { code: String, other_input_at_hand: bool, risk_understood: bool },
+    /// Turns it off at once -> null
+    #[serde(rename = "hid.disable")]
+    HidDisable,
+    /// -> HidStatus
+    #[serde(rename = "hid.status")]
+    HidStatus,
+    /// Adds a keyboard or mouse and connects it, pairing on the way (it has
+    /// to be in pairing mode; several seconds) -> null. Errors error.hid.off,
+    /// error.hid.too_many, error.hid.connect_failed, error.hid.restart_pending,
+    /// error.hid.le_unavailable (an LE device, the adapter without LE).
+    #[serde(rename = "hid.add")]
+    HidAdd {
+        address: String,
+        name: String,
+        /// A Bluetooth LE device: its address type (Device.hid_le); None
+        /// for a classic one
+        #[serde(default)]
+        le: Option<u8>,
+    },
+    /// Connects one on the list again -> null; errors as hid.add
+    #[serde(rename = "hid.connect")]
+    HidConnect { address: String },
+    /// Disconnects one, takes it off the list and forgets its pairing -> null
+    #[serde(rename = "hid.remove")]
+    HidRemove { address: String },
     /// -> UpdateState; error update.failed (update.error) when the check
     /// failed
     #[serde(rename = "app.check_update")]
@@ -2172,6 +2248,18 @@ pub enum Method {
     /// the audio
     #[serde(rename = "app.quit_for_update")]
     AppQuitForUpdate,
+    /// The user's Exit in service mode, where the core keeps running:
+    /// streaming stops, the UI closes (event ui_close) and the tray icon
+    /// goes until BlueCaster is started again -> null. Keyboards and mice
+    /// keep working. Without service mode the same as app.quit.
+    #[serde(rename = "app.close")]
+    AppClose,
+    /// Service mode: runs `call`, a request that answered ipc.needs_admin,
+    /// through the elevated helper (a UAC prompt) -> the call's result.
+    /// Errors ipc.admin_declined, ipc.bad_request (a call that needs no
+    /// administrator), and the call's own.
+    #[serde(rename = "app.run_as_admin")]
+    AppRunAsAdmin { call: Box<Method> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -2636,6 +2724,73 @@ pub struct RfcommClosed {
     pub reason: String,
 }
 
+/// A keyboard or mouse added for the HID host (experimental)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+
+pub struct HidDevice {
+    /// "XX:XX:XX:XX:XX:XX"
+    pub address: String,
+    pub name: String,
+    pub connected: bool,
+    /// Added as a Bluetooth LE device
+    #[serde(default)]
+    pub le: bool,
+}
+
+/// What the HID host did since its stack started: counts only, nothing of
+/// what was typed
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+
+pub struct HidCounts {
+    /// Input reports received
+    pub reports: u64,
+    /// Reports in a format the host does not read
+    pub undecoded: u64,
+    /// Key and pointer events decoded
+    pub events: u64,
+    /// Events Windows took
+    pub injected: u64,
+    /// Events Windows did not take (a window running as administrator, the
+    /// secure desktop)
+    pub blocked: u64,
+    /// Connections refused (a device not on the list)
+    pub refused: u64,
+}
+
+/// hid.status' result
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+
+pub struct HidStatus {
+    pub devices: Vec<HidDevice>,
+    /// None while no stack with the HID host runs
+    pub counts: Option<HidCounts>,
+}
+
+/// A number to type on a keyboard being added, then Enter (Snapshot.hid_passkey)
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+
+pub struct HidPasskey {
+    /// The device's "XX:XX:XX:XX:XX:XX"
+    pub address: String,
+    /// Six digits
+    pub passkey: String,
+}
+
+/// Its Debug form hides the number: a logged state never holds it
+impl std::fmt::Debug for HidPasskey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HidPasskey").field("passkey", &"hidden").finish_non_exhaustive()
+    }
+}
+
+/// hid.code's result
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+
+pub struct HidCode {
+    /// Six digits
+    pub code: String,
+}
+
 // ---------------------------------------------------------------------------
 // Messages
 // ---------------------------------------------------------------------------
@@ -2926,6 +3081,10 @@ mod tests {
             crashes: Vec::new(),
             audio_endpoints: 0,
             vendors: Vec::new(),
+            hid_devices: Vec::new(),
+            hid_candidates: Vec::new(),
+            hid_passkey: None,
+            service_mode: false,
         })
         .unwrap();
         snap.as_object_mut().unwrap().remove("le_scanning");
@@ -2972,6 +3131,54 @@ mod tests {
             serde_json::to_value(&closed).unwrap(),
             serde_json::json!({"kind": "rfcomm_closed", "value": {"channel_id": 3, "reason": "remote"}})
         );
+    }
+
+    /// The HID host's requests and state; an older core's settings
+    /// without it read as off
+    #[test]
+    fn hid_wire_format() {
+        let m = |j: serde_json::Value| serde_json::from_value::<Method>(j).unwrap();
+        assert_eq!(m(serde_json::json!({"method": "hid.code"})), Method::HidCode);
+        assert_eq!(
+            m(serde_json::json!({"method": "hid.enable", "params": {
+                "code": "123456", "other_input_at_hand": true, "risk_understood": false}})),
+            Method::HidEnable { code: "123456".into(), other_input_at_hand: true, risk_understood: false }
+        );
+        assert_eq!(
+            m(serde_json::json!({"method": "hid.add", "params": {"address": "A", "name": "K"}})),
+            Method::HidAdd { address: "A".into(), name: "K".into(), le: None }
+        );
+        assert_eq!(
+            m(serde_json::json!({"method": "hid.add", "params": {"address": "A", "name": "K", "le": 1}})),
+            Method::HidAdd { address: "A".into(), name: "K".into(), le: Some(1) }
+        );
+        let e = Event::HidDevices(vec![HidDevice { address: "A".into(), name: "K".into(), connected: true, le: true }]);
+        assert_eq!(
+            serde_json::to_value(&e).unwrap(),
+            serde_json::json!({"kind": "hid_devices", "value": [{"address": "A", "name": "K", "connected": true, "le": true}]})
+        );
+        // An older core's list: classic devices
+        let old: HidDevice =
+            serde_json::from_value(serde_json::json!({"address": "A", "name": "K", "connected": false})).unwrap();
+        assert!(!old.le);
+        let settings: Settings = serde_json::from_value(serde_json::json!({
+            "language": "en", "theme": "system", "start_with_windows": false, "start_minimized": false,
+            "minimize_to_tray": true, "check_updates_on_startup": true, "include_prereleases": false,
+            "media_keys": true, "developer_mode": true, "bt_chip_pid": 0,
+            "bt_chip_fw_stem": "", "afh": "auto", "remote_sink": ""}))
+        .unwrap();
+        assert!(!settings.hid_host);
+        assert!(FEATURES.contains(&"hid-host"));
+        let p = HidPasskey { address: "A".into(), passkey: "012345".into() };
+        assert_eq!(
+            serde_json::to_value(Event::HidPasskey(Some(p.clone()))).unwrap(),
+            serde_json::json!({"kind": "hid_passkey", "value": {"address": "A", "passkey": "012345"}})
+        );
+        assert_eq!(
+            serde_json::to_value(Event::HidPasskey(None)).unwrap(),
+            serde_json::json!({"kind": "hid_passkey", "value": null})
+        );
+        assert!(!format!("{:?}", Event::HidPasskey(Some(p))).contains("012345"));
     }
 
     #[test]
