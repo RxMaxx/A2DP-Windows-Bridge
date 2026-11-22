@@ -187,6 +187,8 @@ Verfügbar, wenn `welcome.features` `"media_button"` enthält. Wird eine Taste a
 
 Verfügbar, wenn `welcome.features` den Eintrag `"tool_controls"` enthält. Jede Methode ändert genau eine Einstellung. Ein Werkzeug muss also nie ein ganzes Profil senden.
 
+**Experimentell bis BlueCaster 3.1.** Methodennamen und Parameter können sich je nach Rückmeldung noch ändern. Bei einer inkompatiblen Änderung wird `"tool_controls"` durch einen neuen Feature-Namen ersetzt. So erkennt ein Werkzeug, welche Version der Kern unterstützt.
+
 - `name` ist der Name eines gespeicherten Profils. Ohne `name` gilt das Profil des laufenden Streams, oder das aktive Profil, wenn kein Stream läuft. Ein unbekannter Name liefert `profile.not_found`.
 - Die Änderung wird im Profil gespeichert und auf den Stream angewendet, genau wie eine Änderung im BlueCaster-Fenster. Alle Clients erhalten ein `profiles`-Event.
 - Das Senden des aktuellen Werts ändert nichts.

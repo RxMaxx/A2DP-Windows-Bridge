@@ -29,6 +29,9 @@ import type {
 import type {
   AdapterInfo,
   AudioApp,
+  AuracastMix,
+  AuracastMixPreset,
+  AuracastMixState,
   MixerApp,
   AudioDevice,
   CaptureState,
@@ -77,6 +80,8 @@ export type MockScenario =
   | "huawei"
   /** Realtek's Windows driver on this PC has the RTL8761BU's firmware (issue #86) */
   | "realtek_driver"
+  /** A Realtek adapter and a built-in Intel card, both on WinUSB */
+  | "adapters"
   /** Headset microphone on for the WH-1000XM5 (to CABLE
    *  Input) and for the LE Audio earbuds: a stream reports its voice link */
   | "voice";
@@ -112,6 +117,25 @@ const RTL: AdapterInfo = {
   address: "00:1A:7D:DA:71:13",
   bt_version: "5.1",
   windows_name: "TP-Link Bluetooth USB Adapter",
+};
+
+/** A built-in Intel card on WinUSB beside the Realtek one ("adapters" scenario) */
+const INTEL: AdapterInfo = {
+  ...RTL,
+  instance_id: "USB\\VID_8087&PID_0033\\5&19A12CFC&0&14",
+  vid: 0x8087,
+  pid: 0x0033,
+  display_name: "Intel AX211 (0x8087:0x0033)",
+  device_name: "WinUSB Device",
+  vendor: "Intel",
+  realtek_chip: null,
+  firmware_present: null,
+  firmware_files: [],
+  firmware_download: false,
+  vendor_note: { key: "firmware.vendor_intel", args: [] },
+  address: "F4:26:79:00:00:01",
+  bt_version: "5.3",
+  windows_name: "Intel(R) Wireless Bluetooth(R)",
 };
 
 /** A chip BlueCaster has no firmware loader for (the first run lists it too) */
@@ -253,6 +277,8 @@ export function sampleSettings(over: Partial<Settings> = {}): Settings {
     bt_chip_pid: 0,
     bt_chip_fw_stem: "",
     realtek_custom_firmware: false,
+    adapter_id: "",
+    auracast_adapter_id: "",
     afh: "auto",
     remote_sink: "",
     le_audio_experimental: false,
@@ -462,7 +488,9 @@ export function sampleSnapshot(scenario: MockScenario = "normal"): Snapshot {
           ]
         : scenario === "realtek_driver"
           ? [{ ...RTL, firmware_driver: true, firmware_from_driver: true, firmware_files: [RTL_DRIVER_FILE] }]
-          : [RTL],
+          : scenario === "adapters"
+            ? [RTL, INTEL]
+            : [RTL],
       error: null,
       le_audio:
         scenario === "le_unsupported" ? false : scenario === "le" ? true : null,
@@ -1079,6 +1107,34 @@ function sourceOf(mode: string, id: string, name: string): SourceInfo {
 
 export class MockCore implements Transport {
   private mixer = MIXER_APPS;
+  private auracastMix: AuracastMix = {
+    auto: true,
+    center_db: -3,
+    lfe_db: -6,
+    surround_db: 0,
+    normalize: false,
+    matrix: [
+      [1, 0, 0.708, 0.501, 0, 0, 0, 0],
+      [0, 1, 0.708, 0.501, 0, 0, 0, 0],
+      [0, 0, 0, 0, 0.707, 0, 0.707, 0],
+      [0, 0, 0, 0, 0, 0.707, 0, 0.707],
+    ],
+    delay_ms: [0, 0, 0, 0],
+    invert: [false, false, false, false],
+  };
+  private mixPresets: AuracastMixPreset[] = [];
+  private mixState(): AuracastMixState {
+    const builtin = { name: "standard", mix: this.auracastMix, builtin: true };
+    return {
+      mix: this.auracastMix,
+      presets: [builtin, ...this.mixPresets],
+      live: false,
+      channels: 8,
+      present: [true, true, true, true, true, true, true, true],
+      rear: true,
+      effective: this.auracastMix.matrix,
+    };
+  }
   /** Addresses paired in Windows' Bluetooth (device.windows_paired) */
   windowsPaired: string[] = [];
   windowsPairedThrough: string[] | null = null;
@@ -1494,7 +1550,8 @@ export class MockCore implements Transport {
         if (
           before.bt_chip_pid !== this.snap.settings.bt_chip_pid ||
           before.bt_chip_fw_stem !== this.snap.settings.bt_chip_fw_stem ||
-          before.realtek_custom_firmware !== this.snap.settings.realtek_custom_firmware
+          before.realtek_custom_firmware !== this.snap.settings.realtek_custom_firmware ||
+          before.adapter_id !== this.snap.settings.adapter_id
         ) {
           // As the core's reload_adapter: the firmware state for the new
           // chip, then an idle stack is released so the firmware loads again
@@ -1767,6 +1824,28 @@ export class MockCore implements Transport {
           console.info("[mock] tray balloon: tray.minimized_hint");
         }
         return null;
+      case "auracast.set_source": {
+        const st = this.snap.stream;
+        if (st.state !== "streaming" || !st.info) return false;
+        st.info = { ...st.info, source: sourceOf(String(p.source), "", "") };
+        this.emit({ kind: "stream", value: st });
+        return true;
+      }
+      // The mixer: kept here, its matrix as set (no automatic one)
+      case "auracast.mix":
+        return this.mixState();
+      case "auracast.mix_set":
+        this.auracastMix = p.mix as AuracastMix;
+        return this.mixState();
+      case "auracast.mix_preset_save":
+        this.mixPresets = [
+          ...this.mixPresets.filter((x) => x.name !== p.name),
+          { name: p.name as string, mix: p.mix as AuracastMix, builtin: false },
+        ];
+        return this.mixState();
+      case "auracast.mix_preset_delete":
+        this.mixPresets = this.mixPresets.filter((x) => x.name !== p.name);
+        return this.mixState();
       case "app.quit":
         return null;
       default:
@@ -2126,7 +2205,24 @@ export class MockCore implements Transport {
   }
 
   private setAdapter(status: Snapshot["adapter"]["status"]) {
-    this.snap.adapter = { ...this.snap.adapter, status, error: null };
+    // As the core: the chosen adapter on WinUSB, else the first one, is open
+    // while the stack runs
+    const winusb = this.snap.adapter.adapters.filter((a) => a.driver === "winusb");
+    const id = (this.snap.settings.adapter_id ?? "").toLowerCase();
+    const open = winusb.find((a) => id !== "" && a.instance_id.toLowerCase() === id) ?? winusb[0];
+    const active =
+      status === "ready" && open
+        ? {
+            display_name: open.display_name,
+            windows_name: open.windows_name,
+            vid: open.vid,
+            pid: open.pid,
+            vendor: open.vendor,
+            chip: open.realtek_chip,
+            bt_version: open.bt_version,
+          }
+        : null;
+    this.snap.adapter = { ...this.snap.adapter, status, error: null, active };
     this.emit({ kind: "adapter", value: this.snap.adapter });
   }
 
@@ -2275,6 +2371,15 @@ export class MockCore implements Transport {
         : code !== null && (len(code) < 4 || len(code) > 16)
           ? "the broadcast code needs 4 to 16 bytes"
           : null;
+    // As the core: after the answer the session before ends (Idle), then
+    // the broadcast is set up
+    this.later(0, () => {
+      const settingUp = this.snap.stream;
+      if (settingUp.state !== "connecting") return;
+      this.setStream("idle", "status.disconnected");
+      this.snap.stream = settingUp;
+      this.emit({ kind: "stream", value: this.snap.stream });
+    });
     this.connect({
       address: "00:00:00:00:00:00",
       le: true,

@@ -218,6 +218,15 @@ pub struct Settings {
     /// Windows driver on this PC has its firmware, which is loaded by
     /// default (issue #86; adapter::configure)
     pub realtek_custom_firmware: bool,
+    /// The adapter to use when several are on WinUSB: its Windows device
+    /// instance ID, opened first (adapter::configure); empty: automatic
+    /// (the first one found)
+    pub adapter_id: String,
+    /// The adapter Auracast broadcasts go on (developer mode), its instance
+    /// ID: Bluetooth restarts on it for a broadcast and back on
+    /// `adapter_id` for the next scan or connection; empty: the same as
+    /// everything else
+    pub auracast_adapter_id: String,
 
     /// AFH host channel classification: "auto", "off" or Wi-Fi channels "6,11"
     #[serde(default = "default_afh")]
@@ -408,6 +417,8 @@ impl Default for Settings {
             bt_chip_pid: 0,
             bt_chip_fw_stem: String::new(),
             realtek_custom_firmware: false,
+            adapter_id: String::new(),
+            auracast_adapter_id: String::new(),
             afh: default_afh(),
             remote_sink: String::new(),
             last_profile: String::new(),
