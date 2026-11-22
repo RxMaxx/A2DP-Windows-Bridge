@@ -432,6 +432,7 @@ fn to_ipc_settings(s: &CoreSettings) -> Settings {
         bt_chip_fw_stem: s.bt_chip_fw_stem.clone(),
         realtek_custom_firmware: s.realtek_custom_firmware,
         adapter_id: s.adapter_id.clone(),
+        auracast_adapter_id: s.auracast_adapter_id.clone(),
         afh: s.afh.clone(),
         remote_sink: s.remote_sink.clone(),
         le_audio_experimental: s.le_audio_experimental,
@@ -543,6 +544,7 @@ fn merge_settings(base: &CoreSettings, s: &Settings) -> CoreSettings {
     c.bt_chip_fw_stem = s.bt_chip_fw_stem.clone();
     c.realtek_custom_firmware = s.realtek_custom_firmware;
     c.adapter_id = s.adapter_id.trim().to_string();
+    c.auracast_adapter_id = s.auracast_adapter_id.trim().to_string();
     c.afh = s.afh.clone();
     c.remote_sink = s.remote_sink.clone();
     c.le_audio_experimental = s.le_audio_experimental;

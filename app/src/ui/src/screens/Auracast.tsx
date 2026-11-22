@@ -6,9 +6,12 @@
 
 import { createEffect, createRoot, createSignal, Show } from "solid-js";
 import { useApp } from "../app/context";
-import { Button, Field, Section, Segmented } from "../components/controls";
+import { saveSettings } from "../app/settings";
+import { Button, Field, Section, Segmented, Select } from "../components/controls";
 import { t, tm } from "../i18n";
 import type { Core } from "../ipc/store";
+import type { AdapterInfo } from "../ipc/types";
+import { adapterName } from "./Adapter";
 
 type Source = "tone" | "loopback";
 type Quality = "hq" | "sq";
@@ -33,6 +36,31 @@ export function lengthError(text: string, [min, max]: readonly [number, number],
   const n = bytes(optional ? text : text.trim());
   if (optional && n === 0) return null;
   return n < min || n > max ? t("ui.dev.auracast_err_length", min, max) : null;
+}
+
+const hex4 = (n: number) => n.toString(16).toUpperCase().padStart(4, "0");
+
+/** The adapter for broadcasts (Settings::auracast_adapter_id): the current
+ *  one first, then each adapter on WinUSB by name and MAC address (two
+ *  adapters can share a name, "Bluetooth Controller"), VID:PID while its
+ *  address is not known yet, and a chosen one that is not there. `value`
+ *  is the option the setting names, whatever its case. */
+export function auracastAdapterChoices(
+  list: readonly AdapterInfo[],
+  chosen: string,
+): { value: string; options: { value: string; label: string }[] } {
+  const winusb = list.filter((a) => a.driver === "winusb");
+  const id = chosen.trim();
+  const options = [
+    { value: "", label: t("ui.dev.auracast_adapter_current") },
+    ...winusb.map((a) => ({
+      value: a.instance_id,
+      label: `${adapterName(a)} · ${a.address ?? `${hex4(a.vid)}:${hex4(a.pid)}`}`,
+    })),
+  ];
+  const found = winusb.find((a) => id !== "" && a.instance_id.toLowerCase() === id.toLowerCase());
+  if (id !== "" && !found) options.push({ value: id, label: t("ui.dev.auracast_adapter_missing") });
+  return { value: found?.instance_id ?? id, options };
 }
 
 function createSession(core: Core) {
@@ -121,6 +149,14 @@ export function Auracast() {
 
   const locked = () => live() || s.asking();
 
+  // The adapter the broadcast goes on: offered while several adapters are
+  // on WinUSB, or while one is chosen (to go back to the current one)
+  const auracastAdapter = () => core.state.snap!.settings.auracast_adapter_id ?? "";
+  const adapterChoice = () => auracastAdapterChoices(core.state.snap!.adapter.adapters, auracastAdapter());
+  const showAdapter = () =>
+    core.state.snap!.adapter.adapters.filter((a) => a.driver === "winusb").length > 1 ||
+    auracastAdapter().trim() !== "";
+
   return (
     <div>
       <p class="hint">{t("ui.dev.auracast_intro")}</p>
@@ -138,6 +174,20 @@ export function Auracast() {
           </Button>
         }
       >
+        <Show when={showAdapter()}>
+          <Field label={t("ui.dev.auracast_adapter")} hint={t("ui.dev.auracast_adapter_hint")}>
+            {(id, describedBy) => (
+              <Select
+                id={id}
+                describedBy={describedBy}
+                value={adapterChoice().value}
+                options={adapterChoice().options}
+                disabled={locked()}
+                onChange={(auracast_adapter_id) => void saveSettings(app, { auracast_adapter_id })}
+              />
+            )}
+          </Field>
+        </Show>
         <Field label={t("ui.dev.auracast_name")} error={nameError()}>
           {(id, describedBy) => (
             <input

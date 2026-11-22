@@ -481,6 +481,17 @@ fn le_config(le_on: bool, cli: Option<&LeCliOptions>, opts: &ServiceOptions) -> 
     })
 }
 
+/// A broadcast session's claim on the Auracast adapter
+/// ([`Inner::broadcast_wanted`]): dropped when the session ends, so the
+/// next scan or connection goes back on the adapter to use
+pub(crate) struct BroadcastGuard(Arc<Inner>);
+
+impl Drop for BroadcastGuard {
+    fn drop(&mut self) {
+        self.0.broadcast.store(false, Ordering::Release);
+    }
+}
+
 pub(crate) struct Inner {
     opts: ServiceOptions,
     pub settings: Mutex<Settings>,
@@ -517,6 +528,12 @@ pub(crate) struct Inner {
     pub mic_dsp: voice_link::MicDsp,
     /// The running stack was started with LE Audio
     le_active: AtomicBool,
+    /// A broadcast session wants the stack (le_stream::run_broadcast): it
+    /// opens the Auracast adapter (adapter::adapter_for)
+    broadcast: AtomicBool,
+    /// The adapter the running stack was started for (adapter::adapter_for;
+    /// empty: automatic)
+    host_adapter: Mutex<String>,
     /// A device scan runs
     scanning: AtomicBool,
     /// The LE Audio stream being sent (le_stream)
@@ -690,8 +707,26 @@ impl Inner {
         self.le_active.load(Ordering::Acquire)
     }
 
+    /// The adapter the next stack opens first: the Auracast adapter while a
+    /// broadcast wants the stack, else the adapter to use
+    fn wanted_adapter(&self) -> String {
+        let s = self.settings.lock().unwrap_or_else(|e| e.into_inner());
+        crate::adapter::adapter_for(&s, self.broadcast.load(Ordering::Acquire)).to_string()
+    }
+
+    /// A broadcast session wants the stack, until the guard drops: the
+    /// next stack started or checked (ensure_host) is the Auracast
+    /// adapter's
+    pub(crate) fn broadcast_wanted(self: &Arc<Self>) -> BroadcastGuard {
+        self.broadcast.store(true, Ordering::Release);
+        BroadcastGuard(self.clone())
+    }
+
     fn host_config(&self, le_on: bool) -> HostConfig {
-        let s = self.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let mut s = self.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        // The Auracast adapter for a broadcast: configure opens it first
+        s.adapter_id = self.wanted_adapter();
+        *self.host_adapter.lock().unwrap_or_else(|e| e.into_inner()) = s.adapter_id.clone();
         let transport = match &self.opts.hci_tcp {
             Some(addr) => TransportConfig::Tcp(addr.clone()),
             // bt-host adds the adapters it knows to `known`
@@ -931,6 +966,18 @@ impl Inner {
                 // Turned on or off while streaming or scanning: applied now,
                 // before the next scan or connection (v1)
                 Some(if le_wanted { "LE Audio was turned on" } else { "LE Audio was turned off" })
+            } else if !self
+                .host_adapter
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .eq_ignore_ascii_case(&self.wanted_adapter())
+            {
+                // A broadcast on the Auracast adapter, or back from it
+                Some(if self.broadcast.load(Ordering::Acquire) {
+                    "the broadcast goes on the Auracast adapter"
+                } else {
+                    "back on the adapter to use after a broadcast"
+                })
             } else if (self.voice_wanted.load(Ordering::Acquire) || self.mic_test.needs_voice()) && !h.voice_enabled() {
                 Some("headset mode needs the stack with voice")
             } else if !h.controller_responds(CONTROLLER_PROBE) {
@@ -1358,6 +1405,8 @@ impl Service {
             mic_test: Default::default(),
             mic_dsp: voice_link::MicDsp::new(),
             le_active: AtomicBool::new(false),
+            broadcast: AtomicBool::new(false),
+            host_adapter: Mutex::new(String::new()),
             scanning: AtomicBool::new(false),
             le_stream: Mutex::new(None),
             le_support: Mutex::new(None),

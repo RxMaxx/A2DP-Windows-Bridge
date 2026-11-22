@@ -19,11 +19,12 @@ afterEach(() => {
   mock = null;
 });
 
-async function open() {
+async function open(scenario?: "adapters") {
   location.hash = "#/developer";
   const calls: { method: string; params: unknown }[] = [];
   mock = new MockCore({
     speed: 0,
+    scenario,
     onCall: (method, params) => calls.push({ method, params }),
   });
   const core = createCore(mock);
@@ -453,6 +454,39 @@ describe("chip tools", () => {
 });
 
 describe("Auracast tab", () => {
+  it("chooses the adapter for broadcasts, by name and MAC address", async () => {
+    const { core, calls } = await open("adapters");
+    await core.request("settings.set", {
+      settings: { ...core.state.snap!.settings, developer_mode: true },
+    });
+    fireEvent.click(await screen.findByRole("tab", { name: t("ui.dev.auracast") }));
+    const select = (await screen.findByLabelText(t("ui.dev.auracast_adapter"))) as HTMLSelectElement;
+    const labels = [...select.options].map((o) => o.textContent);
+    // The current adapter first, then each one with its address
+    expect(labels[0]).toBe(t("ui.dev.auracast_adapter_current"));
+    expect(labels.slice(1)).toEqual([
+      expect.stringContaining("00:1A:7D:DA:71:13"),
+      expect.stringContaining("F4:26:79:00:00:01"),
+    ]);
+    expect(select.value).toBe("");
+    fireEvent.change(select, { target: { selectedIndex: 2 } });
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === "settings.set").at(-1)?.params).toMatchObject({
+        settings: { auracast_adapter_id: "USB\\VID_8087&PID_0033\\5&19A12CFC&0&14" },
+      }),
+    );
+  });
+
+  it("offers no adapter choice with one adapter", async () => {
+    const { core } = await open();
+    await core.request("settings.set", {
+      settings: { ...core.state.snap!.settings, developer_mode: true },
+    });
+    fireEvent.click(await screen.findByRole("tab", { name: t("ui.dev.auracast") }));
+    await screen.findByRole("button", { name: t("receiver.start") });
+    expect(screen.queryByLabelText(t("ui.dev.auracast_adapter"))).toBeNull();
+  });
+
   it("starts and stops a broadcast", async () => {
     const { core, calls } = await open();
     await core.request("settings.set", {

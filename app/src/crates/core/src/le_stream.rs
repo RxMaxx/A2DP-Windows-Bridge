@@ -888,6 +888,9 @@ fn run_broadcast(inner: &Arc<Inner>, req: StreamRequest) {
     };
 
     inner.notify(StreamState::Connecting, Msg::new("status.initializing_btstack"));
+    // The Auracast adapter, when one is set, for as long as this session
+    // runs (Settings::auracast_adapter_id)
+    let _auracast_adapter = inner.broadcast_wanted();
     let host = match inner.ensure_host() {
         Ok(h) => h,
         Err(m) => return inner.notify(StreamState::Error, m),

@@ -629,6 +629,18 @@ it.
   `--auracast-split` is an argument error, and `stream.start_broadcast` with
   both `mono` and `split` true is refused as a bad request
   (`stream.bad_channels`).
+- Adapter (`Settings::auracast_adapter_id`, the Auracast tab's **Adapter**,
+  shown once two adapters have WinUSB): the adapter broadcasts go on, for
+  one that only broadcasts (an nRF5340 DK) or does more BIGs than the one
+  in use. Empty, **Use the current adapter**: the adapter everything else
+  uses. A process holds one BTstack, so the two never run at once:
+  `run_broadcast` holds `Inner::broadcast_wanted` while it runs,
+  `adapter::adapter_for` then names the Auracast adapter, and `ensure_host`
+  restarts the stack when the running one was started for another adapter
+  (`Inner::host_adapter`): on it for a broadcast, back on
+  `Settings::adapter_id` for the next scan or connection. Developer mode off:
+  not used. The list names each adapter with its MAC address, as two can
+  share a name ("Bluetooth Controller").
 
 BTstack 1.8.1 pitfalls found along the way:
 - `HCI_EVENT_BIS_CAN_SEND_NOW` is emitted only 4 bytes long, so the BIS handle

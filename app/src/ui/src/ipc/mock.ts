@@ -275,6 +275,7 @@ export function sampleSettings(over: Partial<Settings> = {}): Settings {
     bt_chip_fw_stem: "",
     realtek_custom_firmware: false,
     adapter_id: "",
+    auracast_adapter_id: "",
     afh: "auto",
     remote_sink: "",
     le_audio_experimental: false,

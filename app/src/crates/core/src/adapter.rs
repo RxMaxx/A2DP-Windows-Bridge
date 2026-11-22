@@ -159,6 +159,14 @@ fn chosen_adapter<'a>(winusb: &[&'a Adapter], id: &str) -> Option<&'a Adapter> {
     winusb.iter().copied().find(|a| a.device.instance_id.eq_ignore_ascii_case(id) && !a.device.in_use())
 }
 
+/// The adapter a stack opens first (Settings::adapter_id's form): for a
+/// broadcast in developer mode the Auracast adapter when one is set,
+/// otherwise the adapter to use
+pub fn adapter_for(settings: &Settings, broadcast: bool) -> &str {
+    let auracast = settings.auracast_adapter_id.trim();
+    if broadcast && settings.debug_mode && !auracast.is_empty() { auracast } else { settings.adapter_id.trim() }
+}
+
 /// Fills the chipset part of `config` from the settings and the present
 /// adapters
 pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path) {
@@ -716,6 +724,24 @@ mod tests {
             problem_code: None,
             probe,
         }
+    }
+
+    #[test]
+    fn a_broadcast_goes_on_the_auracast_adapter() {
+        let s = |adapter: &str, auracast: &str, debug_mode: bool| Settings {
+            adapter_id: adapter.into(),
+            auracast_adapter_id: auracast.into(),
+            debug_mode,
+            ..Settings::default()
+        };
+        let both = s("BT600", "NRF", true);
+        assert_eq!(adapter_for(&both, true), "NRF");
+        assert_eq!(adapter_for(&both, false), "BT600");
+        // None set for Auracast: the same adapter as everything else
+        assert_eq!(adapter_for(&s("BT600", "", true), true), "BT600");
+        assert_eq!(adapter_for(&s("", " ", true), true), "");
+        // Developer mode off: Auracast is not offered, its adapter not used
+        assert_eq!(adapter_for(&s("BT600", "NRF", false), true), "BT600");
     }
 
     #[test]
