@@ -74,6 +74,15 @@
 #define ENABLE_LE_ISOCHRONOUS_STREAMS      /* CIG / CIS as central, BIG, HCI ISO data */
 #define ENABLE_LE_PERIODIC_ADVERTISING     /* the BASE of a broadcast (Auracast source) */
 
+/* Keyboards and mice (issue #413) that advertise with resolvable private
+ * addresses: BTstack fills the controller's resolving list with the IRKs of
+ * the LE bonds and turns address resolution on, so the background
+ * connection's accept list matches their identity addresses. Inert in every
+ * other run: the transport hides LE Set Address Resolution Enable from
+ * BTstack (btstack-sys src/transport.rs, "Address resolution hidden"), and
+ * hci.c touches the resolving list only when the controller lists it. */
+#define ENABLE_LE_PRIVACY_ADDRESS_RESOLUTION
+
 /* ATT server: a read / write callback may answer "pending". btstack-sys does
  * so only while the application is busy (an ATT request processed from
  * within one of its own calls) and lets BTstack ask again right after. */

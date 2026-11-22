@@ -33,6 +33,20 @@ nav_order: 2.7
 - コアが動いているかどうかは、コアの mutex ではなくパイプで確認してください。パイプがなければ、コアは動いていません。
 - `BLUECASTER_INSTANCE=<name>` を付けて起動した開発ビルドは、代わりに `\\.\pipe\bluecaster-<SID>-<name>` で待ち受けます。そのため、インストール済みの BlueCaster と同時に動かせます。
 
+### サービスのパイプ {#the-service-pipe}
+
+BlueCaster サービスは、サインイン画面で Bluetooth のキーボードとマウスを使えるようにする、開発者モードの試作機能です。サービスをインストールした PC では、コアは Windows サービスとして動きます。この場合、ユーザーごとのパイプはありません。代わりに、コアはすべてのユーザーに共通のパイプを 1 つ提供します。
+
+```
+\\.\pipe\bluecaster-service
+```
+
+- まず `bluecaster-<user SID>` を試し、見つからなければ `bluecaster-service` を試してください。サービスは古い名前のパイプを提供しません。フレーム、ハンドシェイク、リクエストは、どちらのパイプでも同じです。
+- パイプは `GENERIC_READ | FILE_WRITE_DATA` だけで開いてください。パイプのモードを変える場合は、`FILE_WRITE_ATTRIBUTES` を加えます。`GENERIC_WRITE` を要求するクライアントは拒否されます。`GENERIC_WRITE` には、パイプの別のインスタンスを作成する権限（`FILE_CREATE_PIPE_INSTANCE`）が含まれるためです。Python の `open(..., "r+b")` は `GENERIC_WRITE` を要求するので、代わりに `CreateFileW` を使ってください（`ctypes` 経由など）。
+- 接続先が本当に BlueCaster かどうかは、パイプのサーバープロセス ID（`GetNamedPipeServerProcessId`）と `BlueCaster` サービスのプロセス ID（`QueryServiceStatusEx`）を比べて確認してください。サービスが停止している間は、別のプログラムが同じ名前のパイプを作成できます。
+- 開発者モード、アダプターのドライバー、キーボードとマウスの追加など、PC 全体に関わる変更のリクエストは、エラー `ipc.needs_admin` を返します。ツールから管理者の承認を与えることはできません。BlueCaster のウィンドウで変更するよう、ユーザーに依頼してください。BlueCaster のウィンドウが Windows に承認を求めます。
+- コアがサービスとして動いている場合、一部のリクエストは `ipc.not_in_service` を返します。`app.quit` もその 1 つです。キーボードとマウスを使えるように、サービスは動き続ける必要があるためです。代わりに `app.close` を使ってください。`app.close` はストリーミングを止め、BlueCaster のウィンドウとトレイのアイコンを閉じます。
+
 ### フレーム {#frames}
 
 メッセージは、どちらの方向も 1 つのフレームで送ります。フレームは、JSON の長さ（**u32 リトルエンディアン**）に続けて JSON（UTF-8）を置いたものです。4 MiB を超えるフレームは拒否されます。

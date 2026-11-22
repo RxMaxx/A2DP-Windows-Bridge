@@ -157,4 +157,10 @@ le_audio_low_latency: boolean,
  * device (on by default): on, every A2DP profile streams as Auto; off,
  * each with the codec chosen for it (read when the next stream starts)
  */
-auto_codec: boolean, };
+auto_codec: boolean, 
+/**
+ * Developer mode: keyboards and mice through BlueCaster (experimental,
+ * issue #413), in force while developer_mode is on. settings.set can
+ * only turn it off; hid.enable turns it on.
+ */
+hid_host: boolean, };

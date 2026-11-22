@@ -33,6 +33,20 @@ Le cœur (`bluecaster-core.exe`) s'exécute dès que BlueCaster fonctionne, avec
 - Pour savoir si le cœur s'exécute, vérifiez la présence du canal, et non le mutex du cœur : si le canal n'existe pas, le cœur ne s'exécute pas.
 - Les versions de développement lancées avec `BLUECASTER_INSTANCE=<name>` écoutent plutôt sur `\\.\pipe\bluecaster-<SID>-<name>`, afin de pouvoir s'exécuter à côté de la version installée.
 
+### Le canal du service {#the-service-pipe}
+
+Le service BlueCaster est un prototype du mode développeur. Il permet d'utiliser des claviers et souris Bluetooth sur l'écran de connexion. Sur un PC où le service est installé, le cœur s'exécute en tant que service Windows. Le canal propre à chaque utilisateur n'existe alors pas. À la place, le cœur sert un seul canal commun à tous les utilisateurs :
+
+```
+\\.\pipe\bluecaster-service
+```
+
+- Essayez d'abord `bluecaster-<user SID>`, puis `bluecaster-service`. Le service ne sert aucun canal sous l'ancien nom. Les trames, la poignée de main et les requêtes sont identiques sur les deux canaux.
+- Ouvrez le canal uniquement avec `GENERIC_READ | FILE_WRITE_DATA`. Pour changer le mode du canal, ajoutez `FILE_WRITE_ATTRIBUTES`. Le canal refuse les clients qui demandent `GENERIC_WRITE`, car ce droit inclut la création d'une autre instance du canal (`FILE_CREATE_PIPE_INSTANCE`). En Python, `open(..., "r+b")` demande `GENERIC_WRITE`. Utilisez plutôt `CreateFileW`, par exemple via `ctypes`.
+- Pour vérifier que le serveur est bien BlueCaster, comparez l'ID de processus du serveur du canal (`GetNamedPipeServerProcessId`) avec l'ID de processus du service `BlueCaster` (`QueryServiceStatusEx`). Tant que le service est arrêté, un autre programme peut créer un canal portant ce nom.
+- Les requêtes qui s'appliquent à tout le PC renvoient l'erreur `ipc.needs_admin`. C'est le cas du mode développeur, des pilotes d'adaptateur ou de l'ajout de claviers et souris. Un outil ne peut pas accorder l'autorisation d'administrateur. Demandez plutôt à l'utilisateur d'effectuer la modification dans la fenêtre de BlueCaster. La fenêtre demande alors l'autorisation à Windows.
+- Quand le cœur s'exécute en tant que service, certaines requêtes renvoient `ipc.not_in_service`. C'est le cas de `app.quit`, car le service doit continuer à s'exécuter pour les claviers et souris. Utilisez plutôt `app.close`. Cette méthode arrête la diffusion et ferme la fenêtre de BlueCaster ainsi que l'icône de la zone de notification.
+
 ### Trames {#frames}
 
 Chaque message, dans les deux sens, est une trame : la longueur du JSON en **u32 little-endian**, puis le JSON (UTF-8). Les trames de plus de 4 Mio sont refusées.

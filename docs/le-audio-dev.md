@@ -38,7 +38,7 @@ for reference (`git show b819893:app/src/le_audio/<file>`).
 | `app/src/crates/pipeline/src/le.rs` | The LE encode thread: capture -> stereo downmix -> linear resampling to the LC3 rate -> LC3 per channel -> SDU set per frame into the `LeSduSink` |
 | `app/src/crates/pipeline/src/le_rx.rs` | The headset microphone: the "le-decode" thread (jitter buffer by sequence number, LC3 decoding with PLC, mono mix) and its output trait `PcmOut` |
 | `app/src/crates/core/src/le_stream.rs` | The session of an LE Audio profile (v1 `a2dp_service_le_audio.cpp`): connect, start, VolumeSync, re-setup after a loss (3 times), the `error.le_audio_*` messages; the headset microphone (`LeMicPath`) into the output that `voice.rs` resolves |
-| `app/src/crates/core/src/le_media.rs` | MCP's Windows backend (System Media Transport Controls, media keys) |
+| `app/src/crates/session-host/src/host/media/smtc.rs` | MCP's Windows backend (System Media Transport Controls, media keys); `host/media.rs` runs it in the session agent with `--session-agent` |
 | `app/src/crates/core/src/service.rs` | `HostConfig.le_audio` from the setting or the CLI, the deferred toggle, `scan_devices` (classic + LE entries; also the CLI's `--scan` with `--le-audio`), `le_stream()` |
 | `app/src/crates/core/src/devices.rs` | `le_audio_devices.txt` (`load_le` / `save_le` / `remove_le`) |
 | `app/src/core/src/cli.rs` | `--le-audio`, `--le-device`, `--le-preset`, `--le-low-latency`, `--le-scan`, `--le-sim-volume`, `--mcp-dry-run`, `--ccp-sim`, `--ccp-console` (v1 `le_audio_cli.cpp`'s flow and lines); `--headset-mic`, `--mic-output` (the microphone) |
@@ -535,12 +535,15 @@ it), button presses during BlueCaster's own write are applied afterwards, 0-127 
 so the profile's volume sync applies as for A2DP. `--le-sim-volume` runs
 VolumeSync against a simulated Windows volume in the CLI.
 
-**MCP (GMCS server, `mcp.rs`, Windows side in `core/src/le_media.rs`).**
+**MCP (GMCS server, `mcp.rs`, Windows side in `session-host/src/host/media/smtc.rs`).**
 GMCS with v1's 11 characteristics, CCID 1. The control point goes to the
 current SMTC session, otherwise to media keys; with "Control playback with the
 audio device's buttons" off, it answers Command Cannot Be Completed.
 `--mcp-dry-run` (always with `--hci-tcp`): a
-simulated player; commands are only logged ("MCP: dry run: PLAY ..."). Long
+simulated player; commands are only logged ("MCP: dry run: PLAY ...").
+With `--session-agent` the player (Windows' or the simulated one) runs in
+the session agent: the core answers reads from a copy that the agent's
+events update, and sends commands without blocking the BTstack thread. Long
 reads of changing text return 0x80; notifications are truncated to ATT_MTU - 3
 at a UTF-8 boundary.
 

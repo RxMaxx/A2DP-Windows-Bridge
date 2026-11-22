@@ -33,6 +33,20 @@ El núcleo (`bluecaster-core.exe`) se ejecuta siempre que BlueCaster está en ej
 - Para saber si el núcleo está en ejecución, busque la canalización, no el mutex del núcleo: si la canalización no existe, el núcleo no está en ejecución.
 - Las compilaciones de desarrollo iniciadas con `BLUECASTER_INSTANCE=<name>` escuchan en `\\.\pipe\bluecaster-<SID>-<name>`, para poder ejecutarse junto a la versión instalada.
 
+### La canalización del servicio {#the-service-pipe}
+
+El servicio de BlueCaster es un prototipo del modo de desarrollador. Permite usar teclados y ratones Bluetooth en la pantalla de inicio de sesión. En un equipo con el servicio instalado, el núcleo se ejecuta como servicio de Windows. En ese caso no existe la canalización de cada usuario. En su lugar, el núcleo atiende una sola canalización común a todos los usuarios:
+
+```
+\\.\pipe\bluecaster-service
+```
+
+- Pruebe primero `bluecaster-<user SID>` y después `bluecaster-service`. El servicio no atiende ninguna canalización con el nombre antiguo. Las tramas, la negociación inicial y las solicitudes son iguales en ambas canalizaciones.
+- Abra la canalización solo con `GENERIC_READ | FILE_WRITE_DATA`. Para cambiar el modo de la canalización, agregue `FILE_WRITE_ATTRIBUTES`. La canalización rechaza a los clientes que piden `GENERIC_WRITE`, porque ese acceso incluye crear otra instancia de la canalización (`FILE_CREATE_PIPE_INSTANCE`). En Python, `open(..., "r+b")` pide `GENERIC_WRITE`. Use `CreateFileW` en su lugar, por ejemplo mediante `ctypes`.
+- Para comprobar que el servidor es realmente BlueCaster, compare el id. de proceso del servidor de la canalización (`GetNamedPipeServerProcessId`) con el id. de proceso del servicio `BlueCaster` (`QueryServiceStatusEx`). Mientras el servicio está detenido, otro programa podría crear una canalización con ese nombre.
+- Las solicitudes que cambian todo el equipo devuelven el error `ipc.needs_admin`. Por ejemplo, las que cambian el modo de desarrollador o los controladores del adaptador, o las que agregan teclados y ratones. Una herramienta no puede conceder la aprobación de administrador. Pida al usuario que haga el cambio en la ventana de BlueCaster. La ventana solicita la aprobación a Windows.
+- Cuando el núcleo se ejecuta como servicio, algunas solicitudes devuelven `ipc.not_in_service`. Una de ellas es `app.quit`, porque el servicio debe seguir en ejecución para los teclados y ratones. Use `app.close` en su lugar. Este método detiene la transmisión y cierra la ventana de BlueCaster y el icono de la bandeja.
+
 ### Tramas {#frames}
 
 Cada mensaje, en ambos sentidos, es una trama: la longitud del JSON como **u32 little-endian** y, a continuación, el JSON (UTF-8). Las tramas de más de 4 MiB se rechazan.

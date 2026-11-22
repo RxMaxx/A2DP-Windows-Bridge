@@ -37,6 +37,18 @@
 //! it at run time. Without voice ([`crate::Stack::set_sco_hidden`], the
 //! default of every run) their supported-commands bits are cleared the same
 //! way, so HCI init stays as it was without SCO support.
+//!
+//! # Address resolution hidden
+//!
+//! ENABLE_LE_PRIVACY_ADDRESS_RESOLUTION makes BTstack fill the controller's
+//! resolving list with the IRKs of all LE bonds and turn address resolution
+//! on whenever the controller lists LE Set Address Resolution Enable. The
+//! controller then reports resolved identity addresses instead of the
+//! resolvable private addresses LE Audio's connection code works with. Only
+//! for keyboards and mice without LE Audio
+//! ([`crate::Stack::set_address_resolution_hidden`]) is the bit left as the
+//! controller sent it; in every other run it is cleared, and BTstack never
+//! touches the resolving list.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -273,6 +285,54 @@ thread_local! {
     static BROKEN: Cell<&'static [(usize, u8)]> = const { Cell::new(&[]) };
     /// The SCO commands of HCI init are hidden from BTstack (module docs)
     static SCO_HIDDEN: Cell<bool> = const { Cell::new(true) };
+    /// The controller's address resolution is hidden from BTstack (module
+    /// docs)
+    static RESOLUTION_HIDDEN: Cell<bool> = const { Cell::new(true) };
+}
+
+/// Whether the controller lists LE Set Address Resolution Enable, as it
+/// sent its supported commands: 0 not seen, 1 no, 2 yes
+static CONTROLLER_RESOLUTION: AtomicU8 = AtomicU8::new(0);
+
+// ---- Address resolution hidden ----
+
+/// LE Set Address Resolution Enable in the supported commands (hci.c,
+/// SUPPORTED_HCI_COMMAND_LE_SET_ADDRESS_RESOLUTION_ENABLE): BTstack keeps the
+/// controller's resolving list (ENABLE_LE_PRIVACY_ADDRESS_RESOLUTION) only
+/// when it is set
+pub const ADDRESS_RESOLUTION_COMMAND_BIT: (usize, u8) = (35, 1);
+
+/// See [`crate::Stack::set_address_resolution_hidden`]. False (and no
+/// change) once a backend is installed.
+pub(crate) fn set_resolution_hidden(hidden: bool) -> bool {
+    if BACKEND.with(|b| b.borrow().is_some()) {
+        return false;
+    }
+    RESOLUTION_HIDDEN.with(|h| h.set(hidden));
+    true
+}
+
+pub(crate) fn resolution_hidden() -> bool {
+    RESOLUTION_HIDDEN.with(|h| h.get())
+}
+
+/// See [`crate::Stack::controller_address_resolution`]
+pub(crate) fn controller_resolution() -> Option<bool> {
+    match CONTROLLER_RESOLUTION.load(Ordering::Acquire) {
+        0 => None,
+        v => Some(v == 2),
+    }
+}
+
+/// Whether a successful Read Local Supported Commands answer lists LE Set
+/// Address Resolution Enable; None for every other packet
+pub fn address_resolution_in(packet: &[u8]) -> Option<bool> {
+    if packet.len() < 6 + 64 || packet[0] != HCI_EVENT_COMMAND_COMPLETE || packet[5] != 0 {
+        return None;
+    }
+    let opcode = u16::from_le_bytes([packet[3], packet[4]]);
+    let (octet, bit) = ADDRESS_RESOLUTION_COMMAND_BIT;
+    (opcode == HCI_OPCODE_READ_LOCAL_SUPPORTED_COMMANDS).then(|| packet[6 + octet] & (1 << bit) != 0)
 }
 
 // ---- SCO hidden ----
@@ -490,8 +550,10 @@ pub(crate) fn reset() {
     SENT.store(0, Ordering::Release);
     FAILED.store(false, Ordering::Release);
     CONTROLLER_ISO.store(0, Ordering::Release);
+    CONTROLLER_RESOLUTION.store(0, Ordering::Release);
     LE_HIDDEN.with(|h| h.set(true));
     SCO_HIDDEN.with(|h| h.set(true));
+    RESOLUTION_HIDDEN.with(|h| h.set(true));
     RAW.with(|r| r.set(false));
     BROKEN.with(|b| b.set(&[]));
 }
@@ -695,6 +757,14 @@ fn deliver(packet_type: u8, buf: &mut [u8], hidden: bool) {
             CONTROLLER_ISO.store(if iso { 2 } else { 1 }, Ordering::Release);
         }
         patch_broken_commands(buf, BROKEN.with(|b| b.get()));
+        // After the broken ones: an adapter that lists it wrongly does not
+        // count as resolving
+        if let Some(resolves) = address_resolution_in(buf) {
+            CONTROLLER_RESOLUTION.store(if resolves { 2 } else { 1 }, Ordering::Release);
+        }
+        if resolution_hidden() {
+            patch_broken_commands(buf, &[ADDRESS_RESOLUTION_COMMAND_BIT]);
+        }
         if sco_hidden() {
             patch_broken_commands(buf, &SCO_INIT_COMMAND_BITS);
         }
@@ -717,6 +787,23 @@ fn deliver(packet_type: u8, buf: &mut [u8], hidden: bool) {
 mod tests {
     use super::*;
     use crate::consts::{HCI_ACL_DATA_PACKET, HCI_ISO_DATA_PACKET};
+
+    #[test]
+    fn address_resolution_is_read_from_the_supported_commands() {
+        let mut p = vec![HCI_EVENT_COMMAND_COMPLETE, 68, 1, 0x02, 0x10, 0];
+        p.extend([0u8; 64]);
+        assert_eq!(address_resolution_in(&p), Some(false));
+        let (octet, bit) = ADDRESS_RESOLUTION_COMMAND_BIT;
+        p[6 + octet] |= 1 << bit;
+        assert_eq!(address_resolution_in(&p), Some(true));
+        // Hidden: the bit cleared the way the broken ones are
+        patch_broken_commands(&mut p, &[ADDRESS_RESOLUTION_COMMAND_BIT]);
+        assert_eq!(address_resolution_in(&p), Some(false));
+        // Another command, a failed answer: nothing
+        p[5] = 1;
+        assert_eq!(address_resolution_in(&p), None);
+        assert_eq!(address_resolution_in(&p[..20]), None);
+    }
 
     #[test]
     fn setup_packet_keeps_reserved_recipient_bits() {

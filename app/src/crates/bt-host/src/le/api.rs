@@ -68,7 +68,13 @@ impl BtHost {
     /// LE Audio usable: configured, the LE core initialized and HCI working
     /// (v1 Core::ready)
     pub fn le_ready(&self) -> bool {
-        self.le_on && self.le.initialized.load(Ordering::Acquire) && self.le.hci_working.load(Ordering::Acquire)
+        self.le_on && self.le_core_ready()
+    }
+
+    /// The LE core runs and HCI works: LE Audio, or keyboards and mice
+    /// without it (an LE scan for them works then)
+    pub fn le_core_ready(&self) -> bool {
+        self.le_core_on && self.le.initialized.load(Ordering::Acquire) && self.le.hci_working.load(Ordering::Acquire)
     }
 
     /// ISO buffers of the controller (LE Read Buffer Size v2):
@@ -97,13 +103,13 @@ impl BtHost {
 
     /// Starts an LE scan that runs beside a classic one
     /// ([`BtHost::scan_with`]) until [`BtHost::le_scan_stop`]: half the time
-    /// on air, the rest left to the inquiry and name requests. False when LE
-    /// Audio is not ready.
+    /// on air, the rest left to the inquiry and name requests. False when
+    /// the LE core is not ready (LE Audio, or keyboards and mice).
     pub fn le_scan_start(&self) -> bool {
-        if !self.le_ready() {
+        if !self.le_core_ready() {
             return false;
         }
-        tracing::info!("LE Audio: scanning beside the classic scan");
+        tracing::info!("{}: scanning beside the classic scan", if self.le_on { "LE Audio" } else { "LE" });
         self.le_run(RUN_TIMEOUT, |ctx| ctx.start_scan_with(SHARED_SCAN_INTERVAL, SHARED_SCAN_WINDOW)).is_some()
     }
 
@@ -503,7 +509,7 @@ impl BtHost {
         timeout: Duration,
         f: impl FnOnce(&mut LeCtx<'_>) -> R + Send + 'static,
     ) -> Option<R> {
-        if !self.le_on {
+        if !self.le_core_on {
             return None;
         }
         self.call(timeout, move |app, stack| app.le.as_mut().filter(|le| le.initialized()).map(|le| le.run(stack, f)))
@@ -525,7 +531,7 @@ impl BtHost {
         cancellable: bool,
         f: impl FnOnce(&mut LeCtx<'_>, LeDone) + Send + 'static,
     ) -> bool {
-        if !self.le_on {
+        if !self.le_core_on {
             return false;
         }
         let signal = Arc::new(Signal::default());

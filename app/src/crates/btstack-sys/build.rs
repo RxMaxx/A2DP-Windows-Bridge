@@ -49,6 +49,7 @@ const CLASSIC: &[&str] = &[
     "hfp.c",
     "hfp_ag.c",
     "hfp_gsm_model.c",
+    "hid_host.c",
     "sdp_client.c",
     "sdp_client_rfcomm.c",
     "sdp_server.c",

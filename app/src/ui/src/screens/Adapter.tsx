@@ -18,7 +18,7 @@ import { useApp } from "../app/context";
 import { saveSettings } from "../app/settings";
 import { Banner, Button, Field, Section, Segmented, Select, Toggle } from "../components/controls";
 import { Icon } from "../components/Icon";
-import { ErrorPanel, FirmwareDownload, openFirmwareFolder, WinusbDialog } from "../components/stream";
+import { ErrorPanel, FirmwareDownload, FirmwareFolderButton, WinusbDialog } from "../components/stream";
 import { t, tm } from "../i18n";
 import type { AdapterInfo, AdapterState, DriverKind, FirmwareFile, ProbeResult } from "../ipc/types";
 import {
@@ -555,9 +555,7 @@ function ChipSection(props: { files: FirmwareFile[]; onChanged: () => Promise<vo
         <Show when={props.adapter?.firmware_download && props.adapter}>
           {(a) => <FirmwareDownload files={a().firmware_files} kind={a().firmware_present ? undefined : "strong"} />}
         </Show>
-        <Button icon="folder_open" kind="subtle" onClick={() => void openFirmwareFolder(app)}>
-          {t("firmware.open_folder")}
-        </Button>
+        <FirmwareFolderButton kind="subtle" />
         <Button icon="open" kind="subtle" onClick={() => app.core.transport.openUrl(LINKS.setupGuide)}>
           {t("ui.setup.guide")}
         </Button>
@@ -598,9 +596,7 @@ function VendorFirmwareBox(props: { adapter: AdapterInfo }) {
           </Button>
         )}
       </Show>
-      <Button icon="folder_open" kind="subtle" onClick={() => void openFirmwareFolder(app)}>
-        {t("firmware.open_folder")}
-      </Button>
+      <FirmwareFolderButton kind="subtle" />
       <Show when={guide}>
         <Button icon="open" kind="subtle" onClick={() => app.core.transport.openUrl(LINKS.setupGuide)}>
           {t("ui.setup.guide")}

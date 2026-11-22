@@ -4093,6 +4093,89 @@ html.win-flyout body {
   font-size: var(--fs-12);
 }
 
+/* Keyboards and mice through BlueCaster (experimental, issue #413) */
+.hid-enable,
+.hid-devices,
+.hid-code-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.hid-code-box {
+  gap: var(--s2);
+  margin-top: var(--s2);
+}
+.hid-lead {
+  margin: 0;
+  font-weight: 600;
+}
+.hid-risks {
+  margin: 0;
+  padding-left: var(--s5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+.hid-enable .check-item {
+  align-items: flex-start;
+  padding-left: 0;
+}
+.hid-enable .check-item input {
+  margin-top: 0.2em;
+}
+/* Read and typed, never copied */
+.hid-code {
+  font-size: var(--fs-28);
+  font-weight: 600;
+  letter-spacing: 0.3em;
+  user-select: none;
+}
+.hid-code-input {
+  width: 10ch;
+  letter-spacing: 0.2em;
+}
+.hid-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+.hid-device {
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+}
+.hid-device + .hid-device {
+  border-top: 1px solid var(--border);
+}
+.hid-device > .icon {
+  flex-shrink: 0;
+  color: var(--text-2);
+}
+.hid-device-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--s2);
+}
+.hid-counts {
+  margin: 0;
+}
+/* The number to type on a keyboard being added */
+.hid-passkey {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  padding: var(--s3);
+  border: 1px solid var(--accent-fill);
+  border-radius: var(--r);
+}
+.hid-passkey-number {
+  font-family: var(--mono);
+  font-size: var(--fs-28);
+  font-weight: 600;
+  letter-spacing: 0.3em;
+}
+
 /* Diagnostics > Radio: the 2.4 GHz band */
 .band {
   width: 100%;

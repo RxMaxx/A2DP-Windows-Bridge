@@ -33,6 +33,20 @@ nav_order: 2.7
 - 要检查核心是否在运行，请查找管道，而不是核心的互斥体：管道不存在就说明核心没有运行。
 - 以 `BLUECASTER_INSTANCE=<name>` 启动的开发版本改为在 `\\.\pipe\bluecaster-<SID>-<name>` 上监听，以便与已安装的版本并行运行。
 
+### 服务管道 {#the-service-pipe}
+
+BlueCaster 服务是开发者模式中的一个原型功能，让用户可以在登录屏幕上使用蓝牙键盘和鼠标。在安装了该服务的电脑上，核心以 Windows 服务的形式运行。此时不存在每个用户专属的管道。核心改为提供一个所有用户共用的管道：
+
+```
+\\.\pipe\bluecaster-service
+```
+
+- 请先尝试 `bluecaster-<user SID>`，再尝试 `bluecaster-service`。服务不提供旧名称的管道。两个管道上的帧、握手和请求完全相同。
+- 打开管道时只请求 `GENERIC_READ | FILE_WRITE_DATA`。如需更改管道模式，请加上 `FILE_WRITE_ATTRIBUTES`。请求 `GENERIC_WRITE` 的客户端会被管道拒绝，因为该访问权限包含创建管道新实例的权限（`FILE_CREATE_PIPE_INSTANCE`）。Python 的 `open(..., "r+b")` 会请求 `GENERIC_WRITE`，因此请改用 `CreateFileW`（例如通过 `ctypes`）。
+- 要确认服务器确实是 BlueCaster，请比较管道服务器的进程 ID（`GetNamedPipeServerProcessId`）和 `BlueCaster` 服务的进程 ID（`QueryServiceStatusEx`）。服务停止期间，其他程序可能会创建同名管道。
+- 更改整台电脑的请求会返回错误 `ipc.needs_admin`，例如开发者模式、适配器驱动程序以及添加键盘和鼠标。工具无法授予管理员批准。请让用户在 BlueCaster 窗口中进行更改，由窗口向 Windows 请求批准。
+- 核心以服务形式运行时，部分请求会返回 `ipc.not_in_service`。`app.quit` 就是其中之一，因为服务必须持续运行，键盘和鼠标才能使用。请改用 `app.close`：它会停止串流，并关闭 BlueCaster 窗口和托盘图标。
+
 ### 帧 {#frames}
 
 两个方向上的每条消息都是一帧：先是 JSON 的长度（**u32 小端序**），然后是 JSON（UTF-8）。超过 4 MiB 的帧会被拒绝。
