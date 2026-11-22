@@ -320,7 +320,7 @@ pub fn configure(config: &mut HostConfig, settings: &Settings, config_dir: &Path
             detected.iter().any(|a| a.vendor == ChipVendor::Qualcomm && ar30xx(a) && !a.device.in_use());
         // A Realtek chip whose firmware comes from Realtek's Windows driver
         // (the RTL8852BD): the first one present, never one in use
-        config.realtek_driver_chip = winusb
+        config.realtek_driver_chip = detected
             .iter()
             .find(|a| {
                 a.vendor == ChipVendor::Realtek
