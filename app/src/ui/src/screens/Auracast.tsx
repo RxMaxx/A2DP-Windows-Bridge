@@ -77,17 +77,24 @@ function createSession(core: Core) {
     const [failed, setFailed] = createSignal<string | null>(null);
     /** stream.start_broadcast not answered yet: the stream before it still shows */
     const [asking, setAsking] = createSignal(false);
+    /** The broadcast asked for here went on air. Until then an Idle is the
+     *  session before it ending: the core answers stream.start_broadcast,
+     *  then stops what ran before (Idle), then sets the broadcast up */
+    const [onAir, setOnAir] = createSignal(false);
     createEffect(() => {
       const st = core.state.snap?.stream;
       if (!st || !mine() || asking()) return;
       if (st.state === "error") {
         setFailed(tm(st.message));
         setMine(false);
-      } else if (st.state === "idle" || (st.state === "streaming" && st.message.key !== "status.broadcasting")) {
+      } else if (st.state === "streaming" && st.message.key === "status.broadcasting") {
+        setOnAir(true);
+      } else if ((st.state === "idle" && onAir()) || st.state === "streaming") {
+        // Stopped, or another stream took over
         setMine(false);
       }
     });
-    return { choices, setChoices, mine, setMine, failed, setFailed, asking, setAsking };
+    return { choices, setChoices, mine, setMine, failed, setFailed, asking, setAsking, setOnAir };
   });
 }
 
@@ -127,11 +134,13 @@ export function Auracast() {
   const startStop = async () => {
     if (live()) {
       await app.run(() => core.request("stream.stop"));
+      s.setMine(false);
       return;
     }
     const c = choices();
     s.setAsking(true);
     s.setFailed(null);
+    s.setOnAir(false);
     s.setMine(true);
     const ok = await app.run(() =>
       core.request("stream.start_broadcast", {

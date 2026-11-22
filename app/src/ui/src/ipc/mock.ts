@@ -2328,6 +2328,15 @@ export class MockCore implements Transport {
         : code !== null && (len(code) < 4 || len(code) > 16)
           ? "the broadcast code needs 4 to 16 bytes"
           : null;
+    // As the core: after the answer the session before ends (Idle), then
+    // the broadcast is set up
+    this.later(0, () => {
+      const settingUp = this.snap.stream;
+      if (settingUp.state !== "connecting") return;
+      this.setStream("idle", "status.disconnected");
+      this.snap.stream = settingUp;
+      this.emit({ kind: "stream", value: this.snap.stream });
+    });
     this.connect({
       address: "00:00:00:00:00:00",
       le: true,
