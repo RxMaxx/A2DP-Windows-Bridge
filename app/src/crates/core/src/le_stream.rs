@@ -983,6 +983,16 @@ fn run_broadcast(inner: &Arc<Inner>, req: StreamRequest) {
                 tracing::debug!("broadcast: going to sleep, attempt {attempt} not counted");
                 continue;
             }
+            // A reset or replugged adapter takes a moment to come back: the
+            // stack would open the first other one found meanwhile
+            if !inner.wanted_adapter_present() {
+                tracing::warn!("Auracast: attempt {attempt}/{BROADCAST_ATTEMPTS}: the adapter is not back yet");
+                if attempt == BROADCAST_ATTEMPTS {
+                    break BroadcastEnd::Failed(Msg::with("error.auracast", &[&ADAPTER_NOT_BACK]));
+                }
+                attempt += 1;
+                continue;
+            }
             // A source chosen meanwhile is the one to broadcast now
             if let Some(next) = inner.take_source_change() {
                 source = next;

@@ -724,6 +724,12 @@ impl Inner {
         crate::adapter::adapter_for(&s, self.broadcast.load(Ordering::Acquire)).to_string()
     }
 
+    /// The adapter the next stack opens first is there (always, when none
+    /// is chosen)
+    pub(crate) fn wanted_adapter_present(&self) -> bool {
+        crate::adapter::chosen_present(&self.wanted_adapter())
+    }
+
     /// A broadcast session wants the stack, until the guard drops: the
     /// next stack started or checked (ensure_host) is the Auracast
     /// adapter's

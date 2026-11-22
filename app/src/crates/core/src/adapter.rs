@@ -159,6 +159,19 @@ fn chosen_adapter<'a>(winusb: &[&'a Adapter], id: &str) -> Option<&'a Adapter> {
     winusb.iter().copied().find(|a| a.device.instance_id.eq_ignore_ascii_case(id) && !a.device.in_use())
 }
 
+/// The adapter `id` (Settings::adapter_id's form) is on WinUSB and free,
+/// or none is chosen: a stack started now opens that one, not the first
+/// adapter found
+pub fn chosen_present(id: &str) -> bool {
+    if id.trim().is_empty() {
+        return true;
+    }
+    let present = adapters(false);
+    let winusb: Vec<&Adapter> =
+        present.iter().filter(|a| a.device.driver_kind == win_sys::driver::DriverKind::WinUsb).collect();
+    chosen_adapter(&winusb, id).is_some()
+}
+
 /// The adapter a stack opens first (Settings::adapter_id's form): for a
 /// broadcast in developer mode the Auracast adapter when one is set,
 /// otherwise the adapter to use
