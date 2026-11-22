@@ -74,6 +74,8 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Unit tests
+        # About 5 minutes; a hung test fails here instead of after 6 hours
+        timeout-minutes: 20
         run: cargo test --workspace --locked
       - name: No unsafe outside the FFI crates
         shell: pwsh

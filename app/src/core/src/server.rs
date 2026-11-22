@@ -521,7 +521,9 @@ mod tests {
                     let (mut rd, mut wr) = tokio::io::split(pipe);
                     let hello = ClientMessage::Hello { protocol: PROTOCOL_VERSION, client: "test".into() };
                     write_frame(&mut wr, &hello).await.unwrap();
-                    write_frame(&mut wr, &ClientMessage::Request { id: 1, call }).await.unwrap();
+                    // A refused client may find the pipe already closed
+                    // here; the reject is still there to read
+                    let _ = write_frame(&mut wr, &ClientMessage::Request { id: 1, call }).await;
                     loop {
                         let m: serde_json::Value = read_frame(&mut rd).await.unwrap().unwrap();
                         match m["type"].as_str() {
