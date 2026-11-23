@@ -45,7 +45,9 @@ use le_audio::pacs_ascs::{
     Ase, ConfigCodec, ConfigQos, cp_ase_ids, cp_config_codec, cp_config_qos, cp_receiver_start_ready,
     cp_receiver_stop_ready, cp_with_metadata, enable_metadata, parse_ase_value, parse_pac_records,
 };
-use le_audio::plan::{PlannedAse, StreamPlan, choose_streaming_contexts, codec_config_ltvs, source_codec_config_ltvs};
+use le_audio::plan::{
+    CisPlan, PlannedAse, StreamPlan, choose_streaming_contexts, codec_config_ltvs, source_codec_config_ltvs,
+};
 
 use super::LeDeviceId;
 use super::core::{CON_HANDLE_INVALID, LeCtx, LeDevice};
@@ -1617,18 +1619,28 @@ impl Unicast {
                 // The server disabled / released it (e.g. the headset
                 // switched to another source)
                 tracing::warn!("LE Audio: {} ASE {ase_id} left Streaming ({})", d.addr, state.name());
+                let streams = |c: &CisPlan| {
+                    self.cis_connected.contains(&c.cis_handle)
+                        && env
+                            .device(c.device_id)
+                            .and_then(|d| d.ase(c.ase_id))
+                            .is_some_and(|a| a.state == AseState::Streaming)
+                };
+                let sink = self
+                    .plan
+                    .as_ref()
+                    .is_some_and(|p| p.sink_cis().any(|c| c.device_id == dev.0 && c.ase_id == ase_id));
+                // Only a microphone ASE ended while audio still goes out (to
+                // this device or another one): the sound plays on, without
+                // that microphone
+                if !sink && self.plan.as_ref().is_some_and(|p| p.sink_cis().any(&streams)) {
+                    tracing::warn!("LE Audio: {} microphone ASE {ase_id} ended, the sound plays on", d.addr);
+                    return;
+                }
                 // Another device still streaming plays on (an earbud that
                 // ends its ASE before it goes in its case)
-                let others_stream = self.plan.as_ref().is_some_and(|p| {
-                    p.sink_cis().any(|c| {
-                        c.device_id != dev.0
-                            && self.cis_connected.contains(&c.cis_handle)
-                            && env
-                                .device(c.device_id)
-                                .and_then(|d| d.ase(c.ase_id))
-                                .is_some_and(|a| a.state == AseState::Streaming)
-                    })
-                });
+                let others_stream =
+                    self.plan.as_ref().is_some_and(|p| p.sink_cis().any(|c| c.device_id != dev.0 && streams(c)));
                 if others_stream {
                     env.member_lost(dev.0, "its ASE left the Streaming state");
                 } else {
@@ -2405,6 +2417,39 @@ mod tests {
         each(&mut u, &mut env, AseState::Streaming);
         // Only the CIS with a sink ASE: the encode thread fills one SDU
         assert_eq!(env.take(), ["send [60] queue 8 10000 us", "streaming true"]);
+    }
+
+    #[test]
+    fn a_microphone_ase_leaving_streaming_lets_the_sound_play_on() {
+        let mut env = Fake::new(vec![mic_device(0, 0x40, true), mic_device(1, 0x41, false)]);
+        let mut u = Unicast::default();
+        u.start(&mut env, conversational_plan(true), Box::new(|_| {}));
+        let each = |u: &mut Unicast, env: &mut Fake, state: AseState| {
+            for (dev, ase) in [(0, 1), (0, 3), (1, 3)] {
+                env.set_state(dev, ase, state);
+                u.on_ase_update(env, LeDeviceId(dev), ase);
+            }
+        };
+        each(&mut u, &mut env, AseState::CodecConfigured);
+        u.on_cig_created(&mut env, &cig_created(1, &[0x60, 0x61]));
+        each(&mut u, &mut env, AseState::QosConfigured);
+        each(&mut u, &mut env, AseState::Enabling);
+        u.on_cis_created(&mut env, &cis_created(1, 0x60, 0));
+        u.on_cis_created(&mut env, &cis_created(1, 0x61, 0));
+        each(&mut u, &mut env, AseState::Streaming);
+        env.take();
+        // The microphone of the device that also plays: nothing is dropped
+        env.set_state(0, 3, AseState::Disabling);
+        u.on_ase_update(&mut env, LeDeviceId(0), 3);
+        // The device with only a microphone: neither
+        env.set_state(1, 3, AseState::Disabling);
+        u.on_ase_update(&mut env, LeDeviceId(1), 3);
+        assert!(env.lost.is_none());
+        assert_eq!(env.take(), Vec::<String>::new());
+        // The last sink ASE: the stream is lost
+        env.set_state(0, 1, AseState::Releasing);
+        u.on_ase_update(&mut env, LeDeviceId(0), 1);
+        assert_eq!(env.lost.as_deref(), Some("an ASE left the Streaming state"));
     }
 
     #[test]

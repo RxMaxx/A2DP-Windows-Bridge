@@ -67,6 +67,9 @@ const REJOIN_FIRST: Duration = Duration::from_secs(3);
 const REJOIN_EVERY: Duration = Duration::from_secs(4);
 const REJOIN_MAX: Duration = Duration::from_secs(60);
 const REJOIN_SCAN: Duration = Duration::from_millis(1500);
+/// A member that leaves again this soon after it joined is waited for longer
+/// ([`Rejoin`])
+const REJOIN_SETTLE: Duration = Duration::from_secs(30);
 /// CSIP's look for the other members at set-up when one that comes later
 /// joins the stream anyway ([`member_wait`])
 const MEMBER_WAIT: Duration = Duration::from_secs(3);
@@ -556,7 +559,10 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
     let mic_refused = std::cell::Cell::new(false);
     // `skip`: members of the set on their way off, left out (they join later)
     let connect_and_stream = |how: SetUp, skip: &[[u8; 6]]| -> Result<LeStreamStarted, Msg> {
-        inner.notify(StreamState::Connecting, Msg::new("status.connecting_device"));
+        // (a rejoin keeps the status "earbud back" its caller shows)
+        if how != SetUp::Rejoin {
+            inner.notify(StreamState::Connecting, Msg::new("status.connecting_device"));
+        }
         let t = Instant::now();
         let others = other_set_members(inner, &host, req.device, &devices);
         host.le_set_member_wait(match skip {
@@ -706,7 +712,7 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
     // Devices of the stream that went away while the others play on (an
     // earbud put in its case), and when to look for the missing ones
     let mut shown_dropped = 0;
-    let mut rejoin = Rejoin::new();
+    let mut rejoin = Rejoin::new(Instant::now());
     let mut joining: Option<Joining> = None;
     // The stream was lost (while a member back was connected: handled once
     // that ended), and whether the status says so
@@ -800,7 +806,7 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
             if !lost {
                 inner.notify(StreamState::Streaming, set_status(&host, &started, &dropped, stalled));
             }
-            rejoin.look_soon();
+            rejoin.look_soon(Instant::now());
         }
         let joined = if let Some(j) = joining.take_if(|j| j.thread.is_finished()) {
             Some(j)
@@ -816,27 +822,43 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
         } else {
             None
         };
+        let mut member_back = false;
         if joined.is_none()
             && !lost
             && inner.auto_reconnect()
             && (shown_dropped > 0 || host.le_set_members_missing() > 0)
             && !rebuild
-            && rejoin.due()
+            && rejoin.due(Instant::now())
         {
             // The other earbud out of its case again is connected while the
             // one there plays on (a failed connection costs it nothing),
             // then the stream is set up again with both (a short gap on the
             // one that played)
             let missing = missing_members(inner, &host, req.device, &devices, &started, &dropped);
-            rejoin.looked(false);
-            joining = Joining::start(inner, &host, missing);
+            rejoin.looked(Instant::now(), false);
+            // One connected already does not advertise: no scan finds it, the
+            // stream is set up with it (a failure lets it go)
+            let linked: Vec<String> = host
+                .le_devices()
+                .iter()
+                .filter(|d| d.connected && missing.contains(&d.addr.addr))
+                .map(|d| d.addr.to_string())
+                .collect();
+            if linked.is_empty() {
+                joining = Joining::start(inner, &host, missing);
+            } else {
+                tracing::info!(
+                    "LE Audio: {} of the set connected but not in the stream, setting the stream up with it",
+                    linked.join(", ")
+                );
+                member_back = true;
+            }
         }
         // The member back, connected
-        let mut member_back = false;
         match joined.map(|j| j.thread.join().unwrap_or(Joined::NotSeen)) {
             None | Some(Joined::NotSeen) => {}
             Some(Joined::Connected) => member_back = true,
-            Some(Joined::Failed) => rejoin.restored(false),
+            Some(Joined::Failed) => rejoin.restored(Instant::now(), false),
         }
         if stopped() {
             break;
@@ -914,7 +936,7 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
                     (lost, shown_lost, let_go) = (false, false, false);
                     left.clear();
                     stream_at = Instant::now();
-                    rejoin.restored(host.le_set_members_missing() == 0);
+                    rejoin.restored(Instant::now(), host.le_set_members_missing() == 0);
                     mic_streams += 1;
                     mic = open_mic(inner, &mut started, mic_target.as_ref(), mic_streams, &mut mic_note);
                     audio = match LeAudioPath::start(&req.source, &started, host.stats().clone(), None) {
@@ -929,7 +951,7 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
                     report(&started, audio.as_ref(), mic_note.as_ref());
                     continue;
                 }
-                None => rejoin.restored(false),
+                None => rejoin.restored(Instant::now(), false),
             }
         }
 
@@ -1518,37 +1540,52 @@ fn device_turned_off(inner: &Inner, host: &BtHost, devices: &[[u8; 6]]) -> bool 
 /// members (a quiet scan, [`REJOIN_SCAN`] long): [`REJOIN_FIRST`] after
 /// one went, then every [`REJOIN_EVERY`]; a member found that did not
 /// make it into the stream doubles the wait, up to [`REJOIN_MAX`] (no gap
-/// every few seconds for an earbud that advertises but does not stream)
+/// every few seconds for an earbud that advertises but does not stream),
+/// and so does one that leaves again within [`REJOIN_SETTLE`] of joining
+/// (in-ear detection that goes on and off)
 struct Rejoin {
     next: Instant,
     wait: Duration,
+    /// When the stream was last set up with every member
+    restored_at: Option<Instant>,
 }
 
 impl Rejoin {
-    fn new() -> Rejoin {
-        Rejoin { next: Instant::now() + REJOIN_FIRST, wait: REJOIN_EVERY }
+    fn new(now: Instant) -> Rejoin {
+        Rejoin { next: now + REJOIN_FIRST, wait: REJOIN_EVERY, restored_at: None }
     }
 
-    fn look_soon(&mut self) {
-        self.next = Instant::now() + REJOIN_FIRST;
+    /// A member went
+    fn look_soon(&mut self, now: Instant) {
+        if self.restored_at.is_some_and(|t| now.saturating_duration_since(t) < REJOIN_SETTLE) {
+            self.wait = (self.wait * 2).min(REJOIN_MAX);
+            self.next = now + self.wait;
+        } else {
+            self.wait = REJOIN_EVERY;
+            self.next = now + REJOIN_FIRST;
+        }
     }
 
-    fn due(&self) -> bool {
-        Instant::now() >= self.next
+    fn due(&self, now: Instant) -> bool {
+        now >= self.next
     }
 
     /// A look ended (found: the stream is set up again now)
-    fn looked(&mut self, found: bool) {
+    fn looked(&mut self, now: Instant, found: bool) {
         if !found {
-            self.next = Instant::now() + self.wait;
+            self.next = now + self.wait;
         }
     }
 
     /// The stream was set up with the member found: `complete`, every
     /// member in it
-    fn restored(&mut self, complete: bool) {
-        self.wait = if complete { REJOIN_EVERY } else { (self.wait * 2).min(REJOIN_MAX) };
-        self.next = Instant::now() + self.wait;
+    fn restored(&mut self, now: Instant, complete: bool) {
+        if complete {
+            self.restored_at = Some(now);
+        } else {
+            self.wait = (self.wait * 2).min(REJOIN_MAX);
+        }
+        self.next = now + self.wait;
     }
 }
 
@@ -1845,6 +1882,42 @@ fn connect_devices(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_member_that_leaves_again_soon_is_waited_for_longer() {
+        let t = Instant::now();
+        let mut r = Rejoin::new(t);
+        assert!(!r.due(t) && r.due(t + REJOIN_FIRST));
+        // Gone, back with every member
+        r.look_soon(t);
+        r.restored(t + Duration::from_secs(4), true);
+        // Gone again within REJOIN_SETTLE: twice the wait each time
+        let mut at = t + Duration::from_secs(10);
+        for wait in [8, 16, 32, 60, 60] {
+            r.look_soon(at);
+            assert!(!r.due(at + Duration::from_secs(wait) - Duration::from_millis(1)), "{wait} s");
+            assert!(r.due(at + Duration::from_secs(wait)));
+            at += Duration::from_secs(wait);
+            r.restored(at, true);
+            at += Duration::from_secs(5);
+        }
+        // Gone after it stayed longer: soon again
+        at += REJOIN_SETTLE;
+        r.look_soon(at);
+        assert!(r.due(at + REJOIN_FIRST));
+        r.looked(at + REJOIN_FIRST, false);
+        assert!(r.due(at + REJOIN_FIRST + REJOIN_EVERY));
+    }
+
+    #[test]
+    fn a_member_found_that_does_not_stream_doubles_the_wait() {
+        let t = Instant::now();
+        let mut r = Rejoin::new(t);
+        r.restored(t, false);
+        assert!(!r.due(t + REJOIN_EVERY) && r.due(t + 2 * REJOIN_EVERY));
+        r.restored(t, false);
+        assert!(r.due(t + 4 * REJOIN_EVERY));
+    }
 
     #[test]
     fn a_developer_microphone_preset_is_taken_as_it_is() {
