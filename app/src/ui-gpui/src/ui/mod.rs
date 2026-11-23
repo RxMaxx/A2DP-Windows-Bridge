@@ -8,8 +8,23 @@
 //! Field -> [`field`], Section -> [`section`], Banner -> [`banner`],
 //! NavRow -> [`nav_row`], HelpTip -> [`help_tip`].
 
+pub mod cable_notes;
+pub mod capture_picker;
+pub mod charts;
+pub mod codec_details;
+pub mod device_picker;
+pub mod device_settings;
+pub mod device_switcher;
 pub mod dialog;
 pub mod icons;
+pub mod import_pairings;
+pub mod input_source;
+pub mod media_eq;
+pub mod mic_processing;
+pub mod mixer;
+pub mod paired_devices;
+pub mod pairing_dialog;
+pub mod stream;
 
 use std::rc::Rc;
 
@@ -149,7 +164,7 @@ pub fn segmented<T: Clone + PartialEq + 'static>(
         .children(choices.into_iter().map(|c| {
             let mut tab = Tab::new().label(c.label).disabled(c.disabled);
             if let Some(i) = c.icon {
-                tab = tab.icon(icon(i));
+                tab = tab.prefix(icon(i).small());
             }
             tab
         }))
@@ -175,7 +190,7 @@ pub fn tab_bar<T: Clone + PartialEq + 'static>(
         .children(tabs.into_iter().map(|c| {
             let mut tab = Tab::new().label(c.label);
             if let Some(i) = c.icon {
-                tab = tab.icon(icon(i));
+                tab = tab.prefix(icon(i).small());
             }
             tab
         }))
@@ -420,4 +435,22 @@ pub fn banner(
 /// A "?" that shows `text` while hovered (short reference text such as an order)
 pub fn help_tip(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Button {
     Button::new(id).ghost().xsmall().icon(icon(IconName::QuestionCircle)).tooltip(text)
+}
+
+/// What changes when Windows' audio devices change (a cable installed by
+/// its own setup, a device plugged in or out), or a profile's source or
+/// microphone output does (the core gave it a cable that came: the list read
+/// before does not have it, issue #86). A view keeps the last one and reads
+/// the devices again when it differs (TS `onAudioDevicesChanged`; not at
+/// first). Ported from app/context.tsx.
+pub fn audio_devices_key(snap: Option<&ipc::Snapshot>) -> String {
+    let Some(snap) = snap else { return String::new() };
+    let mut key = snap.audio_endpoints.to_string();
+    for p in &snap.profiles {
+        key.push('\n');
+        key.push_str(&p.audio_device_id);
+        key.push('|');
+        key.push_str(&p.mic_device_id);
+    }
+    key
 }

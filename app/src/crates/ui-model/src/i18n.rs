@@ -64,16 +64,21 @@ pub fn lang() -> &'static str {
     CURRENT.read().unwrap_or_else(|e| e.into_inner()).code
 }
 
+/// The language of `code` (unknown codes: English)
+fn resolve(code: &str) -> Current {
+    let known = LANGUAGES.iter().find(|(c, _)| *c == code).map(|(c, _)| *c);
+    match known.and_then(|c| parse(c).map(|d| (c, d))) {
+        Some((c, dict)) if c != "en" => Current { code: c, dict },
+        _ => Current { code: "en", dict: ENGLISH.clone() },
+    }
+}
+
 /// Switches the language (unknown codes: English) -> whether it changed
 pub fn set_language(code: &str) -> bool {
     if code == lang() {
         return false;
     }
-    let known = LANGUAGES.iter().find(|(c, _)| *c == code).map(|(c, _)| *c);
-    let next = match known.and_then(|c| parse(c).map(|d| (c, d))) {
-        Some((c, dict)) if c != "en" => Current { code: c, dict },
-        _ => Current { code: "en", dict: ENGLISH.clone() },
-    };
+    let next = resolve(code);
     let changed = next.code != lang();
     *CURRENT.write().unwrap_or_else(|e| e.into_inner()) = next;
     changed
@@ -296,24 +301,22 @@ mod tests {
         assert_eq!(printf("a %s b %s", &s(&["x"])), "a x b ");
     }
 
-    // One test for everything that switches the language: tests run in
-    // parallel and the language is global
+    // The language is global and tests run in parallel, so no test
+    // switches it: the other modules' tests read English texts
     #[test]
     fn translations() {
-        set_language("en");
         assert_eq!(t!("status.connecting_retry", 2, 3), "Connection failed, trying again (2/3)...");
         let msg = Msg { key: "status.scan_complete".into(), args: vec!["4".into()] };
         assert_eq!(tm(Some(&msg)), "Scan complete: 4 device(s) found");
+        // An unknown key shows itself, so it is noticed
         assert_eq!(t("no.such.key"), "no.such.key");
-        set_language("ja");
-        assert_eq!(lang(), "ja");
-        assert_eq!(t("ui.nav.home"), "ホーム");
-        set_language("de");
-        assert_eq!(t("ui.nav.home"), "Start");
-        assert_ne!(t("connection.connect"), "");
-        set_language("xx");
-        assert_eq!(lang(), "en");
-        assert_eq!(t("ui.nav.home"), "Home");
+        let text = |code: &str, key: &str| resolve(code).dict.get(key).cloned().unwrap_or_default();
+        assert_eq!(resolve("ja").code, "ja");
+        assert_eq!(text("ja", "ui.nav.home"), "ホーム");
+        assert_eq!(text("de", "ui.nav.home"), "Start");
+        assert_ne!(text("de", "connection.connect"), "");
+        assert_eq!(resolve("xx").code, "en");
+        assert_eq!(text("xx", "ui.nav.home"), "Home");
     }
 
     #[test]

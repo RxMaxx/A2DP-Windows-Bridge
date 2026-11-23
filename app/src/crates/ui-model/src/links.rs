@@ -530,4 +530,40 @@ mod tests {
         assert!(get(&link.url, "probe").unwrap().starts_with("```json\n{\n \"b\""));
         assert!(chip_report_url(&ChipReport { report: "not json".into(), ..Default::default() }).attach);
     }
+
+    // adapter.test.tsx "chipReportUrl"
+
+    fn chip_base(report: String) -> ChipReport {
+        ChipReport {
+            version: "3.0.2".into(),
+            adapter: "Barrot (0x33FA:0x0012)".into(),
+            summary: "Barrot, USB 33FA:0012".into(),
+            info: String::new(),
+            report,
+        }
+    }
+
+    #[test]
+    fn puts_the_chip_report_in_the_issue_when_it_fits() {
+        let link = chip_report_url(&chip_base(r#"{"steps":[{"answer":"0e0c"}]}"#.into()));
+        assert!(!link.attach);
+        assert_eq!(
+            get(&link.url, "probe").as_deref(),
+            Some("```json\n{\n \"steps\": [\n  {\n   \"answer\": \"0e0c\"\n  }\n ]\n}\n```")
+        );
+    }
+
+    #[test]
+    fn falls_back_to_one_line_then_to_an_empty_field_the_user_must_fill() {
+        let steps = |n: usize| format!(r#"{{"steps":[{}]}}"#, vec![r#"{"a":"0e"}"#; n].join(","));
+        // Too long indented, short enough on one line
+        let mid = chip_report_url(&chip_base(steps(250)));
+        assert!(!mid.attach);
+        assert_eq!(get(&mid.url, "probe"), Some(format!("```json\n{}\n```", steps(250))));
+        // Too long either way: GitHub refuses the issue until the file is attached
+        let big = chip_report_url(&chip_base(format!(r#"{{"x":"{}"}}"#, "0".repeat(8000))));
+        assert!(big.attach);
+        assert_eq!(get(&big.url, "probe"), None);
+        assert!(chip_report_url(&chip_base(String::new())).attach);
+    }
 }

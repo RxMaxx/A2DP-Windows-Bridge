@@ -21,3 +21,4 @@ pub mod receiver;
 pub mod sbc;
 pub mod series;
 pub mod store;
+pub mod view;

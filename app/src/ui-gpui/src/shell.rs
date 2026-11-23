@@ -46,6 +46,8 @@ pub struct MainWindow {
     /// state starts over, and what it asked the core for is released)
     screen: Option<(RouteName, AnyView)>,
     setup: Option<AnyView>,
+    /// The cables' dialog shown once, while the screens show
+    cables_once: Option<Entity<ui::cable_notes::CablesOnce>>,
     /// Whether the setup was decided for the state that first arrived
     setup_decided: bool,
     /// The window has the setup's size
@@ -91,6 +93,7 @@ impl MainWindow {
             collapsed: None,
             screen: None,
             setup: None,
+            cables_once: None,
             setup_decided: false,
             setup_sized: false,
             language: String::new(),
@@ -227,6 +230,7 @@ impl Render for MainWindow {
         if !ready {
             self.screen = None;
             self.setup = None;
+            self.cables_once = None;
             return root.child(connection_screen(&self.core.read(cx).conn, false, cx)).into_any_element();
         }
         if setup_active != self.setup_sized {
@@ -236,11 +240,13 @@ impl Render for MainWindow {
         }
         let body = if setup_active {
             self.screen = None;
+            self.cables_once = None;
             let setup = self.setup.get_or_insert_with(|| screens::setup::open(window, cx)).clone();
             root.child(div().size_full().child(setup))
         } else {
             self.setup = None;
             let screen = self.screen(window, cx);
+            let once = self.cables_once.get_or_insert_with(|| ui::cable_notes::cables_once(window, cx)).clone();
             root.child(self.render_nav(window, cx)).child(
                 div()
                     .flex()
@@ -251,6 +257,7 @@ impl Render for MainWindow {
                     .child(screens::status::app_notices(cx))
                     .child(div().flex_1().min_h_0().child(screen)),
             )
+            .child(once)
         };
         body.child(notice_line(cx)).into_any_element()
     }

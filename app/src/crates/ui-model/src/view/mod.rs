@@ -1,0 +1,17 @@
+//! The rules of the screens' components that the window draws: what is
+//! listed, shown or enabled, with the TS tests that checked them.
+
+pub mod about;
+pub mod adapter;
+pub mod auracast;
+pub mod charts;
+pub mod codec_details;
+pub mod developer;
+pub mod devices;
+pub mod diagnostics;
+pub mod hid;
+pub mod media_eq;
+pub mod mic_processing;
+pub mod mixer;
+pub mod receiver_test;
+pub mod stream;
