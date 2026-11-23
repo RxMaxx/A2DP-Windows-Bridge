@@ -259,6 +259,13 @@ fn patched_a2dp(btstack: &Path) -> PathBuf {
 /// Disallowed), waited for its disconnection forever and never removed the
 /// CIG. A CIS found IDLE there (its disconnection set that) stays IDLE, and
 /// its CIS created event carries Connection Failed to be Established.
+///
+/// A CIG whose CIS were never created (an earbud that rejected Enable after
+/// Set CIG Parameters) was not removed either: gap_cig_remove took their
+/// REQUESTED state for a live CIS and waited forever. The CIG stayed in the
+/// controller, and after a few such tries Set CIG Parameters failed with
+/// Connection Limit Exceeded (0x09). A REQUESTED CIS is discarded like an
+/// IDLE one, so LE Remove CIG goes out.
 fn patched_hci(btstack: &Path) -> PathBuf {
     const FILE: &str = "hci.c";
     let mut source = std::fs::read_to_string(btstack.join("src").join(FILE)).unwrap().replace("\r\n", "\n");
@@ -288,6 +295,17 @@ fn patched_hci(btstack: &Path) -> PathBuf {
          \x20                               } else if ((iso_stream->group_id == cig->cig_id) && (iso_stream->stream_id == cis_id)){\n\
          \x20                                   iso_stream->state = HCI_ISO_STREAM_STATE_ACTIVE;\n\
          \x20                                   hci_cis_handle_created(iso_stream, status);\n",
+    );
+    let idle = "                            case HCI_ISO_STREAM_STATE_IDLE:\n\
+                \x20                               // Either never established or already disconnected, discard\n";
+    replace_once(
+        &mut source,
+        FILE,
+        idle,
+        &format!(
+            "{idle}                            case HCI_ISO_STREAM_STATE_REQUESTED: /* BlueCaster: patched by btstack-sys \
+             build.rs (patched_hci), never created */\n"
+        ),
     );
     let path = PathBuf::from(env::var("OUT_DIR").unwrap()).join(FILE);
     std::fs::write(&path, source).unwrap();
