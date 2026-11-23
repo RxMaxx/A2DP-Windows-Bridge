@@ -215,10 +215,18 @@ fn update_notice(cx: &App) {
     let Some(snap) = core.read(cx).snap() else { return };
     let Some(u) = snap.update.available.clone() else { return };
     let (route, setup) = (state.read(cx).route.name, state.read(cx).setup_active);
+    let answered = crate::ui_state::update_later().as_deref() == Some(u.version.as_str());
     if route == RouteName::Settings || route == RouteName::Setup || setup {
+        // Settings has the update itself: an open dialog goes away, unanswered,
+        // and comes back when the user leaves (closing it in code answers nothing)
+        let mut shown = UPDATE_SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+        if !answered && shown.as_deref() == Some(u.version.as_str()) {
+            *shown = None;
+            on_main_window(cx, |window, cx| window.close_dialog(cx));
+        }
         return;
     }
-    if crate::ui_state::update_later().as_deref() == Some(u.version.as_str()) {
+    if answered {
         return;
     }
     {
@@ -229,19 +237,24 @@ fn update_notice(cx: &App) {
         *shown = Some(u.version.clone());
     }
     let current = snap.update.current_version.clone();
+    on_main_window(cx, move |window, cx| open_update_dialog(u.clone(), current.clone(), window, cx));
+}
+
+/// Runs `f` on the main window once the frame being drawn is done (every
+/// root is the component library's Root)
+fn on_main_window(cx: &App, f: impl Fn(&mut Window, &mut App) + 'static) {
     cx.spawn(async move |cx: &mut AsyncApp| {
         cx.update(|cx| {
-            // The main window (every root is the component library's Root)
             let main = crate::windows::main_hwnd(cx);
             for w in cx.windows() {
-                let opened = w.update(cx, |_, window, cx| {
+                let done = w.update(cx, |_, window, cx| {
                     let ours = main != 0 && crate::windows::hwnd(window) == main;
                     if ours {
-                        open_update_dialog(u.clone(), current.clone(), window, cx);
+                        f(window, cx);
                     }
                     ours
                 });
-                if opened.unwrap_or(false) {
+                if done.unwrap_or(false) {
                     break;
                 }
             }
@@ -251,7 +264,7 @@ fn update_notice(cx: &App) {
 }
 
 fn open_update_dialog(u: UpdateInfo, current: String, window: &mut Window, cx: &mut App) {
-    window.open_dialog(cx, move |dialog, _, cx| {
+    window.open_dialog(cx, move |dialog, window, cx| {
         let p = *cx.palette();
         // Whether this copy updates itself
         let phase = host::state(cx).read(cx).update.clone();
@@ -295,7 +308,7 @@ fn open_update_dialog(u: UpdateInfo, current: String, window: &mut Window, cx: &
             .flex()
             .flex_col()
             .gap(theme::S3)
-            .child(div().child(t!("ui.settings.update_available", &u.version, &current)))
+            .child(div().child(ui::text(t!("ui.settings.update_available", &u.version, &current))))
             .children(notes)
             .child(
                 div().flex().child(
@@ -306,8 +319,8 @@ fn open_update_dialog(u: UpdateInfo, current: String, window: &mut Window, cx: &
                 ),
             );
         dialog
-            .width(px(480.))
-            .title(t("update.available_title"))
+            .width(ui::dialog::width(window, cx))
+            .title(ui::text(t("update.available_title")))
             .child(body)
             .footer(footer)
             .on_close(move |_, _, _| crate::ui_state::set_update_later(&v3))

@@ -675,5 +675,5 @@ pub fn open_codec_settings(
         s.on_close = Some(Box::new(on_close));
         s
     });
-    dialog::ask(Question::new(title).width(560.), move |_, _| entity.clone().into_any_element(), |_, _| {}, window, cx);
+    dialog::ask(Question::new(title), move |_, _| entity.clone().into_any_element(), |_, _| {}, window, cx);
 }

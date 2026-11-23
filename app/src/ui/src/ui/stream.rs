@@ -981,7 +981,13 @@ static FIX_RUNNING: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 
 /// An error with its cause and the button that fixes it. `id` tells the
 /// panels on screen apart (their buttons, the fix running).
-pub fn error_panel(id: &str, code: Option<&str>, message: &Msg, title: Option<&str>, cx: &App) -> Div {
+pub fn error_panel(
+    id: &str,
+    code: Option<&str>,
+    message: &Msg,
+    title: Option<&str>,
+    cx: &App,
+) -> gpui_kit::Stateful<Div> {
     let fix = fix_for(code, &message.key, cx);
     let busy = FIX_RUNNING.lock().unwrap_or_else(|e| e.into_inner()).contains(id);
     let (code, message_c) = (code.map(str::to_owned), message.clone());
@@ -1026,7 +1032,7 @@ pub fn error_panel(id: &str, code: Option<&str>, message: &Msg, title: Option<&s
     ui::banner(
         BannerKind::Error,
         Some(title.map_or_else(|| t("status.error"), str::to_owned).into()),
-        Some(div().child(tm(Some(message))).into_any_element()),
+        Some(div().child(ui::text(tm(Some(message)))).into_any_element()),
         Some(actions.into_any_element()),
         None,
         cx,

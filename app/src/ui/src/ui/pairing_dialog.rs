@@ -11,10 +11,10 @@
 
 use std::time::Duration;
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, AsyncApp, Context, Div, Entity, FontWeight, IntoElement, ParentElement as _,
+    AccessibleAction, AnyElement, App, AppContext as _, AsyncApp, Context, Div, Entity, FontWeight,
+    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Role, StatefulInteractiveElement as _,
     Styled as _, WeakEntity, Window, div, px,
 };
 use ipc::{Device, DevicePairing, Method, ServiceList};
@@ -158,6 +158,53 @@ fn key_row(i: usize, row: KeyRow, cx: &App) -> Div {
         .child(column(KEY_COLUMNS, 1).child(value))
 }
 
+/// The keys' heading that folds them: pressed, clicked, Enter or Space;
+/// assistive technology sees whether it is unfolded and can unfold or fold it
+fn keys_fold(state: &Entity<PairingState>, open: bool, cx: &App) -> impl IntoElement + use<> {
+    let p = *cx.palette();
+    let toggle = {
+        let weak = state.downgrade();
+        move |cx: &mut App| {
+            let _ = weak.update(cx, |s, cx| s.toggle_keys(cx));
+        }
+    };
+    let label = t("ui.pairing.key_title");
+    let (click, key, expand, collapse) = (toggle.clone(), toggle.clone(), toggle.clone(), toggle);
+    div()
+        .id("keys-fold")
+        .role(Role::Button)
+        .aria_label(label.clone())
+        .aria_expanded(open)
+        .tab_index(0)
+        .flex()
+        .items_center()
+        .gap(theme::S2)
+        .h(px(32.))
+        .px(theme::S3)
+        .rounded(theme::RADIUS)
+        .cursor_pointer()
+        .hover(|s| s.bg(p.surface_2))
+        .focus_visible(|s| s.bg(p.surface_2))
+        .on_click(move |_, _, cx| click(cx))
+        .on_key_down(move |e: &KeyDownEvent, _, cx| {
+            if matches!(e.keystroke.key.as_str(), "enter" | "space") {
+                key(cx);
+            }
+        })
+        .on_a11y_action(AccessibleAction::Expand, move |_, _, cx| {
+            if !open {
+                expand(cx);
+            }
+        })
+        .on_a11y_action(AccessibleAction::Collapse, move |_, _, cx| {
+            if open {
+                collapse(cx);
+            }
+        })
+        .child(icon(if open { IconName::ChevronDown } else { IconName::ChevronRight }))
+        .child(label)
+}
+
 fn body(state: &Entity<PairingState>, cx: &App) -> AnyElement {
     let s = state.read(cx);
     let p = *cx.palette();
@@ -165,14 +212,7 @@ fn body(state: &Entity<PairingState>, cx: &App) -> AnyElement {
     let le = s.device.le_audio;
     let hint = |text: String| super::hint(text, cx);
     let keys = keys_of.then(|| {
-        let weak = state.downgrade();
-        let fold = Button::new("keys-fold")
-            .ghost()
-            .icon(icon(if s.keys_open { IconName::ChevronDown } else { IconName::ChevronRight }))
-            .label(t("ui.pairing.key_title"))
-            .on_click(move |_, _, cx| {
-                let _ = weak.update(cx, |s, cx| s.toggle_keys(cx));
-            });
+        let fold = keys_fold(state, s.keys_open, cx);
         let part = div().flex().flex_col().child(div().flex().child(fold));
         match s.pairing.as_ref().filter(|_| s.keys_open) {
             Some(Ok(pairing)) => {
@@ -240,7 +280,7 @@ pub fn open(device: &Device, window: &mut Window, cx: &mut App) {
     });
     let name = if device.name.is_empty() { t("device.name_unknown") } else { device.name.clone() };
     dialog::ask(
-        Question::new(t("ui.pairing.services")).subtitle(format!("{name} {}", device.address)).width(640.),
+        Question::new(t("ui.pairing.services")).subtitle(format!("{name} {}", device.address)),
         move |_, cx| body(&state, cx),
         |_, _| {},
         window,

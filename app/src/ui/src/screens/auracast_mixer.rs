@@ -531,3 +531,6 @@ impl AuracastMixer {
         Some(section)
     }
 }
+
+#[cfg(test)]
+mod interaction_tests;

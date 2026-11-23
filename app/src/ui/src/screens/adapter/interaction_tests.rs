@@ -62,6 +62,32 @@ fn manual_channels_are_saved_when_entered(cx: &mut TestAppContext) {
     assert_eq!(saved_afh(&h).last().map(String::as_str), Some("3,13"));
 }
 
+/// The box being typed into is never put back to what it showed before,
+/// whatever is drawn between two keys: Ctrl+A and Backspace as two separate
+/// presses, each followed by a frame, empty it, and a new state from the core
+/// while it has the keyboard leaves what is typed. The old UI's input kept
+/// its own text until left.
+#[gpui_kit::test]
+fn the_box_being_typed_into_is_never_put_back(cx: &mut TestAppContext) {
+    let (mut h, w, a) = open(cx, "1,6");
+    let input = cx.read(|cx| a.read(cx).afh_input.clone());
+    let shown = |cx: &TestAppContext| cx.read(|cx| input.read(cx).value().to_string());
+    h.on(cx, w, |window, cx| input.update(cx, |s, cx| s.focus(window, cx)));
+    h.on(cx, w, |window, cx| window.press("ctrl-a", cx));
+    h.on(cx, w, |window, cx| window.press("backspace", cx));
+    assert_eq!(shown(cx), "");
+    h.on(cx, w, |window, cx| window.input("11", cx));
+    assert_eq!(shown(cx), "11");
+    // The core's state changes meanwhile (another setting): the box keeps it
+    h.edit(cx, |s| s["settings"]["media_keys"] = json!(true));
+    assert_eq!(shown(cx), "11");
+    assert!(saved_afh(&h).is_empty(), "saved while typing");
+    // Left: saved, and shown as typed
+    h.key(cx, w, "tab");
+    assert_eq!(saved_afh(&h), ["11"]);
+    assert_eq!(shown(cx), "11");
+}
+
 #[gpui_kit::test]
 fn auto_takes_no_typing(cx: &mut TestAppContext) {
     let (mut h, w, a) = open(cx, "auto");

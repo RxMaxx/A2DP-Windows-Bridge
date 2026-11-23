@@ -511,8 +511,9 @@ impl Developer {
         for e in entries {
             let value = e.profile.as_ref().map_or(PACKET_DEFAULT, |p| p.max_media_payload);
             if let Some(f) = self.packets.get_mut(&e.key) {
-                // The saved value changed: what was typed goes
-                if f.value != value {
+                // The saved value changed: what was typed goes, once the field
+                // is left (a field being edited is never overwritten)
+                if f.value != value && !f.input.read(cx).focus_handle(cx).is_focused(window) {
                     f.value = value;
                     f.text = None;
                     f.input.update(cx, |i, cx| i.set_value(value.to_string(), window, cx));
@@ -1004,7 +1005,7 @@ fn tab_panel() -> Div {
 }
 
 /// A tab's intro, a warning while anything on it is changed
-fn intro_banner(active: bool, intro: &str, cx: &App) -> Div {
+fn intro_banner(active: bool, intro: &str, cx: &App) -> gpui_kit::Stateful<Div> {
     if active {
         ui::banner(BannerKind::Warn, Some(t("ui.dev.active").into()), None, None, None, cx)
     } else {

@@ -27,7 +27,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::component::input::{InputEvent, InputState, NumberInput, NumberInputEvent, StepAction};
-use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
+use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::{Disableable as _, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -55,7 +55,7 @@ use crate::app;
 use crate::host;
 use crate::theme::{self, ActivePalette as _};
 use crate::ui::charts::{Mark, ViewBox, plot};
-use crate::ui::{self, ButtonKind, Choice, IconName, dialog, icon};
+use crate::ui::{self, ButtonKind, Choice, IconName, dialog, icon, menu_choice, menu_command};
 
 /// A line saying whether the playback EQ is on, with the editor in a dialog
 /// (`MediaEqSettings`)
@@ -71,7 +71,7 @@ pub fn media_eq_settings<'a>(device: &Device, cx: &'a App) -> impl IntoElement +
             let key = key.clone();
             let editor = cx.new(|cx| MediaEqEditor::new(key, window, cx));
             dialog::ask(
-                dialog::Question::new(t("eq.title")).width(760.),
+                dialog::Question::new(t("eq.title")),
                 move |_, _| editor.clone().into_any_element(),
                 |_, _| {},
                 window,
@@ -782,7 +782,7 @@ impl EqGraph {
                 Some((i, b)) => {
                     for kind in BAND_TYPES {
                         let weak = weak.clone();
-                        menu = menu.item(PopupMenuItem::new(type_label(kind)).checked(b.band_type == kind).on_click(
+                        menu = menu.item(menu_choice(type_label(kind).into(), b.band_type == kind, false).on_click(
                             move |_: &ClickEvent, _, cx| {
                                 let _ = weak.update(cx, |g, cx| {
                                     let next = rules::replace(&g.bands, i, &with_type(&b, kind));
@@ -792,7 +792,7 @@ impl EqGraph {
                         ));
                     }
                     let weak = weak.clone();
-                    menu.separator().item(PopupMenuItem::new(t("eq.delete_point")).on_click(
+                    menu.separator().item(menu_command(t("eq.delete_point").into(), false).on_click(
                         move |_: &ClickEvent, _, cx| {
                             let _ = weak.update(cx, |g, cx| {
                                 g.select(None, cx);
@@ -804,21 +804,19 @@ impl EqGraph {
                 }
                 None => {
                     let (w1, w2) = (weak.clone(), weak.clone());
-                    menu.item(PopupMenuItem::new(t("eq.add_point_here")).disabled(bands.len() >= MAX_POINTS).on_click(
+                    menu.item(menu_command(t("eq.add_point_here").into(), bands.len() >= MAX_POINTS).on_click(
                         move |_: &ClickEvent, _, cx| {
                             let _ = w1.update(cx, |g, cx| g.add_at(x, y, cx));
                         },
                     ))
-                    .item(
-                        PopupMenuItem::new(t("eq.reset")).disabled(is_default_points(&bands)).on_click(
-                            move |_: &ClickEvent, _, cx| {
-                                let _ = w2.update(cx, |g, cx| {
-                                    g.select(None, cx);
-                                    g.change(DEFAULT_POINTS.to_vec(), true, cx);
-                                });
-                            },
-                        ),
-                    )
+                    .item(menu_command(t("eq.reset").into(), is_default_points(&bands)).on_click(
+                        move |_: &ClickEvent, _, cx| {
+                            let _ = w2.update(cx, |g, cx| {
+                                g.select(None, cx);
+                                g.change(DEFAULT_POINTS.to_vec(), true, cx);
+                            });
+                        },
+                    ))
                 }
             }
         });

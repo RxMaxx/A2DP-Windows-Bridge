@@ -242,7 +242,7 @@ impl CablesDialog {
     ) {
         let view = this.clone();
         dialog::ask(
-            Question::new(t("cables.title")).width(560.).on_cancel(on_close),
+            Question::new(t("cables.title")).on_cancel(on_close),
             move |_, _| view.clone().into_any_element(),
             |_, _| {},
             window,

@@ -129,6 +129,57 @@ fn the_close_control_does_nothing_while_busy(cx: &mut TestAppContext) {
     assert_eq!(seen.cancelled.get(), 0);
 }
 
+/// A window with a button of its own behind the dialog
+struct Behind;
+
+impl gpui_kit::Render for Behind {
+    fn render(&mut self, _: &mut Window, _: &mut gpui_kit::Context<Self>) -> impl IntoElement {
+        div().size_full().child(button("behind", "Behind", ButtonKind::Default).on_click(|_, _, _| {}))
+    }
+}
+
+#[gpui_kit::test]
+fn tab_keeps_the_keyboard_inside_the_dialog(cx: &mut TestAppContext) {
+    let mut h = Harness::start(cx, snapshot());
+    let (w, _) = h.open(cx, |_, cx| cx.new(|_| Behind));
+    h.on(cx, w, |window, cx| {
+        ask(Question::new("Title").confirm("Go"), |_, _| div().child("Body").into_any_element(), |_, _| {}, window, cx)
+    });
+    let focused = |h: &mut Harness, cx: &mut TestAppContext| {
+        h.on(cx, w, |window, _| {
+            ["dialog-cancel", "dialog-confirm", "behind"]
+                .into_iter()
+                .find(|id| window.try_find(*id).is_some_and(|e| e.focused() == Some(true)))
+        })
+    };
+    let mut seen = Vec::new();
+    for key in ["tab"; 6].into_iter().chain(["shift-tab"; 4]) {
+        h.on(cx, w, |window, cx| window.press(key, cx));
+        seen.push(focused(&mut h, cx));
+    }
+    assert!(!seen.contains(&Some("behind")), "the keyboard left the dialog: {seen:?}");
+    assert!(seen.contains(&Some("dialog-cancel")) && seen.contains(&Some("dialog-confirm")), "{seen:?}");
+    // Tab goes round: each button comes again
+    assert!(seen.iter().filter(|s| **s == Some("dialog-confirm")).count() >= 2, "{seen:?}");
+}
+
+#[gpui_kit::test]
+fn a_dialog_is_as_wide_as_the_page(cx: &mut TestAppContext) {
+    let (mut h, w, _) = open(cx, true);
+    let width =
+        |h: &mut Harness, cx: &mut TestAppContext| h.on(cx, w, |window, _| window.find("surface").bounds().size.width);
+    // No page (the setup): the window less the margins
+    assert_eq!(width(&mut h, cx), px(1000. - 48.));
+    // Beside the navigation: the page less its padding
+    h.on(cx, w, |window, cx| set_page_width(window, Some(px(760.)), cx));
+    h.on(cx, w, |window, _| window.refresh());
+    assert_eq!(width(&mut h, cx), px(760. - 48.));
+    // Never wider than the page's cards
+    h.on(cx, w, |window, cx| set_page_width(window, Some(px(3000.)), cx));
+    h.on(cx, w, |window, _| window.refresh());
+    assert_eq!(width(&mut h, cx), px(1000. - 48.));
+}
+
 #[gpui_kit::test]
 fn enter_presses_the_focused_button_only(cx: &mut TestAppContext) {
     let (mut h, w, seen) = open(cx, true);

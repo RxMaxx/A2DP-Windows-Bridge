@@ -249,13 +249,21 @@ impl Render for MainWindow {
             self.screen = None;
             self.setup = None;
             self.cables_once = None;
-            return root.child(connection_screen(&self.core.read(cx).conn, false, cx)).into_any_element();
+            return root
+                .child(connection_screen(&self.core.read(cx).conn, false, cx))
+                .child(ui::frame_drawn())
+                .into_any_element();
         }
         if setup_active != self.setup_sized {
             // The first-run setup opened or closed: the window fits it
             self.setup_sized = setup_active;
             window.defer(cx, move |window, cx| windows::setup_window(setup_active, window, cx));
         }
+        // Dialogs are as wide as the page (beside the navigation)
+        let nav =
+            if self.collapsed.unwrap_or(window.viewport_size().width < px(NARROW)) { NAV_COLLAPSED } else { NAV_WIDTH };
+        let page = (!setup_active).then(|| window.viewport_size().width - px(nav));
+        ui::dialog::set_page_width(window, page, cx);
         let body = if setup_active {
             self.screen = None;
             self.cables_once = None;
@@ -278,39 +286,45 @@ impl Render for MainWindow {
                 )
                 .child(once)
         };
-        body.child(notice_line(cx)).into_any_element()
+        body.child(notice_line(cx)).child(ui::frame_drawn()).into_any_element()
     }
 }
 
 /// The screen until the core answered: connecting, missing, wrong version
 pub fn connection_screen(conn: &ConnStatus, compact: bool, cx: &App) -> impl IntoElement + use<> {
     let p = cx.palette();
-    let title = |key: &str| div().text_size(theme::FS_20).font_weight(FontWeight::SEMIBOLD).child(t(key));
-    let base = div()
-        .size_full()
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_center()
-        .gap(theme::S3)
-        .p(if compact { theme::S4 } else { theme::S8 })
-        .text_center();
+    let title = |key: &str| div().text_size(theme::FS_20).font_weight(FontWeight::SEMIBOLD).child(ui::text(t(key)));
+    // A status a screen reader reads as it changes, named by its title (the
+    // service's notices are banners that name themselves)
+    let base = |title_key: Option<&str>| {
+        ui::alert("conn-screen", title_key.map(t).unwrap_or_default(), false)
+            .size_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(theme::S3)
+            .p(if compact { theme::S4 } else { theme::S8 })
+            .text_center()
+    };
     match conn {
-        ConnStatus::CoreMissing { detail } => base
+        ConnStatus::CoreMissing { detail } => base(Some("ui.conn.missing_title"))
             .child(title("ui.conn.missing_title"))
-            .child(div().child(t("ui.conn.missing_body")))
+            .child(div().child(ui::text(t("ui.conn.missing_body"))))
             .child(ui::mono(detail.clone()).text_color(p.text_2)),
-        ConnStatus::Rejected { reason } => base
+        ConnStatus::Rejected { reason } => base(Some("ui.conn.rejected_title"))
             .child(title("ui.conn.rejected_title"))
-            .child(div().child(t("ui.conn.rejected_body")))
+            .child(div().child(ui::text(t("ui.conn.rejected_body"))))
             .child(ui::mono(reason.clone()).text_color(p.text_2)),
         ConnStatus::ServiceNeedsUpdate { version, app } => {
-            base.child(screens::service_addon::connection_notice(false, Some((version, app)), cx))
+            base(None).child(screens::service_addon::connection_notice(false, Some((version, app)), cx))
         }
-        ConnStatus::ServiceNewer { version, app } => base.child(screens::service_addon::newer_notice(version, app, cx)),
-        ConnStatus::ServiceStopped => base.child(screens::service_addon::connection_notice(true, None, cx)),
+        ConnStatus::ServiceNewer { version, app } => {
+            base(None).child(screens::service_addon::newer_notice(version, app, cx))
+        }
+        ConnStatus::ServiceStopped => base(None).child(screens::service_addon::connection_notice(true, None, cx)),
         ConnStatus::Connecting | ConnStatus::Connected { .. } => {
-            base.child(Spinner::new().large()).child(title("ui.conn.connecting"))
+            base(Some("ui.conn.connecting")).child(Spinner::new().large()).child(title("ui.conn.connecting"))
         }
     }
 }
@@ -324,8 +338,9 @@ pub fn notice_line(cx: &App) -> impl IntoElement + use<> {
             NoticeKind::Error => (IconName::ErrorCircle, p.bad_text, p.bad_text),
             NoticeKind::Info => (IconName::CheckmarkCircle, p.good_text, p.border_strong),
         };
+        // A screen reader reads it as it appears (an error at once)
         d.child(
-            div()
+            ui::alert("notice", n.text.clone(), n.kind == NoticeKind::Error)
                 .flex()
                 .items_center()
                 .gap(theme::S2)

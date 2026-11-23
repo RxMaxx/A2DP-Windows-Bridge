@@ -7,7 +7,9 @@ use gpui_kit::{AnyWindowHandle, AppContext as _, TestAppContext};
 use serde_json::json;
 
 use super::*;
-use crate::testing::{Answer, Harness, snapshot};
+use crate::testing::{Answer, Harness, device, profile, snapshot};
+
+const ADDR: &str = "0A:00:00:00:00:01";
 
 fn open(cx: &mut TestAppContext, route: RouteName) -> (Harness, AnyWindowHandle) {
     let mut s = snapshot();
@@ -93,6 +95,100 @@ fn tab_walks_the_navigation_then_every_setting_in_order(cx: &mut TestAppContext)
     // take the keyboard too (not registered for tests: "?")
     let links = seen[places[0] + 1..places[1]].iter().filter(|s| *s == "?").count();
     assert!(links >= 7, "{links} navigation links reached: {seen:?}");
+}
+
+/// The controls the keyboard should reach: every one registered for tests
+/// that is shown, can be used and takes keys, by its path
+fn controls(h: &mut Harness, cx: &mut TestAppContext, w: AnyWindowHandle) -> Vec<String> {
+    use gpui_kit::Role;
+    h.on(cx, w, |window, _| {
+        window
+            .elements()
+            .into_iter()
+            .filter(|e| e.visible() && e.disabled() != Some(true))
+            .filter(|e| {
+                matches!(
+                    e.role(),
+                    Some(
+                        Role::Button | Role::Switch | Role::CheckBox | Role::TextInput | Role::SpinButton | Role::Link
+                    )
+                )
+            })
+            .map(|e| format!("{:?}", e.path()))
+            .collect()
+    })
+}
+
+/// Tab pressed until the keyboard is back where it started (at most
+/// `max` times): what had it each time, by path ("?" for one not registered)
+fn tab_round(h: &mut Harness, cx: &mut TestAppContext, w: AnyWindowHandle, max: usize) -> Vec<String> {
+    let path = |h: &mut Harness, cx: &mut TestAppContext| {
+        h.on(cx, w, |window, _| {
+            window
+                .elements()
+                .into_iter()
+                .filter(|e| e.focused() == Some(true))
+                .map(|e| format!("{:?}", e.path()))
+                .next_back()
+                .unwrap_or_else(|| "?".into())
+        })
+    };
+    let mut seen: Vec<String> = Vec::new();
+    for _ in 0..max {
+        h.on(cx, w, |window, cx| window.press("tab", cx));
+        let now = path(h, cx);
+        if seen.first() == Some(&now) && now != "?" {
+            return seen;
+        }
+        seen.push(now);
+    }
+    panic!("Tab never came back to the first control in {max} presses: {seen:?}");
+}
+
+/// Every control of the screen takes the keyboard in one round of Tab, and
+/// the round ends where it began (nothing keeps the keyboard); with a saved
+/// device and its profile, so the screens show their device controls
+fn check_tab_round(route: RouteName, cx: &mut TestAppContext) {
+    let (mut h, w) = open(cx, route);
+    h.edit(cx, |s| {
+        s["devices"] = json!([device(ADDR, "Test Phones")]);
+        s["profiles"] = json!([profile("Test Phones | Auto", ADDR, "Test Phones", json!({}))]);
+        s["active_profile"] = json!("Test Phones | Auto");
+    });
+    let seen = tab_round(&mut h, cx, w, 200);
+    let missed: Vec<String> = controls(&mut h, cx, w).into_iter().filter(|c| !seen.contains(c)).collect();
+    assert!(missed.is_empty(), "{route:?}: Tab never reached {missed:?}; it went {seen:?}");
+    // No control twice in one round: the keyboard is not caught in a loop
+    let mut sorted: Vec<&String> = seen.iter().filter(|s| *s != "?").collect();
+    sorted.sort();
+    let before = sorted.len();
+    sorted.dedup();
+    assert_eq!(sorted.len(), before, "{route:?}: a control came twice in one round: {seen:?}");
+}
+
+#[gpui_kit::test]
+fn tab_reaches_every_control_of_home(cx: &mut TestAppContext) {
+    check_tab_round(RouteName::Home, cx);
+}
+
+#[gpui_kit::test]
+fn tab_reaches_every_control_of_codecs(cx: &mut TestAppContext) {
+    check_tab_round(RouteName::Codecs, cx);
+}
+
+#[gpui_kit::test]
+fn tab_reaches_every_control_of_audio_devices(cx: &mut TestAppContext) {
+    check_tab_round(RouteName::Devices, cx);
+}
+
+#[gpui_kit::test]
+fn tab_reaches_every_control_of_adapter(cx: &mut TestAppContext) {
+    check_tab_round(RouteName::Adapter, cx);
+}
+
+#[gpui_kit::test]
+fn tab_reaches_every_control_of_diagnostics(cx: &mut TestAppContext) {
+    check_tab_round(RouteName::Diagnostics, cx);
 }
 
 #[gpui_kit::test]

@@ -14,9 +14,9 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Sizable as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, AsyncApp, Context, Div, ElementId, Entity, FontWeight, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, ScrollAnchor, ScrollHandle, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Task, WeakEntity, Window, WindowVisibility, div, px,
+    AnyElement, App, AppContext as _, AsyncApp, Context, Div, ElementId, Entity, Focusable as _, FontWeight,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, ScrollAnchor, ScrollHandle, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Task, WeakEntity, Window, WindowVisibility, div, px,
 };
 use ipc::{AdapterInfo, DiagInfo, DiagInfoParams, DriverKind, FirmwareFile, Method, ProbeResult, Snapshot};
 use ui_model::chips::{
@@ -707,7 +707,10 @@ impl Adapter {
         let placeholder_changed = self.afh_placeholder != Some(manual);
         self.afh_placeholder = Some(manual);
         self.afh_input.update(cx, |input, cx| {
-            if input.value().as_ref() != shown {
+            // What the user is typing is never put back while the box has the
+            // keyboard: it shows the box's own text again once it is left
+            let editing = manual && input.focus_handle(cx).is_focused(window);
+            if !editing && input.value().as_ref() != shown {
                 input.set_value(shown.clone(), window, cx);
             }
             if placeholder_changed {
@@ -881,7 +884,7 @@ fn vendor_firmware_box(snap: &Snapshot, a: &AdapterInfo, cx: &App) -> Vec<AnyEle
 /// v1 UpdateFirmwareStatus: the files, what is missing, a vendor's note.
 /// `embedded`: in the adapter's firmware box, whose tag says the files are
 /// there and which has the download button itself
-fn firmware_status(snap: &Snapshot, st: &ChipStatus, embedded: bool, cx: &App) -> Option<Div> {
+fn firmware_status(snap: &Snapshot, st: &ChipStatus, embedded: bool, cx: &App) -> Option<gpui_kit::Stateful<Div>> {
     let open_page = |id: &'static str, url: &'static str| {
         ui::button(id, t("firmware.open_download_page"), ButtonKind::Default)
             .icon(icon(IconName::Open))
@@ -899,7 +902,7 @@ fn firmware_status(snap: &Snapshot, st: &ChipStatus, embedded: bool, cx: &App) -
     let banner = |kind: BannerKind, title: Option<String>, body: Option<AnyElement>, actions: Option<AnyElement>| {
         ui::banner(kind, title.map(Into::into), body, actions, None, cx)
     };
-    let text = |s: String| div().child(s).into_any_element();
+    let text = |s: String| div().child(ui::text(s)).into_any_element();
     let present = |files: &[String]| {
         (!embedded).then(|| {
             banner(BannerKind::Good, Some(t("firmware.present")), Some(file_list(files).into_any_element()), None)
@@ -985,6 +988,7 @@ impl Render for Adapter {
             .pb(theme::S8)
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
+            .child(ui::reveal_presses(&self.scroll))
             .child(Adapter::head())
             .child(Adapter::stack_line(&snap, cx))
             .when(chosen_missing(&adapter.adapters, &chosen), |d| {

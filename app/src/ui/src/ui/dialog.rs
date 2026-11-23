@@ -12,6 +12,7 @@
 //! request the caller tracks runs; [`ask_run`] tracks the request itself and
 //! closes when it went well (or always, as the caller decides).
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use gpui_kit::component::WindowExt as _;
@@ -19,8 +20,8 @@ use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::{Disableable as _, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, AsyncWindowContext, Entity, FontWeight, IntoElement, ParentElement as _,
-    SharedString, Styled as _, Task, Window, div, px,
+    AnyElement, App, AppContext as _, AsyncWindowContext, Entity, FontWeight, Global, IntoElement, ParentElement as _,
+    Pixels, SharedString, Styled as _, Task, Window, WindowId, div, px,
 };
 use ui_model::i18n::t;
 
@@ -64,7 +65,6 @@ pub struct Question {
     pub extra: Option<Extra>,
     /// Runs when Cancel, Escape, the backdrop or the close control close it
     pub on_cancel: Option<Action>,
-    pub width: f32,
 }
 
 impl Question {
@@ -81,7 +81,6 @@ impl Question {
             confirm_disabled: false,
             extra: None,
             on_cancel: None,
-            width: 480.,
         }
     }
 
@@ -124,11 +123,38 @@ impl Question {
         self.on_cancel = Some(Rc::new(on_cancel));
         self
     }
+}
 
-    pub fn width(mut self, width: f32) -> Self {
-        self.width = width;
-        self
-    }
+/// The widest a dialog gets: a page's cards (72rem less the page's padding)
+const MAX_WIDTH: Pixels = px(1104.);
+
+/// The width of each window's page (beside the navigation), told by the
+/// window as it draws; a window without one (the setup) has none
+#[derive(Default)]
+struct PageWidths(HashMap<WindowId, Pixels>);
+
+impl Global for PageWidths {}
+
+/// The window's page is `width` wide (None: it shows no page)
+pub fn set_page_width(window: &Window, width: Option<Pixels>, cx: &mut App) {
+    let id = window.window_handle().window_id();
+    let widths = &mut cx.default_global::<PageWidths>().0;
+    match width {
+        Some(w) => widths.insert(id, w),
+        None => widths.remove(&id),
+    };
+}
+
+/// Every dialog is as wide as the page's cards, centred in the window: the
+/// page's width less its padding, at most [`MAX_WIDTH`]; without a page, the
+/// window's width less the same margin
+pub fn width(window: &Window, cx: &App) -> Pixels {
+    let viewport = window.viewport_size().width;
+    let page = cx
+        .try_global::<PageWidths>()
+        .and_then(|p| p.0.get(&window.window_handle().window_id()).copied())
+        .unwrap_or(viewport);
+    (page.min(viewport) - theme::S6 * 2.).min(MAX_WIDTH).max(px(0.))
 }
 
 /// Opens the dialog. `question` and `body` run again whenever the dialog is
@@ -172,10 +198,16 @@ pub fn show(
                     .items_center()
                     .gap(theme::S2)
                     .when(q.warn, |d| d.child(div().flex().text_color(p.warn_text).child(icon(IconName::Warning))))
-                    .child(q.title.clone()),
+                    .child(super::text(q.title.clone())),
             )
             .when_some(q.subtitle.clone(), |d, s| {
-                d.child(div().font_weight(FontWeight::NORMAL).text_size(theme::FS_12).text_color(p.text_2).child(s))
+                d.child(
+                    div()
+                        .font_weight(FontWeight::NORMAL)
+                        .text_size(theme::FS_12)
+                        .text_color(p.text_2)
+                        .child(super::text(s)),
+                )
             });
         let head =
             div().flex().items_start().justify_between().gap(theme::S3).child(heading).when(q.confirm.is_none(), |d| {
@@ -199,7 +231,7 @@ pub fn show(
             }
         };
         let dialog = dialog
-            .width(px(q.width))
+            .width(width(window, cx))
             .title(head)
             .close_button(false)
             // Escape, the backdrop: as Cancel

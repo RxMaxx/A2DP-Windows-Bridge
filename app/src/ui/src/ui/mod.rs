@@ -23,8 +23,13 @@ pub mod paired_devices;
 pub mod pairing_dialog;
 pub mod stream;
 
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
+use gpui_kit::TestSupportExt as _;
+use gpui_kit::accesskit::Live;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement as _;
@@ -33,8 +38,10 @@ use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{Disableable as _, Icon, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Div, ElementId, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    AnyElement, App, ClickEvent, DispatchPhase, Div, ElementId, FontWeight, InputEvent as _, InteractiveElement as _,
+    IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement as _, Pixels, Point, RenderOnce, Role,
+    ScrollHandle, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Text, Toggled, Window, canvas,
+    div, point, px,
 };
 
 pub use icons::IconName;
@@ -170,7 +177,7 @@ fn select_named<T: Clone + PartialEq + 'static>(
             }
             let (v, on_change) = (c.value.clone(), on_change.clone());
             let chosen = c.value == value;
-            let mut item = PopupMenuItem::new(c.label.clone()).checked(chosen).disabled(c.disabled);
+            let mut item = menu_choice(c.label.clone(), chosen, c.disabled);
             if let Some(i) = c.icon {
                 item = item.icon(icon(i));
             }
@@ -185,6 +192,53 @@ fn select_named<T: Clone + PartialEq + 'static>(
         menu
     })
 }
+
+// The menu reports each of its entries as highlighted or not, and for
+// assistive technology that leaves an entry nothing to press. The entries
+// below carry their text in a node of their own that can be chosen or
+// pressed; the press lands on the entry, which runs its handler and closes
+// the menu, and the menu draws the check mark.
+
+/// A menu entry that is one of several options, `chosen` with a check mark;
+/// add `.icon(..)` and `.on_click(..)`
+pub fn menu_choice(label: SharedString, chosen: bool, disabled: bool) -> PopupMenuItem {
+    PopupMenuItem::element(move |_, _| {
+        div()
+            .id("choice")
+            .test_support()
+            .role(Role::MenuItemRadio)
+            .aria_label(label.clone())
+            .aria_toggled(if chosen { Toggled::True } else { Toggled::False })
+            .when(disabled, |d| d.a11y_synthetic_children(|b| b.parent_node().set_disabled()))
+            .flex_1()
+            .child(label.clone())
+    })
+    .checked(chosen)
+    .disabled(disabled)
+}
+
+/// A menu entry that does something; add `.on_click(..)`
+pub fn menu_command(label: SharedString, disabled: bool) -> PopupMenuItem {
+    PopupMenuItem::element(move |_, _| {
+        div()
+            .id("command")
+            .test_support()
+            .role(Role::MenuItem)
+            .aria_label(label.clone())
+            .when(disabled, |d| d.a11y_synthetic_children(|b| b.parent_node().set_disabled()))
+            // Tells assistive technology that the entry can be pressed: the
+            // press itself goes on to the entry
+            .on_click(|_, _, _| {})
+            .flex_1()
+            .child(label.clone())
+    })
+    .disabled(disabled)
+}
+
+#[cfg(test)]
+mod page_tests;
+#[cfg(test)]
+mod select_tests;
 
 /// A few choices side by side, one chosen
 pub fn segmented<T: Clone + PartialEq + 'static>(
@@ -239,14 +293,46 @@ pub fn tab_bar<T: Clone + PartialEq + 'static>(
         })
 }
 
+/// Text that assistive technology reads (plain text is only drawn)
+pub fn text(s: impl Into<SharedString>) -> Text {
+    let s = s.into();
+    Text::new(child_id("text", &s), s)
+}
+
+thread_local! {
+    /// How often each kind and words were given an id in the frame being
+    /// drawn (see [`frame_drawn`])
+    static IDS_GIVEN: RefCell<HashMap<(&'static str, SharedString), u64>> = RefCell::new(HashMap::new());
+}
+
+/// An id of an element known by its words: the same words again in one
+/// frame get the next number, as assistive technology needs every element's
+/// id to be its own; drawn in the same order, they get the same ids each
+/// frame
+fn child_id(kind: &'static str, words: &SharedString) -> ElementId {
+    let n = IDS_GIVEN.with(|ids| {
+        let mut ids = ids.borrow_mut();
+        let n = ids.entry((kind, words.clone())).or_insert(0);
+        *n += 1;
+        *n - 1
+    });
+    ElementId::NamedChild(Arc::new(ElementId::NamedInteger(kind.into(), n)), words.clone())
+}
+
+/// Put once in a window's root: when the window's frame is painted (every
+/// element made), the ids of [`child_id`] start again for the next frame
+pub fn frame_drawn() -> impl IntoElement {
+    canvas(|_, _, _| {}, |_, _, _, _| IDS_GIVEN.with(|ids| ids.borrow_mut().clear())).absolute().size_0()
+}
+
 /// Secondary text under a label or in a card (`.hint`)
-pub fn hint(text: impl Into<SharedString>, cx: &App) -> Div {
-    div().text_size(theme::FS_12).text_color(cx.palette().text_2).child(text.into())
+pub fn hint(s: impl Into<SharedString>, cx: &App) -> Div {
+    div().text_size(theme::FS_12).text_color(cx.palette().text_2).child(text(s))
 }
 
 /// Dimmed text (`.muted`)
-pub fn muted(text: impl Into<SharedString>, cx: &App) -> Div {
-    div().text_color(cx.palette().text_2).child(text.into())
+pub fn muted(s: impl Into<SharedString>, cx: &App) -> Div {
+    div().text_color(cx.palette().text_2).child(text(s))
 }
 
 /// Text in the monospace font (addresses, versions, log lines)
@@ -264,14 +350,17 @@ pub fn row() -> Div {
     div().flex().items_center().justify_between().gap(theme::S4).min_h(px(40.))
 }
 
-fn row_text(label: SharedString, hint_text: Option<SharedString>, cx: &App) -> Div {
+/// A line's label and hint; `read`: the label is read out too (a switch
+/// carries its label itself, other controls may not)
+fn row_text(label: SharedString, hint_text: Option<SharedString>, read: bool, cx: &App) -> Div {
+    let label = if read { div().child(text(label)) } else { div().child(label) };
     div()
         .flex()
         .flex_col()
         .flex_1()
         .min_w_0()
         .gap(px(2.))
-        .child(div().child(label))
+        .child(label)
         .when_some(hint_text, |d, h| d.child(hint(h, cx)))
 }
 
@@ -288,7 +377,7 @@ pub fn toggle(
 ) -> Div {
     let label = label.into();
     row()
-        .child(row_text(label.clone(), hint_text, cx))
+        .child(row_text(label.clone(), hint_text, false, cx))
         .child(Switch::new(id).checked(checked).disabled(disabled).accessibility_label(label).on_change(on_change))
 }
 
@@ -317,7 +406,7 @@ pub fn field(
         .flex()
         .flex_col()
         .gap(theme::S1)
-        .child(row().child(row_text(label.into(), hint_text, cx)).child(control))
+        .child(row().child(row_text(label.into(), hint_text, true, cx)).child(control))
         .when_some(error, |d, e| d.child(field_error(e, cx)))
 }
 
@@ -333,21 +422,33 @@ pub fn field_stacked(
         .flex()
         .flex_col()
         .gap(theme::S2)
-        .child(div().child(label.into()))
+        .child(div().child(text(label)))
         .child(control)
         .when_some(hint_text, |d, h| d.child(hint(h, cx)))
         .when_some(error, |d, e| d.child(field_error(e, cx)))
 }
 
-fn field_error(text: SharedString, cx: &App) -> Div {
-    div()
+/// A field's error, told at once by a screen reader as it appears
+fn field_error(message: SharedString, cx: &App) -> Stateful<Div> {
+    alert(child_id("field-error", &message), message.clone(), true)
         .flex()
         .items_center()
         .gap(theme::S1)
         .text_size(theme::FS_12)
         .text_color(cx.palette().bad_text)
         .child(icon(IconName::ErrorCircle).small())
-        .child(text)
+        .child(message)
+}
+
+/// A region a screen reader reads out when it appears or its words change:
+/// an error (`urgent`: at once) or a status, named by its words
+pub fn alert(id: impl Into<ElementId>, words: impl Into<SharedString>, urgent: bool) -> Stateful<Div> {
+    let live = if urgent { Live::Assertive } else { Live::Polite };
+    div()
+        .id(id)
+        .role(if urgent { Role::Alert } else { Role::Status })
+        .aria_label(words.into())
+        .a11y_synthetic_children(move |b| b.parent_node().set_live(live))
 }
 
 /// A line that opens more settings: its name, its state, an arrow. The
@@ -411,14 +512,120 @@ pub fn section(title: impl Into<SharedString>, actions: Option<AnyElement>, cx: 
 }
 
 /// A screen: its heading, then its cards, scrolling as one
-pub fn page(id: impl Into<ElementId>, title: impl Into<SharedString>) -> impl gpui_kit::ParentElement + IntoElement {
-    div().id(id).size_full().flex().flex_col().gap(theme::S4).p(theme::S6).overflow_y_scrollbar().child(
+pub fn page(id: impl Into<ElementId>, title: impl Into<SharedString>) -> Page {
+    Page { id: id.into(), title: title.into(), children: Vec::new() }
+}
+
+/// What [`page`] makes; add the cards with `.child(..)`
+#[derive(IntoElement)]
+pub struct Page {
+    id: ElementId,
+    title: SharedString,
+    children: Vec<AnyElement>,
+}
+
+impl gpui_kit::ParentElement for Page {
+    fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
+        self.children.extend(elements);
+    }
+}
+
+impl RenderOnce for Page {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        // The page keeps where it was scrolled to while it is shown
+        let scroll = window.use_keyed_state(self.id.clone(), cx, |_, _| ScrollHandle::new()).read(cx).clone();
         div()
-            .font_family(theme::FONT_DISPLAY)
-            .text_size(theme::FS_28)
-            .font_weight(FontWeight::SEMIBOLD)
-            .child(title.into()),
+            .relative()
+            .size_full()
+            .child(
+                div()
+                    .id(self.id)
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .gap(theme::S4)
+                    .p(theme::S6)
+                    .overflow_y_scroll()
+                    .track_scroll(&scroll)
+                    .child(reveal_presses(&scroll))
+                    .child(
+                        div()
+                            .font_family(theme::FONT_DISPLAY)
+                            .text_size(theme::FS_28)
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(text(self.title)),
+                    )
+                    .children(self.children),
+            )
+            .vertical_scrollbar(&scroll)
+    }
+}
+
+/// Lets a press assistive technology makes on a control scrolled out of
+/// view reach it. Such a press arrives as a click at the control's centre,
+/// outside the window, where no pointer can be: the scrolling element
+/// (`scroll`'s, which this is put in) scrolls the control into view and the
+/// press goes to it there.
+pub fn reveal_presses(scroll: &ScrollHandle) -> impl IntoElement {
+    let scroll = scroll.clone();
+    canvas(
+        |_, _, _| {},
+        move |_, _, window, _| {
+            let swallow_up = Rc::new(Cell::new(false));
+            let (down_scroll, up_swallow) = (scroll.clone(), swallow_up.clone());
+            window.on_mouse_event(move |e: &MouseDownEvent, phase, window, cx| {
+                if phase != DispatchPhase::Capture || e.button != MouseButton::Left {
+                    return;
+                }
+                let Some(at) = revealed_at(&down_scroll, e.position, window) else { return };
+                cx.stop_propagation();
+                swallow_up.set(true);
+                window.refresh();
+                // Pressed once the frame with the new scroll position is drawn:
+                // what runs on the next frame runs before that frame is drawn
+                window.on_next_frame(move |window, _| {
+                    window.on_next_frame(move |window, cx| press_at_now(window, at, cx));
+                });
+            });
+            window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
+                if phase == DispatchPhase::Capture && up_swallow.replace(false) {
+                    cx.stop_propagation();
+                }
+            });
+        },
     )
+    .absolute()
+    .size_0()
+}
+
+/// A left click at `at`, as the platform delivers one
+fn press_at_now(window: &mut Window, at: Point<Pixels>, cx: &mut App) {
+    let modifiers = window.modifiers();
+    let down =
+        MouseDownEvent { button: MouseButton::Left, position: at, modifiers, click_count: 1, first_mouse: false };
+    window.dispatch_event(down.to_platform_input(), cx);
+    let up = MouseUpEvent { button: MouseButton::Left, position: at, modifiers, click_count: 1 };
+    window.dispatch_event(up.to_platform_input(), cx);
+}
+
+/// For a press at `at` outside the window, over the element `scroll`
+/// scrolls: scrolls it so that the place comes into view and says where it
+/// is then (None: not such a press, or the place cannot be shown)
+fn revealed_at(scroll: &ScrollHandle, at: Point<Pixels>, window: &Window) -> Option<Point<Pixels>> {
+    let height = window.viewport_size().height;
+    let view = scroll.bounds();
+    let outside_window = at.y < px(0.) || at.y > height;
+    if !outside_window || at.x < view.left() || at.x > view.right() {
+        return None;
+    }
+    // A little room from the edge, as when the user scrolls to it
+    let margin = px(48.).min(view.size.height / 2.);
+    let to = if at.y > view.bottom() { view.bottom() - margin } else { view.top() + margin };
+    let (offset, max) = (scroll.offset(), scroll.max_offset());
+    let y = (offset.y + (to - at.y)).clamp(-max.y, px(0.));
+    scroll.set_offset(point(offset.x, y));
+    let shown = point(at.x, at.y + (y - offset.y));
+    (shown.y >= view.top() && shown.y <= view.bottom() && shown.y <= height && shown.y >= px(0.)).then_some(shown)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -441,7 +648,7 @@ pub fn banner(
     actions: Option<AnyElement>,
     on_dismiss: Option<(ElementId, ClickHandler)>,
     cx: &App,
-) -> Div {
+) -> Stateful<Div> {
     let p = cx.palette();
     let (name, line, text) = match kind {
         BannerKind::Info => (IconName::Info, p.border_strong, p.text_2),
@@ -449,7 +656,10 @@ pub fn banner(
         BannerKind::Error => (IconName::ErrorCircle, p.bad_line, p.bad_text),
         BannerKind::Good => (IconName::CheckmarkCircle, p.good_line, p.good_text),
     };
-    div()
+    // An error is told at once, the others as a status when they appear; the
+    // title names it (a banner without one is read by its text)
+    let words = title.clone().unwrap_or_default();
+    alert(child_id("banner", &words), words, kind == BannerKind::Error)
         .flex()
         .items_start()
         .gap(theme::S3)

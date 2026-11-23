@@ -382,6 +382,122 @@ fn a_failed_save_puts_the_point_back(cx: &mut TestAppContext) {
     assert!(cx.read(|cx| app::state(cx).read(cx).notice.is_some()));
 }
 
+/// Whether the right-click menu is open
+fn menu_open(e: &Entity<MediaEqEditor>, cx: &TestAppContext) -> bool {
+    cx.read(|cx| e.read(cx).graph.read(cx).menu.is_some())
+}
+
+/// The open menu's entries of one kind ("choice": a point's types,
+/// "command": the rest), top to bottom: where each is and whether it is off
+fn entries(
+    h: &mut Harness,
+    cx: &mut TestAppContext,
+    w: AnyWindowHandle,
+    kind: &'static str,
+) -> Vec<(Point<Pixels>, bool)> {
+    h.on(cx, w, move |window, _| {
+        window.find_all(kind).into_iter().map(|e| (e.bounds().center(), e.disabled() == Some(true))).collect()
+    })
+}
+
+#[gpui_kit::test]
+fn a_right_click_on_a_point_offers_its_types_and_delete(cx: &mut TestAppContext) {
+    let (mut h, w, e) = open(
+        cx,
+        json!({"enabled": true, "bands": [{"frequency": 1000.0, "gain": 3.0, "q": 1.0, "band_type": "Peaking"}]}),
+        false,
+    );
+    let p = point_at(&e, cx, 0);
+    h.on(cx, w, |window, cx| {
+        move_to(window, p, false, cx);
+        press_at(window, p, MouseButton::Right, 1, cx);
+        release_at(window, p, MouseButton::Right, 1, cx);
+    });
+    assert!(menu_open(&e, cx));
+    assert_eq!(selected(&e, cx), Some(0), "the point is selected");
+    // Its five types, then Delete point
+    let types = entries(&mut h, cx, w, "choice");
+    assert_eq!(types.len(), BAND_TYPES.len());
+    assert_eq!(entries(&mut h, cx, w, "command").len(), 1);
+    // A click on High shelf makes it one and closes the menu
+    let high_shelf = BAND_TYPES.iter().position(|t| *t == EqBandType::HighShelf).unwrap();
+    let at = types[high_shelf].0;
+    h.on(cx, w, |window, cx| click_at(window, at, cx));
+    assert_eq!(saved_bands(&h)[0].band_type, EqBandType::HighShelf);
+    assert!(!menu_open(&e, cx));
+    // Choosing the type it has saves nothing more
+    let n = saves(&h);
+    h.on(cx, w, |window, cx| {
+        press_at(window, p, MouseButton::Right, 1, cx);
+        release_at(window, p, MouseButton::Right, 1, cx);
+    });
+    let at = entries(&mut h, cx, w, "choice")[high_shelf].0;
+    h.on(cx, w, |window, cx| click_at(window, at, cx));
+    assert_eq!(saves(&h), n);
+    // Delete point
+    h.on(cx, w, |window, cx| {
+        press_at(window, p, MouseButton::Right, 1, cx);
+        release_at(window, p, MouseButton::Right, 1, cx);
+    });
+    let at = entries(&mut h, cx, w, "command")[0].0;
+    h.on(cx, w, |window, cx| click_at(window, at, cx));
+    assert!(saved_bands(&h).is_empty());
+    assert!(!menu_open(&e, cx));
+}
+
+#[gpui_kit::test]
+fn a_right_click_on_the_background_adds_a_point_or_resets(cx: &mut TestAppContext) {
+    let (mut h, w, e) = open(cx, json!({"enabled": true, "bands": []}), false);
+    let (at, elsewhere) = (graph_at(&e, cx, 300.0, 100.0), graph_at(&e, cx, 120.0, 200.0));
+    let right_click = |h: &mut Harness, cx: &mut TestAppContext, at: Point<Pixels>| {
+        h.on(cx, w, |window, cx| {
+            move_to(window, at, false, cx);
+            press_at(window, at, MouseButton::Right, 1, cx);
+            release_at(window, at, MouseButton::Right, 1, cx);
+        })
+    };
+    right_click(&mut h, cx, at);
+    // Add point here, then Reset
+    let commands = entries(&mut h, cx, w, "command");
+    assert_eq!(commands.len(), 2);
+    assert_eq!(entries(&mut h, cx, w, "choice").len(), 0);
+    let add = commands[0].0;
+    h.on(cx, w, |window, cx| click_at(window, add, cx));
+    assert_eq!(saved_bands(&h).len(), 1);
+    // Reset puts the ten default points back
+    right_click(&mut h, cx, elsewhere);
+    let reset = entries(&mut h, cx, w, "command")[1];
+    h.on(cx, w, |window, cx| click_at(window, reset.0, cx));
+    assert_eq!(saved_bands(&h), DEFAULT_POINTS.to_vec());
+    // Escape closes the menu without doing anything
+    right_click(&mut h, cx, elsewhere);
+    let n = saves(&h);
+    h.on(cx, w, |window, cx| window.press("escape", cx));
+    assert!(!menu_open(&e, cx));
+    assert_eq!(saves(&h), n);
+}
+
+#[gpui_kit::test]
+fn the_menu_key_opens_a_focused_points_menu_and_the_keys_choose(cx: &mut TestAppContext) {
+    let (mut h, w, e) = open(
+        cx,
+        json!({"enabled": true, "bands": [{"frequency": 1000.0, "gain": 3.0, "q": 1.0, "band_type": "Peaking"}]}),
+        false,
+    );
+    let p = point_at(&e, cx, 0);
+    h.on(cx, w, |window, cx| click_at(window, p, cx));
+    h.on(cx, w, |window, cx| window.press("menu", cx));
+    assert!(menu_open(&e, cx));
+    // Down to the second type (Low shelf), Enter chooses it
+    h.on(cx, w, |window, cx| {
+        window.press("down", cx);
+        window.press("down", cx);
+    });
+    h.on(cx, w, |window, cx| window.press("enter", cx));
+    assert_eq!(saved_bands(&h)[0].band_type, BAND_TYPES[1]);
+    assert!(!menu_open(&e, cx));
+}
+
 #[gpui_kit::test]
 fn the_switch_turns_it_on_with_the_ten_default_points(cx: &mut TestAppContext) {
     let (mut h, w, _e) = open(cx, json!({"enabled": false, "bands": []}), false);

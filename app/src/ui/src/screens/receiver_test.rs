@@ -488,7 +488,8 @@ impl ReceiverTest {
             )
             .when_some(found, |d, f| d.child(f))
             .child(
-                div()
+                // Read out as it changes, as the old UI's status line
+                ui::alert("receiver-status", status.lines.join("\n"), false)
                     .flex()
                     .flex_col()
                     .gap(theme::S1)
@@ -847,3 +848,6 @@ impl Render for ReceiverTest {
             .child(self.log_section(cx))
     }
 }
+
+#[cfg(test)]
+mod interaction_tests;

@@ -434,12 +434,42 @@ impl Render for FlyoutRoot {
                     .size_full(),
                 ),
             )
+            .child(crate::ui::frame_drawn())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use gpui_kit::TestAppContext;
+    use gpui_kit::test::TestWindowExt as _;
+
     use super::*;
+    use crate::testing::{Harness, snapshot};
+
+    /// The flyout's page in a test window, known as the flyout
+    fn open_flyout(cx: &mut TestAppContext) -> (Harness, AnyWindowHandle) {
+        let mut h = Harness::start(cx, snapshot());
+        let (w, _) =
+            h.open_sized(cx, (FLYOUT_WIDTH, FLYOUT_HEIGHT), |window, cx| cx.new(|cx| FlyoutRoot::new(window, cx)));
+        cx.update(|cx| flyout(cx).window = Some(w));
+        h.settle(cx);
+        (h, w)
+    }
+
+    fn is_open(cx: &mut TestAppContext) -> bool {
+        cx.update(open)
+    }
+
+    #[gpui_kit::test]
+    fn escape_closes_the_flyout(cx: &mut TestAppContext) {
+        let (mut h, w) = open_flyout(cx);
+        // Another key leaves it
+        h.on(cx, w, |window, cx| window.press("a", cx));
+        assert!(is_open(cx));
+        h.on(cx, w, |window, cx| window.press("escape", cx));
+        assert!(!is_open(cx), "Escape closed it");
+        assert!(cx.update(|cx| cx.windows().iter().all(|x| x.window_id() != w.window_id())), "its window went");
+    }
 
     #[test]
     fn flyout_stands_above_the_panels_or_beside_them() {

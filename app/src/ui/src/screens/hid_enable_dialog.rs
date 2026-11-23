@@ -46,7 +46,10 @@ pub struct HidEnableDialog {
 /// Opens the dialog
 pub fn open_hid_enable_dialog(window: &mut Window, cx: &mut App) {
     let state = cx.new(|cx| HidEnableDialog::new(window, cx));
-    window.open_dialog(cx, move |dialog, _, cx| HidEnableDialog::build(&state, dialog, cx));
+    window.open_dialog(cx, move |dialog, window, cx| {
+        let dialog = dialog.width(ui::dialog::width(window, cx));
+        HidEnableDialog::build(&state, dialog, cx)
+    });
 }
 
 impl HidEnableDialog {
@@ -175,7 +178,6 @@ impl HidEnableDialog {
             });
         let busy_now = state.clone();
         dialog
-            .width(px(480.))
             .title(warn_title(t("ui.dev.hid_enable_title"), cx))
             .close_button(false)
             .keyboard(!busy)
