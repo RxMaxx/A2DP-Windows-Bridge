@@ -711,8 +711,13 @@ impl<'a> LeCtx<'a> {
     /// resolved with its IRK: they no longer stand for the device
     fn delete_bond(&mut self, identity: LeAddr) {
         self.stack.le_delete_bonding(identity.addr_type, &identity.addr);
-        self.core.rpa_cache.retain(|_, e| !(e.ok && e.identity.addr == identity.addr));
-        for r in self.core.scan_results.iter_mut().filter(|r| r.identity.is_some_and(|i| i.addr == identity.addr)) {
+        self.forget_identity(&identity.addr);
+    }
+
+    /// The RPAs resolved with the IRK of `identity`, whose bond is gone
+    fn forget_identity(&mut self, identity: &[u8; 6]) {
+        self.core.rpa_cache.retain(|_, e| !(e.ok && e.identity.addr == *identity));
+        for r in self.core.scan_results.iter_mut().filter(|r| r.identity.is_some_and(|i| i.addr == *identity)) {
             r.identity = None;
         }
     }
@@ -908,6 +913,12 @@ impl<'a> LeCtx<'a> {
                 } else if let Some(b) = events::bonding_deleted(p) {
                     tracing::debug!("LE Audio: bonding deleted (le_device_db index {})", b.index);
                     self.core.server.on_bonding_deleted(self.stack, b.index as usize);
+                    // A bond that made room for a new one (the warning is
+                    // logged there): as if the user had forgotten it
+                    for e in self.stack.take_evicted_le_bonds() {
+                        self.forget_identity(&e.addr);
+                        super::modules::csip::forget_stored(self, e.addr);
+                    }
                 }
             }
             HCI_EVENT_ENCRYPTION_CHANGE | HCI_EVENT_ENCRYPTION_CHANGE_V2 => {
