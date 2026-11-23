@@ -430,6 +430,8 @@ pub fn le_hidden_patch_event(packet: &mut [u8]) {
 
 /// Actions ATS2851 dongles ("Actions general adapter")
 pub const ATS2851: (u16, u16) = (0x10D7, 0xB012);
+/// CSR8510 A10 dongles, many of them clones ("CSR8510 A10", HCI version 10)
+pub const CSR8510: (u16, u16) = (0x0A12, 0x0001);
 
 /// The supported-commands bits (octet, bit) to clear for an adapter that
 /// lists commands it answers wrongly, so BTstack takes the path it has for a
@@ -438,10 +440,15 @@ pub const ATS2851: (u16, u16) = (0x10D7, 0xB012);
 /// takes the key size as 16), Write Default Erroneous Data Reporting, LE Set
 /// Address Resolution Enable and LE Set Extended Advertising Enable
 /// (BTstack's switch to the extended LE commands, which the chip also
-/// refuses)
+/// refuses). CSR8510: the SCO commands of HCI init
+/// ([`SCO_INIT_COMMAND_BITS`]): Write Synchronous Flow Control Enable gets
+/// no answer, and the controller then answers nothing, not even HCI Reset,
+/// until it is unplugged (issue #569). BTstack then paces SCO itself, as for
+/// any controller without the command.
 pub fn broken_command_bits(vid: u16, pid: u16) -> &'static [(usize, u8)] {
     match (vid, pid) {
         ATS2851 => &[(18, 3), (20, 4), (35, 1), (36, 5)],
+        CSR8510 => &SCO_INIT_COMMAND_BITS,
         _ => &[],
     }
 }
@@ -945,6 +952,19 @@ mod tests {
         assert!(set_sco_hidden(false));
         assert!(!sco_hidden());
         assert!(set_sco_hidden(true));
+    }
+
+    #[test]
+    fn the_csr8510_never_gets_the_sco_init_commands() {
+        // Hidden even with voice: the chip hangs on Write Synchronous Flow
+        // Control Enable (issue #569)
+        assert_eq!(broken_command_bits(0x0A12, 0x0001), &SCO_INIT_COMMAND_BITS);
+        // Its answer from issue #569: octet 10 = 0xFF, octet 18 = 0x8F
+        let mut commands = [0u8; 64];
+        (commands[10], commands[18]) = (0xFF, 0x8F);
+        let mut p = command_complete(0x1002, &commands);
+        patch_broken_commands(&mut p, broken_command_bits(0x0A12, 0x0001));
+        assert_eq!((p[6 + 10], p[6 + 18]), (0xEF, 0x87));
     }
 
     #[test]
