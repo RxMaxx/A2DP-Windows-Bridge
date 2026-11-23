@@ -1060,3 +1060,6 @@ impl Render for Adapter {
         div().relative().size_full().child(page).vertical_scrollbar(&self.scroll).into_any_element()
     }
 }
+
+#[cfg(test)]
+mod interaction_tests;

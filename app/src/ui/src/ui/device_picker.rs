@@ -254,7 +254,8 @@ impl DevicePicker {
             }
         })
         .detach();
-        let new_name = cx.new(|cx| InputState::new(window, cx));
+        // 64 at most, counted as the old UI's maxLength did (UTF-16 units)
+        let new_name = cx.new(|cx| InputState::new(window, cx).validate(|s, _| s.encode_utf16().count() <= 64));
         cx.subscribe_in(&new_name, window, |this: &mut Self, _, e: &InputEvent, window, cx| match e {
             InputEvent::Change => cx.notify(),
             InputEvent::PressEnter { .. } => this.rename(window, cx),
@@ -1054,3 +1055,6 @@ impl Render for DevicePicker {
         root
     }
 }
+
+#[cfg(test)]
+mod interaction_tests;

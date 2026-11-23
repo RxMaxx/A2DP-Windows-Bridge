@@ -26,5 +26,9 @@ ui-host.workspace = true
 raw-window-handle = "0.6"
 windows-version = "0.1"
 
+[dev-dependencies]
+# Headless windows driven by pointer, keyboard and wheel input (src/testing.rs)
+gpui-kit = { version = "0.11", default-features = false, features = ["component", "assets", "test-support"] }
+
 [lints]
 workspace = true

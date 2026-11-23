@@ -305,13 +305,15 @@ impl VolumeControl {
     fn send(&mut self, pct: u32, cx: &mut Context<Self>) {
         // At most ten requests a second while dragging, and the final value
         self.pending = None;
+        // The executor's clock: the wall clock, and the test clock in tests
         let go = move |this: &mut VolumeControl, cx: &mut Context<Self>| {
-            this.last_sent = Some(Instant::now());
+            this.last_sent = Some(cx.background_executor().now());
             let volume = percent_to_volume(pct).min(127) as u8;
             // Fire and forget: a failure shows as the slider coming back
             drop(app::request::<serde_json::Value>(Method::StreamSetVolume { volume }, cx));
         };
-        let since = self.last_sent.map_or(Duration::MAX, |t| t.elapsed());
+        let now = cx.background_executor().now();
+        let since = self.last_sent.map_or(Duration::MAX, |t| now.saturating_duration_since(t));
         let Some(wait) = Duration::from_millis(100).checked_sub(since).filter(|w| !w.is_zero()) else {
             go(self, cx);
             return;
@@ -1306,3 +1308,6 @@ pub fn v1_running(cx: &App) -> Option<AnyElement> {
             .into_any_element(),
     )
 }
+
+#[cfg(test)]
+mod slider_tests;

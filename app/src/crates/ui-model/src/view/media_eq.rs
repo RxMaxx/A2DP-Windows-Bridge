@@ -326,7 +326,8 @@ pub fn eq_controls(eq: &MediaEq, has_entry: bool, selected: Option<usize>) -> Eq
 /// A number field's text: the value, empty while there is none (or the field is disabled)
 pub fn field_text(value: Option<f32>, enabled: bool) -> String {
     match value {
-        Some(v) if enabled => crate::i18n::js_number(f64::from(v)),
+        // The f32's shortest form: 0.1, not 0.10000000149011612
+        Some(v) if enabled => crate::i18n::js_number(v.to_string().parse().unwrap_or(f64::from(v))),
         _ => String::new(),
     }
 }
@@ -387,6 +388,10 @@ mod tests {
         let c = eq_controls(&on(bands.clone()), true, Some(0));
         assert!(c.frequency);
         assert_eq!(field_text(Some(p.frequency), c.frequency), "1000");
+        // A stored f32 shows as typed
+        assert_eq!(field_text(Some(0.1), true), "0.1");
+        assert_eq!(field_text(Some(-2.3), true), "-2.3");
+        assert_eq!(field_text(Some(0.99), true), "0.99");
     }
 
     #[test]

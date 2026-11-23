@@ -169,11 +169,18 @@ fn select_named<T: Clone + PartialEq + 'static>(
                 }
             }
             let (v, on_change) = (c.value.clone(), on_change.clone());
-            let mut item = PopupMenuItem::new(c.label.clone()).checked(c.value == value).disabled(c.disabled);
+            let chosen = c.value == value;
+            let mut item = PopupMenuItem::new(c.label.clone()).checked(chosen).disabled(c.disabled);
             if let Some(i) = c.icon {
                 item = item.icon(icon(i));
             }
-            menu = menu.item(item.on_click(move |_: &ClickEvent, window, cx| on_change(&v, window, cx)));
+            // The value it has chosen again changes nothing (as a list in a
+            // browser): the flyout's device list would start its stream again
+            menu = menu.item(item.on_click(move |_: &ClickEvent, window, cx| {
+                if !chosen {
+                    on_change(&v, window, cx);
+                }
+            }));
         }
         menu
     })

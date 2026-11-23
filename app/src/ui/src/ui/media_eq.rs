@@ -31,11 +31,11 @@ use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::{Disableable as _, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Anchor, App, AppContext as _, AsyncApp, Bounds, ClickEvent, Context, CursorStyle, DismissEvent, Div, Entity,
-    EventEmitter, FocusHandle, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render, Role,
-    ScrollDelta, ScrollEvent, StatefulInteractiveElement as _, Styled as _, Subscription, Task, WeakEntity, Window,
-    anchored, canvas, deferred, div, point, px, relative,
+    AccessibleAction, Anchor, App, AppContext as _, AsyncApp, Bounds, ClickEvent, Context, CursorStyle, DismissEvent,
+    Div, Entity, EventEmitter, FocusHandle, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render,
+    Role, ScrollDelta, ScrollEvent, StatefulInteractiveElement as _, Styled as _, Subscription, Task, WeakEntity,
+    Window, anchored, canvas, deferred, div, point, px, relative,
 };
 use ipc::{Device, EqBandType, EqPoint, MediaEq, Method, StreamState};
 use ui_model::eq::{
@@ -172,7 +172,13 @@ impl MediaEqEditor {
         }));
         let mut fields = Vec::new();
         for kind in [FieldKind::Frequency, FieldKind::Gain, FieldKind::Q] {
-            let input = cx.new(|cx| InputState::new(window, cx));
+            // No step of the box's own: the arrow keys and buttons come here
+            // as Step, step by the field's own amount and save at once
+            let input = cx.new(|cx| {
+                let mut s = InputState::new(window, cx);
+                s.set_step(None, window, cx);
+                s
+            });
             subs.push(cx.subscribe_in(&input, window, move |this: &mut Self, _, ev: &InputEvent, _, cx| {
                 if matches!(ev, InputEvent::PressEnter { .. } | InputEvent::Blur) {
                     this.field_done(kind, cx);
@@ -213,7 +219,8 @@ impl MediaEqEditor {
 
     fn send_preview(&mut self, cx: &mut Context<Self>) {
         self.pending_preview = None;
-        self.last_preview = Some(Instant::now());
+        // The executor's clock: the wall clock, and the test clock in tests
+        self.last_preview = Some(cx.background_executor().now());
         let (Some(p), Some(d)) = (self.entry(cx).and_then(|e| e.profile), self.draft.clone()) else { return };
         let core = app::core(cx);
         let Some(snap) = core.read(cx).snap() else { return };
@@ -229,7 +236,8 @@ impl MediaEqEditor {
         if self.pending_preview.is_some() {
             return;
         }
-        let since = self.last_preview.map_or(u64::MAX, |t| t.elapsed().as_millis() as u64);
+        let now = cx.background_executor().now();
+        let since = self.last_preview.map_or(u64::MAX, |t| now.saturating_duration_since(t).as_millis() as u64);
         let wait = PREVIEW_MS.saturating_sub(since);
         self.pending_preview = Some(cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             cx.background_executor().timer(Duration::from_millis(wait)).await;
@@ -462,8 +470,9 @@ impl Render for MediaEqEditor {
                                 .disabled(!c.delete)
                                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.delete_selected(cx))),
                         )
-                        .child(div().min_w(px(72.)).child(ui::select(
+                        .child(div().min_w(px(72.)).child(ui::select_labelled(
                             "eq-point",
+                            t("eq.point"),
                             &selected.map_or(-1, |i| i as i32),
                             point_choices,
                             !c.point_pick,
@@ -474,8 +483,9 @@ impl Render for MediaEqEditor {
                         ))),
                 ),
             )
-            .child(eq_field(t("eq.type"), cx).child(div().min_w(px(112.)).child(ui::select(
+            .child(eq_field(t("eq.type"), cx).child(div().min_w(px(112.)).child(ui::select_labelled(
                 "eq-type",
+                t("eq.type"),
                 &sel.map_or(EqBandType::Peaking, |b| b.band_type),
                 type_choices,
                 !c.type_pick,
@@ -894,40 +904,44 @@ impl EqGraph {
             .when(halo, |d| d.bg(Hsla { a: 0.22, ..p.accent_fill }))
             .when(focused && !self.disabled, |d| d.border_2().border_color(p.focus))
             .when(!self.disabled, |d| {
-                d.cursor(if self.drag.is_some() { CursorStyle::ClosedHand } else { CursorStyle::OpenHand })
-                    .track_focus(&self.focus[i])
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, ev: &MouseDownEvent, window, cx| this.on_point_down(i, ev, window, cx)),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
-                            cx.stop_propagation();
-                            if this.disabled {
-                                return;
-                            }
-                            let Some(b) = this.bands.get(i).copied() else { return };
-                            this.select(Some(i), cx);
-                            this.open_menu(
-                                Some(i),
-                                (x_of(f64::from(b.frequency)), point_y(&b)),
-                                ev.position,
-                                window,
-                                cx,
-                            );
-                        }),
-                    )
-                    .on_scroll(cx.listener(move |this, ev: &ScrollEvent, _, cx| this.on_wheel(i, ev, cx)))
-                    .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, window, cx| this.on_key(i, ev, window, cx)))
-                    .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                        if *hovered {
-                            this.hover = Some(i);
-                        } else if this.hover == Some(i) {
-                            this.hover = None;
-                        }
+                // Pressed by assistive technology: selected, as by a click,
+                // for the boxes under the graph
+                let weak = cx.entity().downgrade();
+                d.on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.focus[i].focus(window, cx);
+                        this.select(Some(i), cx);
                         cx.notify();
-                    }))
+                    });
+                })
+                .cursor(if self.drag.is_some() { CursorStyle::ClosedHand } else { CursorStyle::OpenHand })
+                .track_focus(&self.focus[i])
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, ev: &MouseDownEvent, window, cx| this.on_point_down(i, ev, window, cx)),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
+                        cx.stop_propagation();
+                        if this.disabled {
+                            return;
+                        }
+                        let Some(b) = this.bands.get(i).copied() else { return };
+                        this.select(Some(i), cx);
+                        this.open_menu(Some(i), (x_of(f64::from(b.frequency)), point_y(&b)), ev.position, window, cx);
+                    }),
+                )
+                .on_scroll(cx.listener(move |this, ev: &ScrollEvent, _, cx| this.on_wheel(i, ev, cx)))
+                .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, window, cx| this.on_key(i, ev, window, cx)))
+                .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                    if *hovered {
+                        this.hover = Some(i);
+                    } else if this.hover == Some(i) {
+                        this.hover = None;
+                    }
+                    cx.notify();
+                }))
             })
             .child(
                 div()
@@ -1080,3 +1094,6 @@ impl Render for EqGraph {
             .children(menu)
     }
 }
+
+#[cfg(test)]
+mod interaction_tests;

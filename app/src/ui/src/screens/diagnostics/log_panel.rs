@@ -11,7 +11,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, ClickEvent, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement, KeyDownEvent,
-    ParentElement as _, Render, ScrollStrategy, SharedString, StatefulInteractiveElement as _, Styled as _,
+    ParentElement as _, Render, Role, ScrollStrategy, SharedString, StatefulInteractiveElement as _, Styled as _,
     UniformListScrollHandle, Window, div, px, uniform_list,
 };
 use ipc::{LogLevel, LogLine};
@@ -315,9 +315,17 @@ impl LogPanel {
                 };
                 // One line each: the list needs lines of one height (a copy has the whole text)
                 let msg = if m { mask_identifiers(&l.message) } else { l.message.clone() }.replace(['\r', '\n'], " ");
+                // Assistive technology reads the whole message (the row cuts
+                // it) and selects a row as a click does
+                let name = format!("{} {} {}", level_name(l.level).to_uppercase(), l.target, msg);
                 Some(
                     div()
                         .id(("log-line", ix))
+                        .role(Role::ListItem)
+                        .aria_label(name)
+                        .aria_selected(selected)
+                        // The list's width: the whole row is clicked and highlighted
+                        .w_full()
                         .h(px(LINE_H))
                         .flex()
                         .items_center()
@@ -490,3 +498,6 @@ impl Render for LogPanel {
         div().flex().flex_col().gap(theme::S3).child(tools).child(actions).child(log)
     }
 }
+
+#[cfg(test)]
+mod interaction_tests;

@@ -204,8 +204,11 @@ pub fn show(
             .close_button(false)
             // Escape, the backdrop: as Cancel
             .on_cancel(veto)
-            // Enter presses the focused button only
-            .on_ok(|_, _, _| false)
+            // Enter presses the focused button only: the key goes on to it
+            .on_ok(|_, _, cx| {
+                cx.propagate();
+                false
+            })
             .child(div().flex().flex_col().gap(theme::S3).child(body(window, cx)));
         let Some(label) = q.confirm.clone() else { return dialog };
         let mut footer = DialogFooter::new().child({
@@ -332,3 +335,6 @@ fn set(busy: &Entity<bool>, value: bool, cx: &mut App) {
     });
     cx.refresh_windows();
 }
+
+#[cfg(test)]
+mod interaction_tests;

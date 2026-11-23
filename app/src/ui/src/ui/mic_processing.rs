@@ -266,3 +266,6 @@ impl Render for MicProcessingControls {
         out
     }
 }
+
+#[cfg(test)]
+mod slider_tests;

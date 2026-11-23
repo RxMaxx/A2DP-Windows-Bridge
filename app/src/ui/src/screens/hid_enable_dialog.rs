@@ -5,7 +5,7 @@
 //! risks are on screen long enough to be read. The core checks the code
 //! and the statements again (hid.enable).
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::checkbox::Checkbox;
@@ -62,11 +62,13 @@ impl HidEnableDialog {
                 _ => {}
             }),
         ];
-        let opened = Instant::now();
+        // The executor's clock: the wall clock, and the test clock in tests
+        let opened = cx.background_executor().now();
         let timer = cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             loop {
                 cx.background_executor().timer(Duration::from_millis(250)).await;
-                let left = wait_left(opened.elapsed().as_millis() as u64);
+                let elapsed = cx.background_executor().now().saturating_duration_since(opened);
+                let left = wait_left(elapsed.as_millis() as u64);
                 let alive = this.update(cx, |this, cx| {
                     this.left = left;
                     cx.notify();
@@ -180,6 +182,12 @@ impl HidEnableDialog {
             .overlay_closable(!busy)
             // While the confirmed request runs the dialog stays
             .on_cancel(move |_, _, cx| !busy_now.read(cx).busy)
+            // Enter confirms through the code field only (once ready), or
+            // presses the focused button; it never closes the dialog by itself
+            .on_ok(|_, _, cx| {
+                cx.propagate();
+                false
+            })
             .child(state.clone())
             .footer(DialogFooter::new().child(cancel).child(confirm).into_any_element())
     }
@@ -191,7 +199,13 @@ impl Render for HidEnableDialog {
         let service = self.core.read(cx).snap().is_some_and(|s| s.service_mode);
         let lead = t(if service { "ui.dev.hid_enable_lead_service" } else { "ui.dev.hid_enable_lead" });
         let risks = risks(service).iter().map(|k| {
-            div().flex().items_start().gap(theme::S2).child(div().child("•")).child(div().flex_1().child(t(k)))
+            // min_w_0: the text wraps inside the dialog instead of widening the row
+            div()
+                .flex()
+                .items_start()
+                .gap(theme::S2)
+                .child(div().child("•"))
+                .child(div().flex_1().min_w_0().child(t(k)))
         });
         div()
             .flex()
@@ -253,3 +267,6 @@ impl Render for HidEnableDialog {
             )
     }
 }
+
+#[cfg(test)]
+mod interaction_tests;

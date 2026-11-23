@@ -337,14 +337,14 @@ impl Render for Auracast {
                 t("ui.dev.auracast_name"),
                 None,
                 name_error.map(Into::into),
-                Input::new(&self.name).disabled(locked).w(px(260.)),
+                Input::new(&self.name).aria_label(t("ui.dev.auracast_name")).disabled(locked).w(px(260.)),
                 cx,
             ))
             .child(ui::field(
                 t("ui.dev.auracast_code"),
                 None,
                 code_error.map(Into::into),
-                Input::new(&self.code).disabled(locked).w(px(260.)),
+                Input::new(&self.code).aria_label(t("ui.dev.auracast_code")).disabled(locked).w(px(260.)),
                 cx,
             ))
             .child(choice(

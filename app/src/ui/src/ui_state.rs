@@ -47,9 +47,9 @@ fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     f(store)
 }
 
-/// `ui-state.json` in the user's folder; None for the demo state
+/// `ui-state.json` in the user's folder; None for the demo state and in tests
 fn file_path() -> Option<PathBuf> {
-    if std::env::var_os("BLUECASTER_UI_DEMO").is_some() {
+    if cfg!(test) || std::env::var_os("BLUECASTER_UI_DEMO").is_some() {
         return None;
     }
     Some(ui_host::logging::paths::user_config_dir().join(FILE_NAME))

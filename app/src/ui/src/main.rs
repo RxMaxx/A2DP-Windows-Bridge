@@ -17,6 +17,8 @@ mod flyout_window;
 mod host;
 mod screens;
 mod shell;
+#[cfg(test)]
+mod testing;
 mod theme;
 mod ui;
 mod ui_state;
@@ -93,13 +95,7 @@ fn main() {
             .detach();
         }
 
-        // Ctrl+Shift+D opens the diagnostics (v1's Debug Console shortcut)
-        cx.bind_keys([KeyBinding::new("ctrl-shift-d", OpenDiagnostics, None)]);
-        cx.on_action(|_: &OpenDiagnostics, cx| {
-            if !app::state(cx).read(cx).setup_active {
-                app::navigate(RouteName::Diagnostics, cx);
-            }
-        });
+        bind_shortcuts(cx);
 
         if let Some(route) = demo::route() {
             // Demo only: "flyout" shows the tray flyout instead of the main window
@@ -123,6 +119,17 @@ fn main() {
     drop(primary);
     ui_host::recovery::relaunch_if_due();
     drop(log);
+}
+
+/// Ctrl+Shift+D opens the diagnostics (v1's Debug Console shortcut), not
+/// while the first-run setup shows
+fn bind_shortcuts(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new("ctrl-shift-d", OpenDiagnostics, None)]);
+    cx.on_action(|_: &OpenDiagnostics, cx| {
+        if !app::state(cx).read(cx).setup_active {
+            app::navigate(RouteName::Diagnostics, cx);
+        }
+    });
 }
 
 fn on_host_event(event: HostEvent, cx: &mut App) {

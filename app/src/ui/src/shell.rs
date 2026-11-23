@@ -341,3 +341,6 @@ pub fn notice_line(cx: &App) -> impl IntoElement + use<> {
         )
     })
 }
+
+#[cfg(test)]
+mod interaction_tests;

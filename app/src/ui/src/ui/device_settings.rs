@@ -311,8 +311,9 @@ impl Render for DeviceSettings {
             .items_center()
             .gap(theme::S2)
             .child(icon(source_icon))
-            .child(div().flex_1().min_w(px(192.)).child(super::select(
+            .child(div().flex_1().min_w(px(192.)).child(super::select_labelled(
                 "capture-source",
+                t("capture.mode"),
                 &capture_value(&shown),
                 sources,
                 false,

@@ -1211,8 +1211,9 @@ impl DeviceCodecs {
                 let mono = card.id == LE_MIC_CARD.id || !e.le_audio;
                 let w = weak.clone();
                 let rate_control: AnyElement = match choice {
-                    Some(options) => ui::select(
+                    Some(options) => ui::select_labelled(
                         "mic-rate",
+                        t("connection.sample_rate"),
                         &shown.mic_rate,
                         options.into_iter().map(|o| Choice::new(o.value, o.label)).collect(),
                         locked,
@@ -1374,3 +1375,6 @@ impl Render for DeviceCodecs {
         ui::card(cx).min_w_0().child(self.head(&e, state, cx)).child(body)
     }
 }
+
+#[cfg(test)]
+mod interaction_tests;

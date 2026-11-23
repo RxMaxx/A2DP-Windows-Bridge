@@ -97,9 +97,22 @@ fn copy(text: String, cx: &mut App) {
 }
 
 /// A table's look: a heading row, then rows with a line between them
-fn table(head: [String; 2], rows: Vec<Div>, cx: &App) -> Div {
+/// The two columns' widths: a fixed one, or None for the rest. The rows use
+/// the same, so a heading stands over its column.
+type Widths = [Option<gpui_kit::Pixels>; 2];
+const KEY_COLUMNS: Widths = [Some(px(160.)), None];
+const SERVICE_COLUMNS: Widths = [None, Some(px(300.))];
+
+/// A cell of a column of `widths`
+fn column(widths: Widths, i: usize) -> Div {
+    match widths[i] {
+        Some(w) => div().w(w).flex_none(),
+        None => div().flex_1().min_w_0(),
+    }
+}
+
+fn table(head: [String; 2], widths: Widths, rows: Vec<Div>, cx: &App) -> Div {
     let p = *cx.palette();
-    let cell = |text: String| div().flex_1().min_w_0().child(text);
     div()
         .flex()
         .flex_col()
@@ -113,7 +126,7 @@ fn table(head: [String; 2], rows: Vec<Div>, cx: &App) -> Div {
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(p.text_2)
                 .text_size(theme::FS_12)
-                .children(head.map(cell)),
+                .children(head.into_iter().enumerate().map(|(i, h)| column(widths, i).child(h))),
         )
         .children(rows.into_iter().map(|r| r.py(theme::S2).border_t_1().border_color(p.border)))
 }
@@ -141,8 +154,8 @@ fn key_row(i: usize, row: KeyRow, cx: &App) -> Div {
         .flex()
         .items_center()
         .gap(theme::S3)
-        .child(div().w(px(160.)).flex_none().font_weight(FontWeight::SEMIBOLD).child(row.name))
-        .child(div().flex_1().min_w_0().child(value))
+        .child(column(KEY_COLUMNS, 0).font_weight(FontWeight::SEMIBOLD).child(row.name))
+        .child(column(KEY_COLUMNS, 1).child(value))
 }
 
 fn body(state: &Entity<PairingState>, cx: &App) -> AnyElement {
@@ -164,7 +177,7 @@ fn body(state: &Entity<PairingState>, cx: &App) -> AnyElement {
         match s.pairing.as_ref().filter(|_| s.keys_open) {
             Some(Ok(pairing)) => {
                 let rows = key_rows(le, pairing).into_iter().enumerate().map(|(i, r)| key_row(i, r, cx)).collect();
-                part.child(table([t("ui.pairing.col_name"), t("ui.pairing.col_value")], rows, cx))
+                part.child(table([t("ui.pairing.col_name"), t("ui.pairing.col_value")], KEY_COLUMNS, rows, cx))
                     // Why there are no LE keys (issue #86)
                     .when_some(le_missing_text(pairing), |d, why| d.child(hint(why).mt(theme::S2)))
             }
@@ -188,11 +201,10 @@ fn body(state: &Entity<PairingState>, cx: &App) -> AnyElement {
                     .iter()
                     .map(|r| {
                         let name = service_label(r).unwrap_or_else(|| t("ui.pairing.unknown_service"));
-                        div().flex().items_start().gap(theme::S3).child(div().flex_1().min_w_0().child(name)).child(
-                            div()
+                        div().flex().items_start().gap(theme::S3).child(column(SERVICE_COLUMNS, 0).child(name)).child(
+                            column(SERVICE_COLUMNS, 1)
                                 .flex()
                                 .flex_col()
-                                .flex_none()
                                 .font_family(theme::FONT_MONO)
                                 .text_size(theme::FS_12)
                                 .text_color(p.text_2)
@@ -200,7 +212,7 @@ fn body(state: &Entity<PairingState>, cx: &App) -> AnyElement {
                         )
                     })
                     .collect();
-                d.child(table([t("ui.pairing.col_name"), t("ui.pairing.col_guid")], rows, cx))
+                d.child(table([t("ui.pairing.col_name"), t("ui.pairing.col_guid")], SERVICE_COLUMNS, rows, cx))
             }),
     };
     div()

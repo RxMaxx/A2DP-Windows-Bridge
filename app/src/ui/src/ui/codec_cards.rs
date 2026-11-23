@@ -221,10 +221,8 @@ pub fn codec_card(
                         cx.stop_propagation();
                         on_move(by, window, cx);
                     }
-                } else if !m.modified() && (k.key == "space" || k.key == "enter") && !selected {
-                    cx.stop_propagation();
-                    (a.on_pick)(window, cx);
                 }
+                // Enter and Space on the focused card are a click (below), once
             })
         })
         .on_click({
@@ -443,9 +441,11 @@ fn hint_of(key: &str) -> Option<SharedString> {
     Some(t(key).into())
 }
 
-/// A setting as a value or a list
+/// A setting as a value or a list (named by its field's `label` for
+/// assistive technology)
 fn field_control<T: Clone + PartialEq + 'static>(
     id: &'static str,
+    label: impl Into<SharedString>,
     f: &Field<T>,
     on_change: impl Fn(&T, &mut Window, &mut App) + 'static,
     cx: &App,
@@ -454,7 +454,7 @@ fn field_control<T: Clone + PartialEq + 'static>(
         Field::Fixed(text) => value_box(text.clone(), cx).into_any_element(),
         Field::Choice { value, options, disabled } => {
             let choices = options.iter().map(|o| Choice::new(o.value.clone(), o.label.clone())).collect();
-            super::select(id, value, choices, *disabled, on_change).into_any_element()
+            super::select_labelled(id, label, value, choices, *disabled, on_change).into_any_element()
         }
     }
 }
@@ -494,6 +494,7 @@ impl Render for CodecSettings {
                 None,
                 field_control(
                     "codec-quality",
+                    t("connection.quality"),
                     &view.quality,
                     cx.listener(|this, q: &String, _, cx| this.change(Change::Quality(q.clone()), cx)),
                     cx,
@@ -507,6 +508,7 @@ impl Render for CodecSettings {
                 None,
                 field_control(
                     "codec-rate",
+                    t("connection.sample_rate"),
                     &view.rate,
                     cx.listener(|this, r: &u32, _, cx| this.change(Change::SampleRate(*r), cx)),
                     cx,
@@ -520,6 +522,7 @@ impl Render for CodecSettings {
                 None,
                 field_control(
                     "codec-depth",
+                    t("connection.bit_depth"),
                     &view.depth,
                     cx.listener(|this, b: &u32, _, cx| this.change(Change::BitDepth(*b), cx)),
                     cx,
@@ -576,6 +579,7 @@ impl Render for CodecSettings {
                         None,
                         field_control(
                             id,
+                            f.title.clone(),
                             &f.field,
                             cx.listener(move |this, v: &String, _, cx| this.change(frame_change(key, v), cx)),
                             cx,

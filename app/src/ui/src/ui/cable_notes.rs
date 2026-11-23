@@ -19,7 +19,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui_kit::component::link::Link;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, AsyncApp, Context, Entity, FontWeight, IntoElement, ParentElement as _, Render, RenderOnce,
@@ -42,9 +42,10 @@ use crate::ui::{self, ButtonKind, IconName, icon};
 /// Reads Windows' outputs again (the owner's list)
 pub type Reload = Rc<dyn Fn(&mut App)>;
 
-/// A link to a page, opened in the browser
-fn link(id: impl Into<gpui_kit::ElementId>, url: &'static str, label: impl Into<SharedString>) -> Link {
-    Link::new(id).child(label.into()).on_click(move |_, _, cx| host::open_url(url, cx))
+/// A link to a page, opened in the browser (a link button: assistive
+/// technology finds and presses it, which it cannot with a plain `Link`)
+fn link(id: impl Into<gpui_kit::ElementId>, url: &'static str, label: impl Into<SharedString>) -> Button {
+    Button::new(id).link().label(label.into()).on_click(move |_, _, cx| host::open_url(url, cx))
 }
 
 /// VB-Audio's name for it, and that it is donationware: a link to its site

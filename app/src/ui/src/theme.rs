@@ -228,7 +228,9 @@ pub fn refresh(cx: &mut App) {
             matches!(cx.window_appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark)
         }
     };
-    let accent = win_sys::accent::accent_colors().and_then(|a| parse_hex(if dark { &a.dark } else { &a.light }));
+    // Tests keep to the default accent: they read nothing of the PC's
+    let accent = if cfg!(test) { None } else { win_sys::accent::accent_colors() }
+        .and_then(|a| parse_hex(if dark { &a.dark } else { &a.light }));
     let palette = Palette::new(dark, accent);
     if cx.try_global::<Palette>() == Some(&palette) {
         return;

@@ -111,17 +111,21 @@ impl MixerList {
         row.held = Some(volume);
         row.release = None;
         row.pending = None;
-        let wait = send_wait_ms(row.last_sent.map_or(u64::MAX, |t| t.elapsed().as_millis() as u64));
+        // The executor's clock: the wall clock, and the test clock in tests
+        let now = cx.background_executor().now();
+        let wait =
+            send_wait_ms(row.last_sent.map_or(u64::MAX, |t| now.saturating_duration_since(t).as_millis() as u64));
         if wait == 0 {
-            row.last_sent = Some(Instant::now());
+            row.last_sent = Some(now);
             send(volume_request(key, volume), cx);
         } else {
             let key = key.to_owned();
             row.pending = Some(cx.spawn(async move |this: WeakEntity<Self>, cx| {
                 cx.background_executor().timer(Duration::from_millis(wait)).await;
                 let _ = this.update(cx, |this, cx| {
+                    let now = cx.background_executor().now();
                     if let Some(row) = this.row(&key) {
-                        row.last_sent = Some(Instant::now());
+                        row.last_sent = Some(now);
                     }
                     send(volume_request(&key, volume), cx);
                 });
@@ -198,3 +202,6 @@ impl Render for MixerList {
         }))
     }
 }
+
+#[cfg(test)]
+mod slider_tests;
