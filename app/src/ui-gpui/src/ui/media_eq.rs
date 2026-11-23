@@ -35,14 +35,14 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Anchor, App, AppContext as _, AsyncApp, Bounds, ClickEvent, Context, CursorStyle, DismissEvent, Div, Entity,
     EventEmitter, FocusHandle, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render, Role, ScrollDelta,
-    ScrollEvent, StatefulInteractiveElement as _, Styled as _, Subscription, Task, WeakEntity, Window, anchored, canvas,
-    deferred, div, point, px, relative,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render, Role,
+    ScrollDelta, ScrollEvent, StatefulInteractiveElement as _, Styled as _, Subscription, Task, WeakEntity, Window,
+    anchored, canvas, deferred, div, point, px, relative,
 };
 use ipc::{Device, EqBandType, EqPoint, MediaEq, Method, StreamState};
 use ui_model::eq::{
-    BAND_TYPES, DEFAULT_POINTS, GRAPH_RATE, MAX_POINTS, eq_apo_text, has_q, is_default_points,
-    response_curve, with_type,
+    BAND_TYPES, DEFAULT_POINTS, GRAPH_RATE, MAX_POINTS, eq_apo_text, has_q, is_default_points, response_curve,
+    with_type,
 };
 use ui_model::i18n::t;
 use ui_model::profile::{AudioEntry, audio_entries, device_key};
@@ -73,7 +73,7 @@ pub fn media_eq_settings<'a>(device: &Device, cx: &'a App) -> impl IntoElement +
             let key = key.clone();
             let editor = cx.new(|cx| MediaEqEditor::new(key, window, cx));
             dialog::ask(
-                dialog::Question::new(t("eq.title")).cancel(t("modal.close")).width(760.),
+                dialog::Question::new(t("eq.title")).width(760.),
                 move |_, _| editor.clone().into_any_element(),
                 |_, _| {},
                 window,
@@ -336,17 +336,8 @@ impl MediaEqEditor {
         self.edit_selected(|b| kind.with(b, v), cx);
     }
 
-    fn number_field(
-        &mut self,
-        kind: FieldKind,
-        label: String,
-        unit: Option<&'static str>,
-        wide: bool,
-        value: Option<f32>,
-        enabled: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Div {
+    fn number_field(&mut self, field: FieldSpec, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        let FieldSpec { kind, label, unit, wide, value, enabled } = field;
         let text = field_text(value, enabled);
         let f = self.field(kind);
         if f.synced.as_deref() != Some(text.as_str()) {
@@ -360,27 +351,31 @@ impl MediaEqEditor {
                 .flex()
                 .items_center()
                 .gap(theme::S1)
-                .child(
-                    NumberInput::new(&input)
-                        .small()
-                        .disabled(!enabled)
-                        .accessibility_label(label)
-                        .w(px(if wide { 132. } else { 112. })),
-                )
+                .child(NumberInput::new(&input).small().disabled(!enabled).accessibility_label(label).w(px(if wide {
+                    132.
+                } else {
+                    112.
+                })))
                 .when_some(unit, |d, u| d.child(div().text_color(p.text_3).child(u))),
         )
     }
 }
 
+/// What one of the selected point's number boxes shows
+struct FieldSpec {
+    kind: FieldKind,
+    label: String,
+    unit: Option<&'static str>,
+    /// The frequency's box: room for five digits
+    wide: bool,
+    /// None: no point selected
+    value: Option<f32>,
+    enabled: bool,
+}
+
 /// A labelled field under the graph (`.eq-field`)
 fn eq_field(label: String, cx: &App) -> Div {
-    div()
-        .flex()
-        .flex_col()
-        .gap(theme::S1)
-        .text_size(theme::FS_12)
-        .text_color(cx.palette().text_2)
-        .child(label)
+    div().flex().flex_col().gap(theme::S1).text_size(theme::FS_12).text_color(cx.palette().text_2).child(label)
 }
 
 impl Render for MediaEqEditor {
@@ -408,22 +403,48 @@ impl Render for MediaEqEditor {
             point_choices.push(Choice::new(-1, "").disabled(true));
         }
         point_choices.extend((0..eq.bands.len()).map(|i| Choice::new(i as i32, (i + 1).to_string())));
-        let type_choices: Vec<Choice<EqBandType>> =
-            if sel.is_some() { BAND_TYPES.iter().map(|b| Choice::new(*b, type_label(*b))).collect() } else { Vec::new() };
+        let type_choices: Vec<Choice<EqBandType>> = if sel.is_some() {
+            BAND_TYPES.iter().map(|b| Choice::new(*b, type_label(*b))).collect()
+        } else {
+            Vec::new()
+        };
 
         let freq = self.number_field(
-            FieldKind::Frequency,
-            t("eq.frequency"),
-            Some("Hz"),
-            true,
-            sel.map(|b| b.frequency),
-            c.frequency,
+            FieldSpec {
+                kind: FieldKind::Frequency,
+                label: t("eq.frequency"),
+                unit: Some("Hz"),
+                wide: true,
+                value: sel.map(|b| b.frequency),
+                enabled: c.frequency,
+            },
             window,
             cx,
         );
-        let gain =
-            self.number_field(FieldKind::Gain, t("eq.gain"), Some("dB"), false, sel.map(|b| b.gain), c.gain, window, cx);
-        let q = self.number_field(FieldKind::Q, "Q".to_owned(), None, false, sel.map(|b| b.q), c.q, window, cx);
+        let gain = self.number_field(
+            FieldSpec {
+                kind: FieldKind::Gain,
+                label: t("eq.gain"),
+                unit: Some("dB"),
+                wide: false,
+                value: sel.map(|b| b.gain),
+                enabled: c.gain,
+            },
+            window,
+            cx,
+        );
+        let q = self.number_field(
+            FieldSpec {
+                kind: FieldKind::Q,
+                label: "Q".to_owned(),
+                unit: None,
+                wide: false,
+                value: sel.map(|b| b.q),
+                enabled: c.q,
+            },
+            window,
+            cx,
+        );
 
         let fields = div()
             .flex()
@@ -775,21 +796,21 @@ impl EqGraph {
                 }
                 None => {
                     let (w1, w2) = (weak.clone(), weak.clone());
-                    menu.item(
-                        PopupMenuItem::new(t("eq.add_point_here")).disabled(bands.len() >= MAX_POINTS).on_click(
+                    menu.item(PopupMenuItem::new(t("eq.add_point_here")).disabled(bands.len() >= MAX_POINTS).on_click(
+                        move |_: &ClickEvent, _, cx| {
+                            let _ = w1.update(cx, |g, cx| g.add_at(x, y, cx));
+                        },
+                    ))
+                    .item(
+                        PopupMenuItem::new(t("eq.reset")).disabled(is_default_points(&bands)).on_click(
                             move |_: &ClickEvent, _, cx| {
-                                let _ = w1.update(cx, |g, cx| g.add_at(x, y, cx));
+                                let _ = w2.update(cx, |g, cx| {
+                                    g.select(None, cx);
+                                    g.change(DEFAULT_POINTS.to_vec(), true, cx);
+                                });
                             },
                         ),
                     )
-                    .item(PopupMenuItem::new(t("eq.reset")).disabled(is_default_points(&bands)).on_click(
-                        move |_: &ClickEvent, _, cx| {
-                            let _ = w2.update(cx, |g, cx| {
-                                g.select(None, cx);
-                                g.change(DEFAULT_POINTS.to_vec(), true, cx);
-                            });
-                        },
-                    ))
                 }
             }
         });
@@ -814,7 +835,12 @@ impl EqGraph {
         }];
         for f in GRID_F {
             let x = x_of(f);
-            marks.push(Mark::Line { points: vec![(x, PLOT_TOP), (x, PLOT_BOTTOM)], color: p.border, width: 1.0, dashed: false });
+            marks.push(Mark::Line {
+                points: vec![(x, PLOT_TOP), (x, PLOT_BOTTOM)],
+                color: p.border,
+                width: 1.0,
+                dashed: false,
+            });
         }
         for db in GRID_DB {
             let y = y_of(db);
@@ -872,18 +898,28 @@ impl EqGraph {
             .when(!self.disabled, |d| {
                 d.cursor(if self.drag.is_some() { CursorStyle::ClosedHand } else { CursorStyle::OpenHand })
                     .track_focus(&self.focus[i])
-                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
-                        this.on_point_down(i, ev, window, cx)
-                    }))
-                    .on_mouse_down(MouseButton::Right, cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
-                        cx.stop_propagation();
-                        if this.disabled {
-                            return;
-                        }
-                        let Some(b) = this.bands.get(i).copied() else { return };
-                        this.select(Some(i), cx);
-                        this.open_menu(Some(i), (x_of(f64::from(b.frequency)), point_y(&b)), ev.position, window, cx);
-                    }))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, ev: &MouseDownEvent, window, cx| this.on_point_down(i, ev, window, cx)),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
+                            cx.stop_propagation();
+                            if this.disabled {
+                                return;
+                            }
+                            let Some(b) = this.bands.get(i).copied() else { return };
+                            this.select(Some(i), cx);
+                            this.open_menu(
+                                Some(i),
+                                (x_of(f64::from(b.frequency)), point_y(&b)),
+                                ev.position,
+                                window,
+                                cx,
+                            );
+                        }),
+                    )
                     .on_scroll(cx.listener(move |this, ev: &ScrollEvent, _, cx| this.on_wheel(i, ev, cx)))
                     .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, window, cx| this.on_key(i, ev, window, cx)))
                     .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
@@ -973,7 +1009,8 @@ impl Render for EqGraph {
         .absolute()
         .size_full();
 
-        let points: Vec<_> = self.bands.clone().iter().enumerate().map(|(i, b)| self.point_el(i, b, window, cx)).collect();
+        let points: Vec<_> =
+            self.bands.clone().iter().enumerate().map(|(i, b)| self.point_el(i, b, window, cx)).collect();
 
         // The hovered or dragged point's values (not over its menu)
         let tip = if self.menu.is_some() || self.disabled {

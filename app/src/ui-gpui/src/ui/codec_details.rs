@@ -7,12 +7,13 @@
 //! Ported from app/src/ui/src/components/CodecDetails.tsx.
 
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::{App, Div, FontWeight, IntoElement, ParentElement as _, Styled as _, div, px, relative};
+use gpui_kit::{
+    App, Div, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Role, Stateful,
+    StatefulInteractiveElement as _, Styled as _, div, px, relative,
+};
 use ipc::{CodecDetails, StreamInfo};
 use ui_model::codecdetails::{BarSpan, ChipState};
-use ui_model::view::codec_details::{
-    BitpoolPart, BitpoolView, CdChip, CdExtra, CdRow, CdSection, codec_details_view,
-};
+use ui_model::view::codec_details::{BitpoolPart, BitpoolView, CdChip, CdExtra, CdRow, CdSection, codec_details_view};
 
 use crate::theme::{self, ActivePalette as _};
 use crate::ui::{self, charts};
@@ -36,10 +37,14 @@ fn row(label: &str, value: impl IntoElement, cx: &App) -> Div {
         .child(div().flex().flex_col().flex_1().min_w_0().gap(theme::S1).child(value))
 }
 
-/// A setting as chips: in use, offered by the device, not offered
-fn chip(c: &CdChip, cx: &App) -> Div {
+/// A setting as chips: in use, offered by the device, not offered (a
+/// screen reader hears which, as the TS' hidden note said)
+fn chip(i: usize, c: &CdChip, cx: &App) -> Stateful<Div> {
     let p = cx.palette();
     let base = div()
+        .id(("cd-chip", i))
+        .role(Role::ListItem)
+        .aria_label(c.accessible_text())
         .px(theme::S2)
         .h(px(20.))
         .flex()
@@ -50,18 +55,16 @@ fn chip(c: &CdChip, cx: &App) -> Div {
         .whitespace_nowrap()
         .child(c.text.clone());
     match c.state {
-        ChipState::Used => base
-            .border_color(p.accent_fill)
-            .bg(p.accent_fill)
-            .text_color(p.on_accent)
-            .font_weight(FontWeight::SEMIBOLD),
+        ChipState::Used => {
+            base.border_color(p.accent_fill).bg(p.accent_fill).text_color(p.on_accent).font_weight(FontWeight::SEMIBOLD)
+        }
         ChipState::Offered => base.border_color(p.border_strong).text_color(p.text_2),
         ChipState::Off => base.border_dashed().border_color(p.border).text_color(p.text_3).opacity(0.6).line_through(),
     }
 }
 
 fn chips(list: &[CdChip], cx: &App) -> Div {
-    div().flex().flex_wrap().gap(theme::S1).children(list.iter().map(|c| chip(c, cx)))
+    div().flex().flex_wrap().gap(theme::S1).children(list.iter().enumerate().map(|(i, c)| chip(i, c, cx)))
 }
 
 fn span(s: BarSpan) -> Div {
@@ -83,7 +86,11 @@ fn swatch(part: BitpoolPart, cx: &App) -> Div {
 fn bitpool_bar_view(b: &BitpoolView, cx: &App) -> Div {
     let p = cx.palette();
     let bar = &b.bar;
+    // The legend says the same (TS: role="img" with the legend as its name)
     let track = div()
+        .id("bitpool-track")
+        .role(Role::Image)
+        .aria_label(b.label())
         .relative()
         .h(px(10.))
         .rounded_full()
@@ -92,7 +99,9 @@ fn bitpool_bar_view(b: &BitpoolView, cx: &App) -> Div {
         .when_some(bar.config, |d, r| d.child(span(r).top(px(3.)).bottom(px(3.)).rounded_full().bg(p.chart_2)))
         // SBC ABR: the range the bitpool moves in, drawn around the track
         .when_some(bar.abr, |d, r| {
-            d.child(span(r).top(px(-4.)).bottom(px(-4.)).border_2().border_dashed().border_color(p.chart_1).rounded(px(4.)))
+            d.child(
+                span(r).top(px(-4.)).bottom(px(-4.)).border_2().border_dashed().border_color(p.chart_1).rounded(px(4.)),
+            )
         })
         .child(
             div()
@@ -122,11 +131,18 @@ fn bitpool_bar_view(b: &BitpoolView, cx: &App) -> Div {
                 .child("0")
                 .child(bar.max.to_string()),
         )
-        .child(div().flex().flex_wrap().gap_x(theme::S3).gap_y(theme::S1).text_size(theme::FS_12).text_color(p.text_2).children(
-            b.parts.iter().map(|(part, text)| {
-                div().flex().items_center().gap(theme::S1).child(swatch(*part, cx)).child(text.clone())
-            }),
-        ))
+        .child(
+            div()
+                .flex()
+                .flex_wrap()
+                .gap_x(theme::S3)
+                .gap_y(theme::S1)
+                .text_size(theme::FS_12)
+                .text_color(p.text_2)
+                .children(b.parts.iter().map(|(part, text)| {
+                    div().flex().items_center().gap(theme::S1).child(swatch(*part, cx)).child(text.clone())
+                })),
+        )
 }
 
 fn rows(list: &[CdRow], cx: &App) -> Div {

@@ -3,9 +3,7 @@
 //!
 //! Ported from app/src/ui/src/screens/Mixer.tsx.
 
-use gpui_kit::{
-    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _, Window, div,
-};
+use gpui_kit::{AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _, Window, div};
 use ui_model::i18n::t;
 
 use crate::app;
@@ -32,7 +30,11 @@ impl Render for Mixer {
         let p = *cx.palette();
         let mute = self.core.read(cx).snap().is_some_and(|s| s.settings.mute_output);
         let note = |key: &str| {
-            div().flex().gap(theme::S2).child(div().flex_none().child("•")).child(div().flex_1().min_w_0().child(t(key)))
+            div()
+                .flex()
+                .gap(theme::S2)
+                .child(div().flex_none().child("•"))
+                .child(div().flex_1().min_w_0().child(t(key)))
         };
         ui::page("mixer", t("ui.nav.mixer"))
             .child(

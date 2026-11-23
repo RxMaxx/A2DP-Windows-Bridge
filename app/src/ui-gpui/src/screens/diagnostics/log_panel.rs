@@ -412,8 +412,9 @@ impl Render for LogPanel {
         let tools =
             ui::inline()
                 .gap(theme::S3)
-                .child(div().min_w(px(160.)).child(ui::select(
+                .child(div().min_w(px(160.)).child(ui::select_labelled(
                     "log-level",
+                    t("dbgc.col_level"),
                     &level,
                     levels,
                     false,

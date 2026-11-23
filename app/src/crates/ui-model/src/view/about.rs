@@ -247,7 +247,9 @@ mod tests {
     #[test]
     fn licenses_online_in_a_development_build() {
         assert_eq!(licenses(Some("C:\\x".into()), "3.0.4"), Licenses::Folder("C:\\x".into()));
-        assert!(matches!(licenses(None, "3.0.4"), Licenses::Online(u) if u.ends_with("/v3.0.4/THIRD_PARTY_LICENSES.md")));
+        assert!(
+            matches!(licenses(None, "3.0.4"), Licenses::Online(u) if u.ends_with("/v3.0.4/THIRD_PARTY_LICENSES.md"))
+        );
     }
 
     // serviceAddon.test.tsx: "is offered by what it gives", "removes it

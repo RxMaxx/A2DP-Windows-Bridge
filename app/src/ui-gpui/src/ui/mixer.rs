@@ -13,8 +13,7 @@ use gpui_kit::{
 use ipc::{Method, MixerApp};
 use ui_model::i18n::t;
 use ui_model::view::mixer::{
-    REFRESH_MS, RELEASE_MS, app_name, mute_label, mute_request, reconcile, send_wait_ms, shown_volume,
-    volume_request,
+    REFRESH_MS, RELEASE_MS, app_name, mute_label, mute_request, reconcile, send_wait_ms, shown_volume, volume_request,
 };
 
 use crate::app;
@@ -95,8 +94,7 @@ impl MixerList {
     }
 
     fn make_row(&mut self, a: MixerApp, window: &mut Window, cx: &mut Context<Self>) -> MixerRow {
-        let slider =
-            cx.new(|_| SliderState::new().min(0.).max(100.).step(1.).default_value(f32::from(a.volume)));
+        let slider = cx.new(|_| SliderState::new().min(0.).max(100.).step(1.).default_value(f32::from(a.volume)));
         let key = a.key.clone();
         let changes = cx.subscribe_in(&slider, window, move |this, _, ev: &SliderEvent, _, cx| match ev {
             SliderEvent::Change(v) => this.moved(&key, v.start().round().clamp(0., 100.) as u8, cx),

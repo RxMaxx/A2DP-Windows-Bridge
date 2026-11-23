@@ -60,17 +60,15 @@ fn new_input(window: &mut Window, cx: &mut Context<AuracastMixer>) -> Entity<Inp
 
 impl AuracastMixer {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> AuracastMixer {
-        let preset_name =
-            cx.new(|cx| InputState::new(window, cx).placeholder(t("ui.dev.auracast_mix_preset_name")));
+        let preset_name = cx.new(|cx| InputState::new(window, cx).placeholder(t("ui.dev.auracast_mix_preset_name")));
         let mut subs = vec![cx.subscribe_in(&preset_name, window, |_, _, ev: &InputEvent, _, cx| {
             if matches!(ev, InputEvent::Change) {
                 cx.notify();
             }
         })];
         let mut fields = Vec::new();
-        let mut kinds: Vec<MixField> = (0..OUTPUT_NAMES.len())
-            .flat_map(|r| (0..INPUT_NAMES.len()).map(move |c| MixField::Cell(r, c)))
-            .collect();
+        let mut kinds: Vec<MixField> =
+            (0..OUTPUT_NAMES.len()).flat_map(|r| (0..INPUT_NAMES.len()).map(move |c| MixField::Cell(r, c))).collect();
         kinds.extend((0..OUTPUT_NAMES.len()).map(MixField::Delay));
         kinds.extend([MixField::Center, MixField::Lfe, MixField::Surround]);
         for kind in kinds {
@@ -326,10 +324,17 @@ impl AuracastMixer {
             Choice::new(p.name.clone(), preset_label(&p.name, p.builtin)).group(group)
         }));
         let this = cx.entity().downgrade();
-        let preset_select = ui::select("mix-preset", &self.preset, presets, false, move |v: &String, window, cx| {
-            let v = v.clone();
-            let _ = this.update(cx, |m, cx| m.choose_preset(&v, window, cx));
-        });
+        let preset_select = ui::select_labelled(
+            "mix-preset",
+            t("ui.dev.auracast_mix_preset"),
+            &self.preset,
+            presets,
+            false,
+            move |v: &String, window, cx| {
+                let v = v.clone();
+                let _ = this.update(cx, |m, cx| m.choose_preset(&v, window, cx));
+            },
+        );
 
         let unit_label = match self.unit {
             Unit::Ms => t("ui.dev.auracast_mix_ms"),
@@ -446,10 +451,7 @@ impl AuracastMixer {
         );
         let section = ui::section(t("ui.dev.auracast_mix"), None, cx)
             .children(children)
-            .child(ui::hint(
-                if st.live { t("ui.dev.auracast_mix_live") } else { t("ui.dev.auracast_mix_next") },
-                cx,
-            ))
+            .child(ui::hint(if st.live { t("ui.dev.auracast_mix_live") } else { t("ui.dev.auracast_mix_next") }, cx))
             .child(ui::row().child(div().child(t("ui.dev.auracast_mix_preset"))).child(preset_select))
             .child(
                 ui::row()

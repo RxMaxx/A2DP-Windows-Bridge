@@ -30,8 +30,10 @@ const FLYOUT_MARGIN: f32 = 12.;
 /// (issue #86: no empty space under the controls)
 const FLYOUT_WIDTH: f32 = 360.;
 const FLYOUT_HEIGHT: f32 = 340.;
-/// The heights the flyout takes (logical pixels)
-const FLYOUT_MIN_HEIGHT: f32 = 160.;
+/// The heights the flyout takes (logical pixels). The shortest page with a
+/// device (idle: ring, chooser, Connect) is 154 px; the minimum stays under
+/// it so that page gets no empty space (the TS's 160 fitted its own page)
+const FLYOUT_MIN_HEIGHT: f32 = 150.;
 const FLYOUT_MAX_HEIGHT: f32 = 560.;
 /// How long the flyout counts as opening after it was shown (#140).
 /// Meanwhile another click on the tray icon (a double click) does not close

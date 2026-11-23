@@ -9,8 +9,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::{
-    AppContext as _, AsyncApp, Context, Entity, FontWeight, Image, ImageFormat, IntoElement, ParentElement as _, Render,
-    Styled as _, WeakEntity, Window, div, img, px,
+    AppContext as _, AsyncApp, Context, Entity, FontWeight, Image, ImageFormat, IntoElement, ParentElement as _,
+    Render, Styled as _, WeakEntity, Window, div, img, px,
 };
 use ipc::{AudioDevice, Method};
 use ui_model::i18n::t;
@@ -101,7 +101,9 @@ fn open_licenses(cx: &mut gpui_kit::App) {
 
 /// A subtle button that opens a page
 fn page_button(id: &'static str, label: String, url: &'static str) -> impl IntoElement {
-    ui::button(id, label, ButtonKind::Subtle).icon(icon(IconName::Open)).on_click(move |_, _, cx| host::open_url(url, cx))
+    ui::button(id, label, ButtonKind::Subtle)
+        .icon(icon(IconName::Open))
+        .on_click(move |_, _, cx| host::open_url(url, cx))
 }
 
 impl Render for About {

@@ -16,9 +16,7 @@ use std::rc::Rc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tooltip::Tooltip;
@@ -29,16 +27,13 @@ use gpui_kit::{
     ElementId, Entity, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, Render,
     SharedString, StatefulInteractiveElement as _, Styled as _, Task, WeakEntity, Window, div, point, px,
 };
-use ipc::{
-    AdapterInfo, DiagInfo, DiagInfoParams, ErrorInfo, Method, Msg, Profile, SourceInfo, StreamState,
-    WindowsPairedDevice,
-};
+use ipc::{AdapterInfo, DiagInfo, DiagInfoParams, ErrorInfo, Method, Msg, Profile, StreamState, WindowsPairedDevice};
 use ui_model::format::{kbps, khz, percent_to_volume, volume_percent};
 use ui_model::i18n::{t, tm};
 use ui_model::links::{BugReport, bug_report_url};
 use ui_model::profile::AudioEntry;
 use ui_model::t;
-use ui_model::view::stream::{self as model, BatteryTone, FixAction, QualityStatus, SourceIcon};
+use ui_model::view::stream::{self as model, BatteryTone, FixAction, QualityStatus};
 
 // The decisions the screens draw with, under the names stream.tsx exports
 #[allow(unused_imports)]
@@ -53,6 +48,7 @@ use crate::app::{self, AdapterSection, NoticeKind, Route, RouteName};
 use crate::core::{self, CoreEvent, WantKind};
 use crate::host;
 use crate::theme::{self, ActivePalette as _, Palette};
+use crate::ui::dialog::{self, Question};
 use crate::ui::{self, BannerKind, ButtonKind, IconName, charts, icon};
 
 /// The status colour of a state (`.st-<state>`): the dot's, and the text's
@@ -91,19 +87,10 @@ fn snap(cx: &App) -> Option<ipc::Snapshot> {
 // ---------------------------------------------------------------------------
 
 /// The ring around the device: pulses while connecting, glows while
-/// streaming. `id` tells the rings on screen apart (their pulse).
-pub fn ring(
-    id: impl Into<ElementId>,
-    state: StreamState,
-    volume: Option<u8>,
-    small: bool,
-    child: impl IntoElement,
-    cx: &App,
-) -> AnyElement {
-    ring_sized(id, state, volume, if small { 44. } else { 120. }, small, child, cx)
-}
-
-/// [`ring`] at its own size (`--size`: Home's cards 88 px, `.home-device .ring`)
+/// streaming. `id` tells the rings on screen apart (their pulse). `size` is
+/// the CSS `--size` where it is shown (Home's cards 88 px, `.home-device
+/// .ring`; the flyout 56 px, `.fly-head .ring-small`); `small`: the thin
+/// ring of `.ring-small`.
 pub fn ring_sized(
     id: impl Into<ElementId>,
     state: StreamState,
@@ -760,26 +747,6 @@ pub fn mic_row(entry: &AudioEntry, cx: &App) -> Option<AnyElement> {
     )
 }
 
-/// The symbol of what a stream captures
-// TODO(merge): stream.tsx exports it (with source_text); no port draws it yet
-#[allow(dead_code)]
-pub fn source_icon(i: SourceIcon) -> IconName {
-    match i {
-        SourceIcon::MusicNote2 => IconName::MusicNote2,
-        SourceIcon::DesktopSpeaker => IconName::DesktopSpeaker,
-        SourceIcon::Speaker2 => IconName::Speaker2,
-        SourceIcon::WindowApps => IconName::WindowApps,
-    }
-}
-
-/// What a running stream captures (StreamInfo.source), in words: the
-/// profile's application name when the executable is the profile's
-#[allow(dead_code)]
-pub fn source_text(src: &SourceInfo, profile: Option<&Profile>) -> (IconName, String, bool) {
-    let s = model::source_text(src, profile);
-    (source_icon(s.icon), s.text, s.waiting)
-}
-
 // ---------------------------------------------------------------------------
 // Link quality
 // ---------------------------------------------------------------------------
@@ -1081,16 +1048,12 @@ pub enum WinusbMode {
     Restore,
 }
 
-/// The WinUSB dialog's state while it is open
-struct WinusbState {
-    busy: bool,
-    /// Assign: the devices Windows loses with the adapter, by name (issue #86)
-    paired: Vec<WindowsPairedDevice>,
-}
+/// What the WinUSB dialog runs when it closes: whether it was done
+type OnWinusbClose = Rc<dyn Fn(bool, &mut App)>;
 
 /// Assign WinUSB / restore the driver, after saying what it does: while
 /// BlueCaster has the adapter, Windows' Bluetooth does not see it.
-/// `on_close` gets whether it was done (not called when Escape closes it).
+/// `on_close` gets whether it was done.
 pub fn winusb_dialog(
     adapter: AdapterInfo,
     mode: WinusbMode,
@@ -1098,90 +1061,95 @@ pub fn winusb_dialog(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let state = cx.new(|_| WinusbState { busy: false, paired: Vec::new() });
+    // Assign: the devices Windows loses with the adapter, by name (issue #86)
+    let paired: Entity<Vec<WindowsPairedDevice>> = cx.new(|_| Vec::new());
     if mode == WinusbMode::Assign {
         let task = windows_devices(&adapter, cx);
-        let state = state.clone();
+        let paired = paired.clone();
         cx.spawn(async move |cx: &mut AsyncApp| {
-            let paired = task.await;
-            state.update(cx, |s, _| s.paired = paired);
+            let list = task.await;
+            paired.update(cx, |p, _| *p = list);
             redraw(cx);
         })
         .detach();
     }
-    let on_close: Rc<dyn Fn(bool, &mut App)> = Rc::new(on_close);
-    let handle = window.window_handle();
-    window.open_dialog(cx, move |dialog, _, cx| {
-        let p = *cx.palette();
-        let s = state.read(cx);
-        // Devices Windows loses: a warning, those devices first (issue #86)
-        let losing = mode == WinusbMode::Assign && !s.paired.is_empty();
-        let title = if losing {
-            t("ui.adapter.paired_title")
-        } else if mode == WinusbMode::Assign {
-            t("ui.adapter.assign_title")
-        } else {
-            t("ui.adapter.restore_title")
-        };
-        let confirm =
-            t(if mode == WinusbMode::Assign { "ui.adapter.assign_winusb" } else { "ui.adapter.restore_driver" });
-        let danger = mode == WinusbMode::Restore || losing;
-        let (go_adapter, go_state, go_close) = (adapter.clone(), state.clone(), on_close.clone());
-        let cancel_close = on_close.clone();
-        let footer = DialogFooter::new()
-            .child(Button::new("dialog-cancel").label(t("modal.cancel")).disabled(s.busy).on_click(
-                move |_, window, cx| {
-                    window.close_dialog(cx);
-                    cancel_close(false, cx);
-                },
-            ))
-            .child(
-                ui::button("dialog-confirm", confirm, if danger { ButtonKind::Danger } else { ButtonKind::Strong })
-                    .icon(icon(IconName::Shield))
-                    .loading(s.busy)
-                    .disabled(s.busy)
-                    .on_click(move |_, _, cx| {
-                        winusb_go(go_adapter.clone(), mode, go_state.clone(), go_close.clone(), handle, cx);
-                    }),
-            );
-        let body = div()
-            .flex()
-            .flex_col()
-            .gap(theme::S3)
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_x(theme::S1)
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child(adapter.display_name.clone()))
-                    .child(div().text_color(p.text_2).child(format!("· {}", adapter.device_name))),
-            )
-            .map(|d| {
-                if losing {
-                    d.child(paired_devices_note(&s.paired, cx))
-                } else {
-                    d.child(div().child(t(if mode == WinusbMode::Assign {
-                        "ui.adapter.assign_explain"
+    let on_close: OnWinusbClose = Rc::new(on_close);
+    // Devices Windows loses: a warning, those devices first (issue #86)
+    let losing = {
+        let paired = paired.clone();
+        move |cx: &App| mode == WinusbMode::Assign && !paired.read(cx).is_empty()
+    };
+    let question = {
+        let (losing, on_close) = (losing.clone(), on_close.clone());
+        move |_: &mut Window, cx: &mut App| {
+            let losing = losing(cx);
+            let title = if losing {
+                t("ui.adapter.paired_title")
+            } else if mode == WinusbMode::Assign {
+                t("ui.adapter.assign_title")
+            } else {
+                t("ui.adapter.restore_title")
+            };
+            let confirm =
+                t(if mode == WinusbMode::Assign { "ui.adapter.assign_winusb" } else { "ui.adapter.restore_driver" });
+            let on_close = on_close.clone();
+            let mut q = Question::new(title)
+                .confirm(confirm)
+                .confirm_icon(IconName::Shield)
+                .on_cancel(move |_, cx| on_close(false, cx));
+            if mode == WinusbMode::Restore || losing {
+                q = q.danger();
+            }
+            if losing {
+                q = q.warn();
+            }
+            q
+        }
+    };
+    let body = {
+        let adapter = adapter.clone();
+        move |_: &mut Window, cx: &mut App| {
+            let p = *cx.palette();
+            div()
+                .flex()
+                .flex_col()
+                .gap(theme::S3)
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap_x(theme::S1)
+                        .child(div().font_weight(FontWeight::SEMIBOLD).child(adapter.display_name.clone()))
+                        .child(div().text_color(p.text_2).child(format!("· {}", adapter.device_name))),
+                )
+                .map(|d| {
+                    if losing(cx) {
+                        d.child(paired_devices_note(paired.read(cx), cx))
                     } else {
-                        "ui.adapter.restore_explain"
-                    })))
-                }
-            })
-            .child(div().text_color(p.text_2).child(t("ui.adapter.uac_note")));
-        dialog.width(px(480.)).title(title).child(body).footer(footer)
-    });
+                        d.child(div().child(t(if mode == WinusbMode::Assign {
+                            "ui.adapter.assign_explain"
+                        } else {
+                            "ui.adapter.restore_explain"
+                        })))
+                    }
+                })
+                .child(div().text_color(p.text_2).child(t("ui.adapter.uac_note")))
+                .into_any_element()
+        }
+    };
+    let busy = dialog::busy_state(cx);
+    dialog::ask_run(
+        question,
+        busy,
+        body,
+        move |_, cx| winusb_go(adapter.clone(), mode, on_close.clone(), cx),
+        window,
+        cx,
+    );
 }
 
-fn winusb_go(
-    a: AdapterInfo,
-    mode: WinusbMode,
-    state: Entity<WinusbState>,
-    on_close: Rc<dyn Fn(bool, &mut App)>,
-    handle: gpui_kit::AnyWindowHandle,
-    cx: &mut App,
-) {
-    state.update(cx, |s, _| s.busy = true);
-    cx.refresh_windows();
+/// The dialog closes however it ended
+fn winusb_go(a: AdapterInfo, mode: WinusbMode, on_close: OnWinusbClose, cx: &mut App) -> Task<bool> {
     let id = a.instance_id.clone();
     let assign = (mode == WinusbMode::Assign)
         .then(|| app::request::<Vec<AdapterInfo>>(Method::AdapterAssignWinusb { instance_id: id.clone() }, cx));
@@ -1216,11 +1184,9 @@ fn winusb_go(
         if let Err(e) = &done {
             cx.update(|cx| app::notify(app::error_text(e), NoticeKind::Error, cx));
         }
-        state.update(cx, |s, _| s.busy = false);
-        let _ = cx.update_window(handle, |_, window, cx| window.close_dialog(cx));
         cx.update(|cx| on_close(done.is_ok(), cx));
+        true
     })
-    .detach();
 }
 
 // ---------------------------------------------------------------------------
@@ -1257,48 +1223,12 @@ pub fn firmware_download(id: impl Into<ElementId>, files: Vec<String>, kind: But
 }
 
 fn firmware_download_dialog(files: Vec<String>, window: &mut Window, cx: &mut App) {
-    let busy = cx.new(|_| false);
-    let handle = window.window_handle();
-    window.open_dialog(cx, move |dialog, _, cx| {
+    let busy = dialog::busy_state(cx);
+    let file = files.first().cloned().unwrap_or_default();
+    let shown = busy.clone();
+    let body = move |_: &mut Window, cx: &mut App| {
         let p = *cx.palette();
-        let working = *busy.read(cx);
-        let (go_busy, file) = (busy.clone(), files.first().cloned().unwrap_or_default());
-        let footer = DialogFooter::new()
-            .child(
-                Button::new("dialog-cancel")
-                    .label(t("modal.cancel"))
-                    .disabled(working)
-                    .on_click(|_, window, cx| window.close_dialog(cx)),
-            )
-            .child(
-                ui::button("dialog-confirm", t("firmware.download"), ButtonKind::Strong)
-                    .loading(working)
-                    .disabled(working)
-                    .on_click(move |_, _, cx| {
-                        go_busy.update(cx, |b, _| *b = true);
-                        cx.refresh_windows();
-                        let task = app::request::<serde_json::Value>(
-                            Method::AdapterDownloadFirmware { file: file.clone() },
-                            cx,
-                        );
-                        let busy = go_busy.clone();
-                        cx.spawn(async move |cx: &mut AsyncApp| {
-                            let result = task.await;
-                            cx.update(|cx| match result {
-                                Ok(_) => app::notify(t("firmware.downloaded"), NoticeKind::Info, cx),
-                                // The UI stopped waiting, the core did not: it publishes the adapter
-                                // anew when the files are saved, so this is no failure yet
-                                Err(e) if e.code == "ipc.timeout" => {
-                                    app::notify(t("firmware.download_slow"), NoticeKind::Info, cx)
-                                }
-                                Err(e) => app::notify(app::error_text(&e), NoticeKind::Error, cx),
-                            });
-                            busy.update(cx, |b, _| *b = false);
-                            let _ = cx.update_window(handle, |_, window, cx| window.close_dialog(cx));
-                        })
-                        .detach();
-                    }),
-            );
+        let working = *shown.read(cx);
         let body = if working {
             div()
                 .flex()
@@ -1323,8 +1253,30 @@ fn firmware_download_dialog(files: Vec<String>, window: &mut Window, cx: &mut Ap
                 )
                 .child(div().text_color(p.text_2).child(t("firmware.download_license")))
         };
-        dialog.width(px(480.)).title(t("firmware.download_title")).child(body).footer(footer)
-    });
+        body.into_any_element()
+    };
+    dialog::ask_run(
+        |_, _| Question::new(t("firmware.download_title")).confirm(t("firmware.download")),
+        busy,
+        body,
+        move |_, cx| {
+            let task = app::request::<serde_json::Value>(Method::AdapterDownloadFirmware { file: file.clone() }, cx);
+            cx.spawn(async move |cx: &mut AsyncApp| {
+                let result = task.await;
+                cx.update(|cx| match result {
+                    Ok(_) => app::notify(t("firmware.downloaded"), NoticeKind::Info, cx),
+                    // The UI stopped waiting, the core did not: it publishes the adapter
+                    // anew when the files are saved, so this is no failure yet
+                    Err(e) if e.code == "ipc.timeout" => app::notify(t("firmware.download_slow"), NoticeKind::Info, cx),
+                    Err(e) => app::notify(app::error_text(&e), NoticeKind::Error, cx),
+                });
+                // Closes however it ended
+                true
+            })
+        },
+        window,
+        cx,
+    );
 }
 
 // ---------------------------------------------------------------------------

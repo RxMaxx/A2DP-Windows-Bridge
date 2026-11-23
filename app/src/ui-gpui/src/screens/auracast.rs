@@ -17,11 +17,11 @@ use gpui_kit::{
 };
 use ipc::{Method, StreamStatus};
 use ui_model::i18n::t;
+use ui_model::t;
 use ui_model::view::auracast::{
     Channels, Choices, MAX_BIGS, PairMode, Quality, SOURCE_SETTLE_MS, Session, Source, auracast_adapter_choices,
     settled_source, show_adapter,
 };
-use ui_model::t;
 
 use crate::app;
 use crate::core::Core;
@@ -255,7 +255,10 @@ fn pair_row(
             .child(ui::segmented(
                 SharedString::from(format!("{id}-rate")),
                 &rate,
-                rates.into_iter().map(|(v, k)| Choice::new(v, t(k)).disabled(disabled || mode == PairMode::Off)).collect(),
+                rates
+                    .into_iter()
+                    .map(|(v, k)| Choice::new(v, t(k)).disabled(disabled || mode == PairMode::Off))
+                    .collect(),
                 on_rate,
             )),
     )
@@ -317,7 +320,8 @@ impl Render for Auracast {
         });
 
         let status = s.status(&st).map(|(text, bad)| {
-            let summary = live.then(|| st.info.as_ref().and_then(|i| i.le.as_ref()).map(|l| l.summary.clone())).flatten();
+            let summary =
+                live.then(|| st.info.as_ref().and_then(|i| i.le.as_ref()).map(|l| l.summary.clone())).flatten();
             div()
                 .flex()
                 .flex_col()
@@ -428,7 +432,8 @@ impl Render for Auracast {
             ];
             let mut children = children;
             if bigs == 0 {
-                children.push(ui::hint(t("ui.dev.auracast_pairs_off_hint"), cx).text_color(p.bad_text).into_any_element());
+                children
+                    .push(ui::hint(t("ui.dev.auracast_pairs_off_hint"), cx).text_color(p.bad_text).into_any_element());
             }
             if bigs > MAX_BIGS {
                 children.push(

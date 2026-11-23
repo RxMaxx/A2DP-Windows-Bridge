@@ -188,7 +188,7 @@ fn crash_notice(cx: &App) -> Option<AnyElement> {
                 .icon(icon(IconName::Copy))
                 .on_click(move |_, _, cx| stream::copy_report(head2.clone(), text2.clone(), cx)),
         );
-    let dismiss: Box<dyn Fn(&gpui_kit::ClickEvent, &mut Window, &mut App)> = Box::new(|_, _, cx| {
+    let dismiss: ui::ClickHandler = Box::new(|_, _, cx| {
         drop(app::request::<serde_json::Value>(Method::DiagCrashesSeen, cx));
     });
     Some(
@@ -204,9 +204,10 @@ fn crash_notice(cx: &App) -> Option<AnyElement> {
     )
 }
 
-/// The version whose update dialog was answered (Later, Update now, or
-/// closed): it does not come again while the window process runs
-static UPDATE_LATER: Mutex<Option<String>> = Mutex::new(None);
+/// The version whose update dialog opened in this run: it does not open
+/// again while it is open or after it was answered. The answer (Later,
+/// Update now, or closed) is kept across starts in crate::ui_state.
+static UPDATE_SHOWN: Mutex<Option<String>> = Mutex::new(None);
 
 /// A newer release (issue #86): a dialog with its short notes and Update
 /// now (Open download page for a portable copy), once per version; Later
@@ -220,13 +221,15 @@ fn update_notice(cx: &App) {
     if route == RouteName::Settings || route == RouteName::Setup || setup {
         return;
     }
+    if crate::ui_state::update_later().as_deref() == Some(u.version.as_str()) {
+        return;
+    }
     {
-        let mut later = UPDATE_LATER.lock().unwrap_or_else(|e| e.into_inner());
-        if later.as_deref() == Some(u.version.as_str()) {
+        let mut shown = UPDATE_SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+        if shown.as_deref() == Some(u.version.as_str()) {
             return;
         }
-        // Closed in any way, it was answered
-        *later = Some(u.version.clone());
+        *shown = Some(u.version.clone());
     }
     let current = snap.update.current_version.clone();
     cx.spawn(async move |cx: &mut AsyncApp| {
@@ -257,12 +260,13 @@ fn open_update_dialog(u: UpdateInfo, current: String, window: &mut Window, cx: &
         let phase = host::state(cx).read(cx).update.clone();
         let can_install = matches!(phase, UpdatePhase::Idle | UpdatePhase::Failed { .. });
         let (manifest, url, url2) = (u.manifest_url.clone(), u.url.clone(), u.url.clone());
+        // Closed in any way, it was answered: it shows again only for a newer release
+        let (v1, v2, v3) = (u.version.clone(), u.version.clone(), u.version.clone());
         let footer = DialogFooter::new()
-            .child(
-                Button::new("dialog-cancel")
-                    .label(t("ui.update.later"))
-                    .on_click(|_, window, cx| window.close_dialog(cx)),
-            )
+            .child(Button::new("dialog-cancel").label(t("ui.update.later")).on_click(move |_, window, cx| {
+                crate::ui_state::set_update_later(&v1);
+                window.close_dialog(cx);
+            }))
             .child(
                 ui::button(
                     "dialog-confirm",
@@ -270,6 +274,7 @@ fn open_update_dialog(u: UpdateInfo, current: String, window: &mut Window, cx: &
                     ButtonKind::Strong,
                 )
                 .on_click(move |_, window, cx| {
+                    crate::ui_state::set_update_later(&v2);
                     window.close_dialog(cx);
                     if can_install {
                         // Settings shows the download and the install
@@ -303,7 +308,12 @@ fn open_update_dialog(u: UpdateInfo, current: String, window: &mut Window, cx: &
                         .on_click(move |_, _, cx| host::open_url(&url2, cx)),
                 ),
             );
-        dialog.width(px(480.)).title(t("update.available_title")).child(body).footer(footer)
+        dialog
+            .width(px(480.))
+            .title(t("update.available_title"))
+            .child(body)
+            .footer(footer)
+            .on_close(move |_, _, _| crate::ui_state::set_update_later(&v3))
     });
 }
 

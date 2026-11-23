@@ -70,6 +70,15 @@ pub fn main_hwnd(cx: &App) -> isize {
     cx.try_global::<Windows>().map_or(0, |w| if w.main.is_some() { w.main_hwnd } else { 0 })
 }
 
+/// No window of ours shows: none is open, or every one is minimized (the
+/// flyout is removed when it hides). A window that cannot be asked (it is
+/// being updated right now) counts as shown.
+pub fn none_shown(cx: &mut App) -> bool {
+    cx.windows()
+        .into_iter()
+        .all(|handle| handle.update(cx, |_, window, _| win_sys::window::is_minimized(hwnd(window))).unwrap_or(false))
+}
+
 /// The title bars follow the app's theme, not Windows' own
 pub fn apply_theme(cx: &mut App) {
     let dark = cx.palette().dark;
@@ -94,7 +103,8 @@ pub fn show_main(route: Option<Route>, focus: bool, cx: &mut App) {
         windows(cx).main = None;
     }
     let setup = app::state(cx).read(cx).setup_active;
-    let (width, height) = crate::demo::size().unwrap_or(if setup { (SETUP_WIDTH, SETUP_HEIGHT) } else { (MAIN_WIDTH, MAIN_HEIGHT) });
+    let (width, height) =
+        crate::demo::size().unwrap_or(if setup { (SETUP_WIDTH, SETUP_HEIGHT) } else { (MAIN_WIDTH, MAIN_HEIGHT) });
     let bounds = windows(cx)
         .main_bounds
         .filter(|_| !setup)

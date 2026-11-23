@@ -17,6 +17,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tokio::sync::oneshot;
 use ui_model::store::{Change, Store};
+use ui_model::subscription::{SubKey, SubState, Wants};
 
 /// The connection to the core (ui_host::connection::Status, as the screens
 /// read it)
@@ -80,11 +81,8 @@ pub struct Core {
     receiver_wants: BTreeMap<u64, ()>,
     log_wants: BTreeMap<u64, LogLevel>,
     flow_wants: BTreeMap<u64, ()>,
-    last_sent: Option<(Option<LogLevel>, bool, bool)>,
-    /// The log level of the last subscription sent
-    last_logs: Option<LogLevel>,
-    /// Whether the last subscription sent asked for link samples
-    link_on: bool,
+    /// What was sent last
+    sub: SubState,
     push_queued: bool,
     flow_timer: Option<Task<()>>,
 }
@@ -116,9 +114,7 @@ impl Core {
             receiver_wants: BTreeMap::new(),
             log_wants: BTreeMap::new(),
             flow_wants: BTreeMap::new(),
-            last_sent: None,
-            last_logs: None,
-            link_on: false,
+            sub: SubState::default(),
             push_queued: false,
             flow_timer: None,
         }
@@ -140,7 +136,11 @@ impl Core {
 
     /// Sends a request -> its result. The task may be dropped: the request
     /// is sent all the same, only the answer goes nowhere.
-    pub fn request<R: DeserializeOwned + Send + 'static>(&self, method: Method, cx: &App) -> Task<Result<R, ErrorInfo>> {
+    pub fn request<R: DeserializeOwned + Send + 'static>(
+        &self,
+        method: Method,
+        cx: &App,
+    ) -> Task<Result<R, ErrorInfo>> {
         let rx = self.send(method);
         cx.background_spawn(async move { answer(rx?).await })
     }
@@ -177,9 +177,7 @@ impl Core {
         if self.connected() && !was {
             // A window opened after Hello missed the snapshot; on a fresh
             // connection the core sends one too (harmless)
-            self.last_sent = None;
-            self.last_logs = None;
-            self.link_on = false;
+            self.sub.reset();
             self.resync(cx);
             self.push_subscription(cx);
         }
@@ -209,43 +207,40 @@ impl Core {
         // Creating one view and dropping another in the same update sends once
         cx.defer(move |cx| {
             let Some(core) = crate::app::try_core(cx) else { return };
-            core.update(cx, |core, cx| core.send_subscription(cx));
+            let hidden = crate::windows::none_shown(cx);
+            core.update(cx, |core, cx| core.send_subscription(hidden, cx));
         });
     }
 
-    fn send_subscription(&mut self, cx: &mut Context<Self>) {
+    /// No window of ours shows any more, or one shows again: the
+    /// subscription asks for nothing while none shows (the TS: the page hidden)
+    pub fn shown_changed(&mut self, cx: &mut Context<Self>) {
+        self.push_subscription(cx);
+    }
+
+    fn send_subscription(&mut self, hidden: bool, cx: &mut Context<Self>) {
         self.push_queued = false;
-        let link = !self.link_wants.is_empty();
-        let receiver = !self.receiver_wants.is_empty();
-        // The most verbose level asked for
-        let logs = self.log_wants.values().copied().max();
-        let key = (logs, link, receiver);
-        if self.last_sent == Some(key) || !self.connected() {
-            return;
-        }
-        let before = self.last_logs;
-        self.last_sent = Some(key);
-        self.last_logs = logs;
-        // Samples from an earlier subscription would join the new ones across
-        // the gap (a step in the charts, the drops meanwhile in one sample)
-        if link && !self.link_on {
+        let wants = Wants {
+            link: !self.link_wants.is_empty(),
+            receiver: !self.receiver_wants.is_empty(),
+            // The most verbose level asked for
+            logs: self.log_wants.values().copied().max(),
+        };
+        let Some(plan) = self.sub.plan(wants, hidden, self.connected()) else { return };
+        self.sub.sent(&plan);
+        if plan.clear_link {
             self.store.clear_link();
             cx.emit(CoreEvent::Link);
         }
-        self.link_on = link;
+        let SubKey { logs, link, receiver } = plan.key;
         let subscribe = self.request::<Value>(Method::DiagSubscribe { logs, link, receiver: Some(receiver) }, cx);
         // Lines logged while nobody listened (the window was closed, or
         // opened later): the core keeps the recent ones
-        let recent = logs
-            .filter(|l| before.is_none_or(|b| *l > b))
-            .map(|level| self.request::<Option<Vec<LogLine>>>(Method::DiagRecentLogs { level }, cx));
+        let recent =
+            plan.recent_logs.map(|level| self.request::<Option<Vec<LogLine>>>(Method::DiagRecentLogs { level }, cx));
         cx.spawn(async move |this: WeakEntity<Core>, cx: &mut AsyncApp| {
             if subscribe.await.is_err() {
-                let _ = this.update(cx, |core, _| {
-                    core.last_sent = None;
-                    core.last_logs = None;
-                    core.link_on = false;
-                });
+                let _ = this.update(cx, |core, _| core.sub.reset());
                 return;
             }
             if let Some(recent) = recent
@@ -261,7 +256,7 @@ impl Core {
     }
 
     fn refresh_flow(&mut self, cx: &mut Context<Self>) {
-        if !self.connected() {
+        if !self.connected() || crate::windows::none_shown(cx) {
             return;
         }
         let task = self.request::<FlowView>(Method::DiagFlow, cx);

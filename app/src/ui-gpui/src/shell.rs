@@ -3,19 +3,19 @@
 //!
 //! Ported from app/src/ui/src/app/App.tsx (MainWindow, Gate, ConnectionScreen).
 
-use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::Sizable as _;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyView, App, Context, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    AnyView, App, Context, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Render,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
-use ui_model::i18n::{self, t};
+use ui_model::i18n::t;
 
 use crate::app::{self, AppState, NoticeKind, RouteName};
 use crate::core::{self, ConnStatus, Core, WantKind};
 use crate::screens;
-use crate::theme::{self, ActivePalette as _, ThemeSetting};
+use crate::theme::{self, ActivePalette as _};
 use crate::ui::{self, IconName, icon};
 use crate::windows;
 
@@ -52,8 +52,6 @@ pub struct MainWindow {
     setup_decided: bool,
     /// The window has the setup's size
     setup_sized: bool,
-    language: String,
-    theme: String,
 }
 
 impl MainWindow {
@@ -61,6 +59,9 @@ impl MainWindow {
         // Windows' accent colour and theme, read again when the window gets
         // the focus, so a change in Settings shows
         cx.observe_window_activation(window, |this, window, cx| {
+            // Minimized or restored: the subscription asks for nothing while
+            // no window shows
+            this.core.update(cx, |core, cx| core.shown_changed(cx));
             if window.is_window_active() {
                 theme::refresh(cx);
                 return;
@@ -79,7 +80,7 @@ impl MainWindow {
         let core = app::core(cx);
         let state = app::state(cx);
         cx.observe(&core, |this, _, cx| {
-            this.follow_settings(cx);
+            this.decide_setup(cx);
             cx.notify();
         })
         .detach();
@@ -96,37 +97,27 @@ impl MainWindow {
             cables_once: None,
             setup_decided: false,
             setup_sized: false,
-            language: String::new(),
-            theme: String::new(),
         };
-        this.follow_settings(cx);
+        this.decide_setup(cx);
         this
     }
 
-    /// Language and theme come from the core's settings; the first-run
-    /// setup is decided once when the state first arrives
-    fn follow_settings(&mut self, cx: &mut Context<Self>) {
+    /// The first-run setup is decided once when the state first arrives
+    /// (language and theme: app.rs, for every window)
+    fn decide_setup(&mut self, cx: &mut Context<Self>) {
+        if self.setup_decided {
+            return;
+        }
         let core = self.core.read(cx);
         let Some(snap) = core.snap() else { return };
-        let (language, theme_name) = (snap.settings.language.clone(), snap.settings.theme.clone());
         // The first-run setup: decided once when the state first arrives; it
         // stays until finished or skipped, even when creating the profile
         // makes it no longer "needed". Only until it was finished or skipped
         // once (issue #86): with every device removed later, Home adds one. A
         // folder set up without it needs it no more.
-        let decide = !self.setup_decided && !snap.settings.setup_done;
+        let decide = !snap.settings.setup_done;
         let needs = decide && screens::setup::needs_setup(snap);
         self.setup_decided = true;
-        if language != self.language {
-            self.language = language;
-            if i18n::set_language(&self.language) {
-                cx.refresh_windows();
-            }
-        }
-        if theme_name != self.theme {
-            self.theme = theme_name;
-            theme::apply(ThemeSetting::parse(&self.theme), cx);
-        }
         if needs {
             self.state.update(cx, |s, cx| s.set_setup_active(true, cx));
         } else if decide {
@@ -180,14 +171,14 @@ impl MainWindow {
             .border_r_1()
             .border_color(p.border)
             .overflow_y_scroll()
-            .child(
-                div().flex().pb(theme::S2).child(ui::icon_button("nav-toggle", IconName::Navigation, toggle).on_click(
-                    cx.listener(move |this, _, _, cx| {
+            .child(div().flex().pb(theme::S2).child(
+                ui::icon_button("nav-toggle", IconName::Navigation, toggle).on_click(cx.listener(
+                    move |this, _, _, cx| {
                         this.collapsed = Some(!collapsed);
                         cx.notify();
-                    }),
+                    },
                 )),
-            )
+            ))
             .child(div().flex().flex_col().flex_1().gap(px(2.)).children(
                 NAV.iter().filter(|(name, _, _)| self.nav_shown(*name, cx)).map(|(name, icon_name, label)| {
                     let (name, on) = (*name, *name == current);
@@ -206,14 +197,25 @@ impl MainWindow {
                         .when(on, |d| {
                             d.bg(p.surface_2).font_weight(FontWeight::SEMIBOLD).child(
                                 // Windows' selection mark at the item's left
-                                div().absolute().left_0().top(px(9.)).bottom(px(9.)).w(px(3.)).rounded(px(2.)).bg(p.accent_fill),
+                                div()
+                                    .absolute()
+                                    .left_0()
+                                    .top(px(9.))
+                                    .bottom(px(9.))
+                                    .w(px(3.))
+                                    .rounded(px(2.))
+                                    .bg(p.accent_fill),
                             )
                         })
                         .hover(|s| s.bg(p.surface_2).text_color(p.text))
                         .on_click(cx.listener(move |_, _, _, cx| app::navigate(name, cx)))
                         .child(icon(*icon_name))
                         .when(!collapsed, |d| d.child(div().whitespace_nowrap().child(label.clone())))
-                        .when(collapsed, |d| d.tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)))
+                        .when(collapsed, |d| {
+                            d.tooltip(move |window, cx| {
+                                gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)
+                            })
+                        })
                 }),
             ))
             .child(screens::status::capture_sign(collapsed, cx))
@@ -226,7 +228,14 @@ impl Render for MainWindow {
         let p = *cx.palette();
         let ready = self.core.read(cx).ready();
         let setup_active = self.state.read(cx).setup_active || self.state.read(cx).route.name == RouteName::Setup;
-        let root = div().size_full().relative().flex().bg(p.bg).text_color(p.text).text_size(theme::FS_14).font_family(theme::FONT);
+        let root = div()
+            .size_full()
+            .relative()
+            .flex()
+            .bg(p.bg)
+            .text_color(p.text)
+            .text_size(theme::FS_14)
+            .font_family(theme::FONT);
         if !ready {
             self.screen = None;
             self.setup = None;
@@ -247,17 +256,18 @@ impl Render for MainWindow {
             self.setup = None;
             let screen = self.screen(window, cx);
             let once = self.cables_once.get_or_insert_with(|| ui::cable_notes::cables_once(window, cx)).clone();
-            root.child(self.render_nav(window, cx)).child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .child(screens::status::app_notices(cx))
-                    .child(div().flex_1().min_h_0().child(screen)),
-            )
-            .child(once)
+            root.child(self.render_nav(window, cx))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .child(screens::status::app_notices(cx))
+                        .child(div().flex_1().min_h_0().child(screen)),
+                )
+                .child(once)
         };
         body.child(notice_line(cx)).into_any_element()
     }
@@ -303,7 +313,6 @@ pub fn notice_line(cx: &App) -> impl IntoElement + use<> {
     div().absolute().bottom(theme::S4).left_0().right_0().flex().justify_center().when_some(notice, |d, n| {
         let (name, color, line) = match n.kind {
             NoticeKind::Error => (IconName::ErrorCircle, p.bad_text, p.bad_text),
-            NoticeKind::Hint => (IconName::Info, p.text_2, p.border_strong),
             NoticeKind::Info => (IconName::CheckmarkCircle, p.good_text, p.border_strong),
         };
         d.child(

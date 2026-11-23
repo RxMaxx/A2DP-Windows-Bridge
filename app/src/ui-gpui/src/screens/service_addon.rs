@@ -13,22 +13,23 @@
 
 use std::rc::Rc;
 
-use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::button::Button;
-use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::Disableable as _;
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, AsyncApp, AsyncWindowContext, Context, Entity, FontWeight, IntoElement,
-    ParentElement as _, Render, RenderOnce, Styled as _, Task, Window, div, px,
+    App, AppContext as _, AsyncApp, AsyncWindowContext, Context, Entity, FontWeight, IntoElement, ParentElement as _,
+    Render, RenderOnce, Styled as _, Task, Window, div, px,
 };
 use ui_model::i18n::t;
 use ui_model::links::LINKS;
 use ui_model::t;
-use ui_model::view::about::{ServiceButton, ServiceKind, SetupOutcome, service_buttons, service_state_text, setup_error};
+use ui_model::view::about::{
+    ServiceButton, ServiceKind, SetupOutcome, service_buttons, service_state_text, setup_error,
+};
 
 use crate::host::{self, ServiceAction, ServiceOutcome, ServiceState};
 use crate::theme::{self, ActivePalette as _};
+use crate::ui::dialog::{self, Question};
 use crate::ui::{self, ButtonKind, IconName, icon};
 
 fn kind(s: &ServiceState) -> ServiceKind {
@@ -111,70 +112,70 @@ enum Ask {
 fn ask(ask: Ask, setup: Entity<ServiceSetup>, on_end: Rc<dyn Fn(&mut App)>, window: &mut Window, cx: &mut App) {
     // Each opening starts with the data kept
     let data = cx.new(|_| false);
-    window.open_dialog(cx, move |dialog, _, cx| {
-        let busy = setup.read(cx).busy;
-        let remove_data = *data.read(cx);
-        let (title, confirm, kind) = match ask {
-            Ask::Add => (t("ui.service.add_title"), t("ui.service.add"), ButtonKind::Strong),
-            Ask::Remove => (t("ui.service.remove_title"), t("ui.service.remove"), ButtonKind::Danger),
-        };
-        let body = match ask {
-            Ask::Add => div()
-                .flex()
-                .flex_col()
-                .gap(theme::S3)
-                .child(t("ui.service.add_all_users"))
-                .child(t("ui.service.add_headphones")),
-            Ask::Remove => {
-                let data = data.clone();
-                div().flex().flex_col().gap(theme::S3).child(t("ui.service.remove_text")).child(ui::check(
-                    "service-remove-data",
-                    t("ui.service.remove_data"),
-                    remove_data,
-                    busy,
-                    move |v, _, cx| {
-                        let v = *v;
-                        data.update(cx, |d, cx| {
-                            *d = v;
-                            cx.notify();
-                        });
-                    },
-                ))
-            }
-        };
-        let (setup, on_end, closed) = (setup.clone(), on_end.clone(), on_end.clone());
-        let go = ui::button("dialog-confirm", confirm, kind).icon(icon(IconName::Shield)).loading(busy).on_click(
-            move |_, window, cx| {
-                let task = match ask {
-                    Ask::Add => ServiceSetup::run(&setup, ServiceAction::Install, false, cx),
-                    Ask::Remove => ServiceSetup::run(&setup, ServiceAction::Remove, remove_data, cx),
-                };
-                let on_end = on_end.clone();
-                window
-                    .spawn(cx, async move |cx: &mut AsyncWindowContext| {
-                        task.await;
-                        let _ = cx.update(|window, cx| {
-                            window.close_dialog(cx);
-                            on_end(cx);
-                        });
-                    })
-                    .detach();
-            },
-        );
-        dialog
-            .width(px(480.))
-            .title(title)
-            .child(body)
-            .on_close(move |_, _, cx| closed(cx))
-            .footer(
-                DialogFooter::new()
-                    .child(Button::new("dialog-cancel").label(t("modal.cancel")).disabled(busy).on_click(
-                        |_, window, cx| window.close_dialog(cx),
+    let question = {
+        let (setup, on_end) = (setup.clone(), on_end.clone());
+        move |_: &mut Window, cx: &mut App| {
+            let on_end = on_end.clone();
+            let q = match ask {
+                Ask::Add => Question::new(t("ui.service.add_title")).confirm(t("ui.service.add")),
+                Ask::Remove => Question::new(t("ui.service.remove_title")).warn().confirm(t("ui.service.remove")),
+            };
+            q.confirm_icon(IconName::Shield).busy(setup.read(cx).busy).on_cancel(move |_, cx| on_end(cx))
+        }
+    };
+    let body = {
+        let (setup, data) = (setup.clone(), data.clone());
+        move |_: &mut Window, cx: &mut App| {
+            let busy = setup.read(cx).busy;
+            let remove_data = *data.read(cx);
+            match ask {
+                Ask::Add => div()
+                    .flex()
+                    .flex_col()
+                    .gap(theme::S3)
+                    .child(t("ui.service.add_all_users"))
+                    .child(t("ui.service.add_headphones")),
+                Ask::Remove => {
+                    let data = data.clone();
+                    div().flex().flex_col().gap(theme::S3).child(t("ui.service.remove_text")).child(ui::check(
+                        "service-remove-data",
+                        t("ui.service.remove_data"),
+                        remove_data,
+                        busy,
+                        move |v, _, cx| {
+                            let v = *v;
+                            data.update(cx, |d, cx| {
+                                *d = v;
+                                cx.notify();
+                            });
+                        },
                     ))
-                    .child(go)
-                    .into_any_element(),
-            )
-    });
+                }
+            }
+            .into_any_element()
+        }
+    };
+    // The dialog closes however the set-up ended
+    let on_confirm = move |window: &mut Window, cx: &mut App| {
+        if setup.read(cx).busy {
+            return;
+        }
+        let task = match ask {
+            Ask::Add => ServiceSetup::run(&setup, ServiceAction::Install, false, cx),
+            Ask::Remove => ServiceSetup::run(&setup, ServiceAction::Remove, *data.read(cx), cx),
+        };
+        let on_end = on_end.clone();
+        window
+            .spawn(cx, async move |cx: &mut AsyncWindowContext| {
+                task.await;
+                let _ = cx.update(|window, cx| {
+                    window.close_dialog(cx);
+                    on_end(cx);
+                });
+            })
+            .detach();
+    };
+    dialog::show(question, body, on_confirm, window, cx);
 }
 
 /// Developer > keyboards and mice: the optional service, by what it gives
@@ -244,7 +245,8 @@ impl Render for ServiceRow {
                                 .disabled(busy)
                                 .on_click(cx.listener(|this, _, window, cx| this.open(Ask::Add, window, cx))),
                             ServiceButton::Update | ServiceButton::Start => {
-                                let label = if b == ServiceButton::Update { "ui.service.update" } else { "ui.service.start" };
+                                let label =
+                                    if b == ServiceButton::Update { "ui.service.update" } else { "ui.service.start" };
                                 let setup = setup.clone();
                                 ui::button("service-update", t(label), ButtonKind::Default)
                                     .icon(icon(IconName::Shield))
@@ -325,9 +327,13 @@ impl RenderOnce for ServiceConnectionNotice {
         };
         let p = cx.palette();
         let head = if self.stopped {
-            div().flex().flex_col().items_center().gap(theme::S3).child(title(t("ui.service.stopped_title"))).child(
-                para(t("ui.service.stopped_body")),
-            )
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(theme::S3)
+                .child(title(t("ui.service.stopped_title")))
+                .child(para(t("ui.service.stopped_body")))
         } else {
             div()
                 .flex()

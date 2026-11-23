@@ -14,7 +14,6 @@ use std::collections::HashMap;
 
 use gpui_kit::component::Disableable as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::tab::{Tab as GpuiTab, TabBar};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, AsyncApp, Context, Div, Entity, Focusable as _, IntoElement, ParentElement as _,
@@ -1001,34 +1000,6 @@ impl Developer {
     }
 }
 
-/// The tabs with their icons before their names. ui::tab_bar gives a tab
-/// with an icon only the icon (the library's icon tabs), so the icon goes
-/// in as a prefix here.
-fn tab_bar(
-    id: &'static str,
-    current: &Tab,
-    tabs: Vec<Choice<Tab>>,
-    on_select: impl Fn(&Tab, &mut Window, &mut App) + 'static,
-) -> impl IntoElement {
-    let selected = tabs.iter().position(|c| c.value == *current).unwrap_or(0);
-    let values: Vec<Tab> = tabs.iter().map(|c| c.value).collect();
-    TabBar::new(id)
-        .underline()
-        .selected_index(selected)
-        .children(tabs.into_iter().map(|c| {
-            let tab = GpuiTab::new().label(c.label);
-            match c.icon {
-                Some(i) => tab.prefix(div().flex().pl(theme::S2).child(icon(i))),
-                None => tab,
-            }
-        }))
-        .on_click(move |index: &usize, window, cx| {
-            if let Some(v) = values.get(*index) {
-                on_select(v, window, cx);
-            }
-        })
-}
-
 /// The tab's content, its sections one below the other
 fn tab_panel() -> Div {
     div().flex().flex_col().gap(theme::S4)
@@ -1067,7 +1038,7 @@ impl Render for Developer {
             Tab::Debug => self.debug_tab(&snap, cx).into_any_element(),
         };
         ui::page("developer", t("ui.nav.developer"))
-            .child(tab_bar(
+            .child(ui::tab_bar(
                 "developer-tabs",
                 &self.tab,
                 tabs,

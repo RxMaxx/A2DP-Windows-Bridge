@@ -59,7 +59,7 @@ pub fn mic_processing_row(
             let (source, on_change) = (source.clone(), on_change.clone());
             let controls = cx.new(|cx| MicProcessingControls::new(source, on_change, window, cx));
             dialog::ask(
-                dialog::Question::new(t("ui.mic_processing")).cancel(t("modal.close")),
+                dialog::Question::new(t("ui.mic_processing")),
                 move |_, _| controls.clone().into_any_element(),
                 |_, _| {},
                 window,
@@ -194,7 +194,15 @@ impl MicProcessingControls {
         .detach();
     }
 
-    fn slider(&self, i: usize, which: Which, p: &MicProcessing, disabled: bool, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn slider(
+        &self,
+        i: usize,
+        which: Which,
+        p: &MicProcessing,
+        disabled: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> impl IntoElement {
         let s = &self.sliders[i];
         let shown = slider_shown(s.held, s.pending, which.value(p));
         // Keep the slider on what it shows (the profile's value once saved)
@@ -226,12 +234,7 @@ impl MicProcessingControls {
                     .w(px(288.))
                     .child(div().flex_1().child(Slider::new(&s.state).disabled(disabled).accessibility_label(label)))
                     .child(
-                        div()
-                            .min_w(px(56.))
-                            .flex()
-                            .justify_end()
-                            .text_color(dim(pal.text_2))
-                            .child(which.text(shown)),
+                        div().min_w(px(56.)).flex().justify_end().text_color(dim(pal.text_2)).child(which.text(shown)),
                     ),
             )
     }

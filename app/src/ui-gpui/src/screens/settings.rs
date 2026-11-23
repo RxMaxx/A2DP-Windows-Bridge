@@ -50,10 +50,17 @@ pub fn battery_low_choice(settings: &CoreSettings, cx: &App) -> impl IntoElement
         t("ui.settings.battery_low"),
         Some(t("ui.settings.battery_low_hint").into()),
         None,
-        ui::select("battery-low", &settings.battery_low_percent, choices, false, |v: &u8, _, cx| {
-            let v = *v;
-            app::save_settings(move |s| s.battery_low_percent = v, cx);
-        }),
+        ui::select_labelled(
+            "battery-low",
+            t("ui.settings.battery_low"),
+            &settings.battery_low_percent,
+            choices,
+            false,
+            |v: &u8, _, cx| {
+                let v = *v;
+                app::save_settings(move |s| s.battery_low_percent = v, cx);
+            },
+        ),
         cx,
     )
 }
@@ -123,7 +130,8 @@ impl Settings {
     }
 
     fn appearance(&self, s: &CoreSettings, cx: &App) -> impl IntoElement + use<> {
-        let language = if LANGUAGES.iter().any(|(code, _)| *code == s.language) { s.language.clone() } else { "en".into() };
+        let language =
+            if LANGUAGES.iter().any(|(code, _)| *code == s.language) { s.language.clone() } else { "en".into() };
         let languages = LANGUAGES.iter().map(|(code, name)| Choice::new((*code).to_owned(), *name)).collect();
         ui::section(t("ui.settings.appearance"), None, cx)
             .child(ui::field(

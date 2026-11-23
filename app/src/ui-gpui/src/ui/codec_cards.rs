@@ -390,7 +390,7 @@ impl CodecSettings {
         }
         let this = cx.entity().downgrade();
         dialog::ask(
-            Question::new(t("ui.profile.unlisted_warn_title")).confirm(t("ui.profile.unlisted_warn_accept")),
+            Question::new(t("ui.profile.unlisted_warn_title")).warn().confirm(t("ui.profile.unlisted_warn_accept")),
             |_, _| div().child(t("ui.profile.unlisted_warn")).into_any_element(),
             move |_, cx| {
                 app::save_settings(|s| s.unlisted_options_warned = true, cx);
@@ -673,11 +673,5 @@ pub fn open_codec_settings(
         s.on_close = Some(Box::new(on_close));
         s
     });
-    dialog::ask(
-        Question::new(title).cancel(t("modal.close")).width(560.),
-        move |_, _| entity.clone().into_any_element(),
-        |_, _| {},
-        window,
-        cx,
-    );
+    dialog::ask(Question::new(title).width(560.), move |_, _| entity.clone().into_any_element(), |_, _| {}, window, cx);
 }

@@ -147,7 +147,9 @@ impl From<Phase> for UpdatePhase {
                 reason: if reason == "unsigned" { UpdateUnavailable::Unsigned } else { UpdateUnavailable::Portable },
             },
             Phase::Idle => UpdatePhase::Idle,
-            Phase::Downloading { version, downloaded, total } => UpdatePhase::Downloading { version, downloaded, total },
+            Phase::Downloading { version, downloaded, total } => {
+                UpdatePhase::Downloading { version, downloaded, total }
+            }
             Phase::Waiting { version } => UpdatePhase::Waiting { version },
             Phase::Installing { version } => UpdatePhase::Installing { version },
             Phase::Failed { code, detail } => UpdatePhase::Failed { code, detail },

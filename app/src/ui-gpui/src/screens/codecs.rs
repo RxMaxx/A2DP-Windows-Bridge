@@ -62,7 +62,6 @@
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use gpui_kit::component::Disableable as _;
@@ -204,6 +203,8 @@ pub fn settle_state(cx: &mut App) -> Entity<Settle> {
     }
     let state = cx.new(|_| Settle { settling: false, timer: None });
     cx.set_global(SettleGlobal(state.clone()));
+    // Home's and the flyout's codec lists (functions, not views) wait too
+    cx.observe(&state, |_, cx| cx.refresh_windows()).detach();
     state
 }
 
@@ -272,10 +273,6 @@ fn ask_auto_off(then: Act, window: &mut Window, cx: &mut App) {
 }
 
 // ---- the screen -------------------------------------------------------------------
-
-/// "Show only supported codecs", on unless turned off (kept while the
-/// program runs; the WebView kept it in its storage)
-static HIDE_UNSUPPORTED: AtomicBool = AtomicBool::new(true);
 
 pub struct Codecs {
     core: Entity<Core>,
@@ -351,7 +348,7 @@ impl Codecs {
     }
 
     fn set_hide(&mut self, hide: bool, cx: &mut Context<Self>) {
-        HIDE_UNSUPPORTED.store(hide, Ordering::Relaxed);
+        crate::ui_state::set_hide_unsupported(hide);
         for (_, s) in &self.sections {
             s.update(cx, |_, cx| cx.notify());
         }
@@ -379,7 +376,7 @@ impl Render for Codecs {
         let Some(auto) = self.core.read(cx).snap().map(|s| s.settings.auto_codec) else {
             return div().into_any_element();
         };
-        let hide = HIDE_UNSUPPORTED.load(Ordering::Relaxed);
+        let hide = hide();
         let options = div()
             .flex()
             .flex_col()
@@ -1354,8 +1351,10 @@ impl DeviceCodecs {
     }
 }
 
+/// "Show only supported codecs", on unless turned off (kept across starts,
+/// as the WebView kept it in its storage)
 fn hide() -> bool {
-    HIDE_UNSUPPORTED.load(Ordering::Relaxed)
+    crate::ui_state::hide_unsupported()
 }
 
 impl Render for DeviceCodecs {

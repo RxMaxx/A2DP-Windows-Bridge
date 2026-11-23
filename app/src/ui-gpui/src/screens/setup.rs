@@ -344,7 +344,8 @@ impl Setup {
                         Question::new(t("ui.adapter.paired_title"))
                             .confirm(t("ui.setup.auto_button"))
                             .confirm_icon(IconName::Shield)
-                            .danger(),
+                            .danger()
+                            .warn(),
                         move |_, cx| paired_devices_note(&list, cx).into_any_element(),
                         move |_, cx| {
                             let _ = weak.update(cx, |this, cx| {

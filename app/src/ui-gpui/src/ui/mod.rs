@@ -126,10 +126,41 @@ pub fn select<T: Clone + PartialEq + 'static>(
     disabled: bool,
     on_change: impl Fn(&T, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    select_named(id.into(), None, value, choices, disabled, on_change)
+}
+
+/// A [`select`] with a name for screen readers (TS `<Select label=..>`),
+/// for a list without a visible label of its own beside it: it is announced
+/// as "<label>: <the chosen value>"
+pub fn select_labelled<T: Clone + PartialEq + 'static>(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    value: &T,
+    choices: Vec<Choice<T>>,
+    disabled: bool,
+    on_change: impl Fn(&T, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    select_named(id.into(), Some(label.into()), value, choices, disabled, on_change)
+}
+
+fn select_named<T: Clone + PartialEq + 'static>(
+    id: ElementId,
+    label: Option<SharedString>,
+    value: &T,
+    choices: Vec<Choice<T>>,
+    disabled: bool,
+    on_change: impl Fn(&T, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
     let current = choices.iter().find(|c| c.value == *value).map(|c| c.label.clone()).unwrap_or_default();
+    let name = label.map(|l| if current.is_empty() { l } else { format!("{l}: {current}").into() });
     let value = value.clone();
     let on_change = Rc::new(on_change);
-    Button::new(id).label(current).dropdown_caret(true).disabled(disabled).dropdown_menu(move |mut menu, _, _| {
+    let button = Button::new(id).label(current).dropdown_caret(true).disabled(disabled);
+    let button = match name {
+        Some(name) => button.accessibility_label(name),
+        None => button,
+    };
+    button.dropdown_menu(move |mut menu, _, _| {
         let mut group: Option<SharedString> = None;
         for c in &choices {
             if c.group != group {
@@ -176,7 +207,7 @@ pub fn segmented<T: Clone + PartialEq + 'static>(
         })
 }
 
-/// A page's tabs
+/// A page's tabs, each with its icon before its name (Diagnostics, Developer)
 pub fn tab_bar<T: Clone + PartialEq + 'static>(
     id: impl Into<ElementId>,
     current: &T,
@@ -189,11 +220,12 @@ pub fn tab_bar<T: Clone + PartialEq + 'static>(
         .underline()
         .selected_index(selected)
         .children(tabs.into_iter().map(|c| {
-            let mut tab = Tab::new().label(c.label);
-            if let Some(i) = c.icon {
-                tab = tab.prefix(icon(i).small());
+            let tab = Tab::new().label(c.label);
+            // The prefix sits outside the tab's padding: the icon gets its own
+            match c.icon {
+                Some(i) => tab.prefix(div().flex().items_center().pl(theme::S2).child(icon(i))),
+                None => tab,
             }
-            tab
         }))
         .on_click(move |index: &usize, window, cx| {
             if let Some(v) = values.get(*index) {
@@ -250,9 +282,9 @@ pub fn toggle(
     cx: &App,
 ) -> Div {
     let label = label.into();
-    row().child(row_text(label.clone(), hint_text, cx)).child(
-        Switch::new(id).checked(checked).disabled(disabled).accessibility_label(label).on_change(on_change),
-    )
+    row()
+        .child(row_text(label.clone(), hint_text, cx))
+        .child(Switch::new(id).checked(checked).disabled(disabled).accessibility_label(label).on_change(on_change))
 }
 
 /// A small switch with its label after it, for options inside a line or a
@@ -371,15 +403,13 @@ pub fn section(title: impl Into<SharedString>, actions: Option<AnyElement>, cx: 
 
 /// A screen: its heading, then its cards, scrolling as one
 pub fn page(id: impl Into<ElementId>, title: impl Into<SharedString>) -> impl gpui_kit::ParentElement + IntoElement {
-    div()
-        .id(id)
-        .size_full()
-        .flex()
-        .flex_col()
-        .gap(theme::S4)
-        .p(theme::S6)
-        .overflow_y_scrollbar()
-        .child(div().font_family(theme::FONT_DISPLAY).text_size(theme::FS_28).font_weight(FontWeight::SEMIBOLD).child(title.into()))
+    div().id(id).size_full().flex().flex_col().gap(theme::S4).p(theme::S6).overflow_y_scrollbar().child(
+        div()
+            .font_family(theme::FONT_DISPLAY)
+            .text_size(theme::FS_28)
+            .font_weight(FontWeight::SEMIBOLD)
+            .child(title.into()),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -390,6 +420,9 @@ pub enum BannerKind {
     Good,
 }
 
+/// What a click runs (a banner's close button)
+pub type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
 /// A message in a card of its own: an icon, a title, text below it, then
 /// buttons; `on_dismiss` adds a close button
 pub fn banner(
@@ -397,7 +430,7 @@ pub fn banner(
     title: Option<SharedString>,
     body: Option<AnyElement>,
     actions: Option<AnyElement>,
-    on_dismiss: Option<(ElementId, Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>)>,
+    on_dismiss: Option<(ElementId, ClickHandler)>,
     cx: &App,
 ) -> Div {
     let p = cx.palette();
@@ -431,11 +464,6 @@ pub fn banner(
         .when_some(on_dismiss, |d, (id, f)| {
             d.child(icon_button(id, IconName::Dismiss, ui_model::i18n::t("modal.close")).on_click(f))
         })
-}
-
-/// A "?" that shows `text` while hovered (short reference text such as an order)
-pub fn help_tip(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Button {
-    Button::new(id).ghost().xsmall().icon(icon(IconName::QuestionCircle)).tooltip(text)
 }
 
 /// What changes when Windows' audio devices change (a cable installed by

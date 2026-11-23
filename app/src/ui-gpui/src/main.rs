@@ -19,6 +19,7 @@ mod screens;
 mod shell;
 mod theme;
 mod ui;
+mod ui_state;
 mod windows;
 
 use std::sync::Arc;

@@ -17,8 +17,6 @@
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
 
 use gpui_kit::component::{Disableable as _, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -27,12 +25,10 @@ use gpui_kit::{
     ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Task, WeakEntity, Window,
     div, px, relative,
 };
-use ipc::{ErrorInfo, Method, Profile, Snapshot, StreamState};
-use ui_model::codecs::{card_of, codec_spec};
+use ipc::{ErrorInfo, Method, Snapshot, StreamState};
+use ui_model::codecs::codec_spec;
 use ui_model::i18n::t;
-use ui_model::profile::{
-    AudioEntry, EntryByKey, audio_entries, entry_base, followed_name, normalize_profile, with_codec,
-};
+use ui_model::profile::{AudioEntry, EntryByKey, audio_entries};
 use ui_model::view::home::{
     self as model, CardPress, CodecPick, FirmwareBar, HiResBar, HomeError, card_press, codec_pick, device_card,
     firmware_bar, home_error, offers_add, other_radio_text, request_error_key,
@@ -40,6 +36,7 @@ use ui_model::view::home::{
 
 use crate::app::{self, AdapterSection, Route, RouteName};
 use crate::core::Core;
+use crate::screens::codecs::{choose_codec, settle, settling};
 use crate::theme::{self, ActivePalette as _};
 use crate::ui::stream::{
     CodecBadge, LinkSparkline, OnError, QualityIndicator, VolumeControl, adapter_hung, battery_level, codec_badge,
@@ -120,19 +117,15 @@ fn firmware_missing(snap: &Snapshot, cx: &App) -> Option<AnyElement> {
 /// A banner's close button's action
 type OnDismiss = Box<dyn Fn(&gpui_kit::ClickEvent, &mut Window, &mut App)>;
 
-// Another Bluetooth adapter's bar, dismissed (TS: kept in the WebView's
-// storage for good; here while the window process runs)
-static OTHER_RADIO_DISMISSED: AtomicBool = AtomicBool::new(false);
-
 /// Another Bluetooth adapter is active (issue #86): said until dismissed,
-/// which holds for good
+/// which holds for good (across starts: crate::ui_state)
 fn other_radio(snap: &Snapshot, cx: &App) -> Option<AnyElement> {
-    if OTHER_RADIO_DISMISSED.load(Ordering::Relaxed) {
+    if crate::ui_state::other_radio_dismissed() {
         return None;
     }
     let text = other_radio_text(snap)?;
     let dismiss: OnDismiss = Box::new(|_, _, cx| {
-        OTHER_RADIO_DISMISSED.store(true, Ordering::Relaxed);
+        crate::ui_state::set_other_radio_dismissed();
         cx.refresh_windows();
     });
     Some(
@@ -380,7 +373,7 @@ fn connect_entry(press: CardPress, entry: &AudioEntry, cx: &App) -> Task<Result<
         }
         CardPress::Start(profile) => start(profile, cx),
         CardPress::StartAuto => {
-            let saved = choose_codec(entry, "auto", cx);
+            let saved = choose_codec(entry, "auto", None, None, false, cx);
             cx.spawn(async move |cx: &mut AsyncApp| match saved.await {
                 Some(name) => cx.update(|cx| start(name, cx)).await,
                 // Not saved: already told
@@ -569,15 +562,16 @@ pub fn codec_picker(entry: &AudioEntry, cx: &App) -> AnyElement {
     if picker.value.is_none() {
         choices.insert(0, ui::Choice::new(None, t("ui.codec.none")).disabled(true));
     }
-    let busy = codec_saving(&entry.key, None) || settling();
+    let busy = codec_saving(&entry.key, None) || settling(cx);
     let entry = entry.clone();
     div()
         .flex()
         .flex_col()
         .w_full()
         .min_w_0()
-        .child(ui::select(
+        .child(ui::select_labelled(
             SharedString::from(format!("codec-{}", entry.key)),
+            t("quality.codec"),
             &picker.value,
             choices,
             busy,
@@ -610,7 +604,7 @@ fn choose(entry: &AudioEntry, id: &str, cx: &mut App) {
             Some(task) => task.await.is_some(),
             None => true,
         };
-        let ok = ok && cx.update(|cx| choose_codec(&entry, &id, cx)).await.is_some();
+        let ok = ok && cx.update(|cx| choose_codec(&entry, &id, None, None, false, cx)).await.is_some();
         codec_saving(&entry.key, Some(false));
         cx.update(|cx| {
             if ok && running {
@@ -618,92 +612,6 @@ fn choose(entry: &AudioEntry, id: &str, cx: &mut App) {
             }
             cx.refresh_windows();
         });
-    })
-    .detach();
-}
-
-// TODO(merge): use screens/codecs.rs save_entry / choose_codec and its
-// settle / settling once the "codecs" agent has them
-
-/// Saves the device's profile as `edit` changes it (the profile is made
-/// when the device has none yet); its name follows the codec while it is
-/// "<device> | <codec>". The profile's name once saved, None if that failed.
-fn save_entry(entry: &AudioEntry, edit: impl FnOnce(&mut Profile), cx: &App) -> Task<Option<String>> {
-    let Some(snap) = app::core(cx).read(cx).snap() else { return Task::ready(None) };
-    let cur = entry.profile.clone();
-    let mut next =
-        cur.clone().unwrap_or_else(|| entry_base(&entry.address, &entry.name, entry.le_audio, &snap.profiles));
-    edit(&mut next);
-    let taken: Vec<&str> = snap
-        .profiles
-        .iter()
-        .map(|p| p.name.as_str())
-        .filter(|n| Some(*n) != cur.as_ref().map(|c| c.name.as_str()))
-        .collect();
-    let codec = if entry.le_audio { String::new() } else { t(codec_spec(card_of(&next.codec, &next.quality)).label) };
-    next.name = followed_name(&next, &codec, &taken);
-    if cur.as_ref() == Some(&next) {
-        return Task::ready(Some(next.name));
-    }
-    let saved = normalize_profile(&next);
-    let name = saved.name.clone();
-    let method = Method::ProfileSave { profile: Box::new(saved), original_name: cur.map(|c| c.name) };
-    let task = app::run(app::request::<serde_json::Value>(method, cx), cx);
-    cx.spawn(async move |_: &mut AsyncApp| task.await.map(|_| name))
-}
-
-/// Saves the device's profile with `codec` chosen -> its name once saved
-fn choose_codec(entry: &AudioEntry, codec: &str, cx: &App) -> Task<Option<String>> {
-    let le_audio = entry.le_audio;
-    save_entry(
-        entry,
-        |p| {
-            if !le_audio {
-                *p = Profile { codec_forced: false, ..with_codec(p, codec, None) };
-            }
-        },
-        cx,
-    )
-}
-
-/// After a codec chosen during a stream, the codec lists wait at least
-/// this long, and until the stream is no longer starting again...
-const SETTLE_MIN: Duration = Duration::from_millis(1000);
-/// ...but never longer than this (a start that hangs)
-const SETTLE_MAX: Duration = Duration::from_millis(15000);
-// For every device and across pages: one stream starts again at a time
-static SETTLING: Mutex<Option<Instant>> = Mutex::new(None);
-
-fn settling() -> bool {
-    SETTLING.lock().unwrap_or_else(|e| e.into_inner()).is_some()
-}
-
-/// The codec lists wait for the stream started again with a new codec
-fn settle(cx: &mut App) {
-    let since = Instant::now();
-    *SETTLING.lock().unwrap_or_else(|e| e.into_inner()) = Some(since);
-    cx.spawn(async move |cx: &mut AsyncApp| {
-        loop {
-            cx.background_executor().timer(Duration::from_millis(200)).await;
-            let restarting = cx.update(|cx| {
-                app::core(cx)
-                    .read(cx)
-                    .snap()
-                    .is_some_and(|s| matches!(s.stream.state, StreamState::Connecting | StreamState::Reconnecting))
-            });
-            let waited = since.elapsed();
-            let mut s = SETTLING.lock().unwrap_or_else(|e| e.into_inner());
-            // A later settle runs its own wait
-            if *s != Some(since) {
-                return;
-            }
-            if (waited >= SETTLE_MIN && !restarting) || waited >= SETTLE_MAX {
-                *s = None;
-                drop(s);
-                cx.update(|cx| cx.refresh_windows());
-                return;
-            }
-        }
     })
     .detach();
 }

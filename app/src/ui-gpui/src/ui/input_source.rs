@@ -179,8 +179,9 @@ impl Render for InputSource {
             .items_center()
             .gap(theme::S2)
             .child(icon(IconName::Mic))
-            .child(div().flex_1().min_w(px(192.)).child(super::select(
+            .child(div().flex_1().min_w(px(192.)).child(super::select_labelled(
                 "mic-output",
+                t("ui.mic_output"),
                 &v.chosen,
                 options,
                 busy || off,

@@ -18,18 +18,14 @@
 //!
 //! Ported from app/src/ui/src/components/CableNotes.tsx.
 
-use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::button::Button;
-use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::link::Link;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, AsyncApp, Context, Entity, FontWeight, IntoElement, ParentElement as _, Render,
-    RenderOnce, SharedString, Styled as _, Task, WeakEntity, Window, div, px,
+    App, AppContext as _, AsyncApp, Context, Entity, FontWeight, IntoElement, ParentElement as _, Render, RenderOnce,
+    SharedString, Styled as _, Task, WeakEntity, Window, div, px,
 };
 use ipc::{AudioDevice, Method};
 use ui_model::i18n::t;
@@ -42,6 +38,7 @@ use ui_model::view::about::{
 use crate::app::{self, NoticeKind};
 use crate::host;
 use crate::theme::{self, ActivePalette as _};
+use crate::ui::dialog::{self, Question};
 use crate::ui::{self, ButtonKind, IconName, icon};
 
 /// Reads Windows' outputs again (the owner's list)
@@ -54,13 +51,11 @@ fn link(id: impl Into<gpui_kit::ElementId>, url: &'static str, label: impl Into<
 
 /// VB-Audio's name for it, and that it is donationware: a link to its site
 fn origin(id: &'static str, text: String, url: &'static str, cx: &App) -> impl IntoElement + use<> {
-    ui::hint(String::new(), cx)
-        .flex()
-        .flex_wrap()
-        .gap(theme::S1)
-        .mt(theme::S1)
-        .child(text)
-        .child(link(id, url, link_text(url).to_owned()))
+    ui::hint(String::new(), cx).flex().flex_wrap().gap(theme::S1).mt(theme::S1).child(text).child(link(
+        id,
+        url,
+        link_text(url).to_owned(),
+    ))
 }
 
 /// One cable: its name with Installed or Not installed, its origin, and
@@ -111,7 +106,8 @@ impl CableRow {
         self.failed = false;
         self.polling = None;
         cx.notify();
-        let method = if uninstall { Method::AudioUninstallCable { hifi: self.hifi } } else { Method::AudioInstallVbCable };
+        let method =
+            if uninstall { Method::AudioUninstallCable { hifi: self.hifi } } else { Method::AudioInstallVbCable };
         let task = app::request::<bool>(method, cx);
         cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let answer = task.await;
@@ -238,31 +234,21 @@ impl CablesDialog {
         self.hifi.update(cx, |r, cx| r.set_installed(hifi, cx));
     }
 
-    /// Opens the dialog; `on_close` runs once when it closes, however
-    pub fn open(this: &Entity<Self>, on_close: impl Fn(&mut Window, &mut App) + 'static, window: &mut Window, cx: &mut App) {
+    /// Opens the dialog; `on_close` runs when it closes
+    pub fn open(
+        this: &Entity<Self>,
+        on_close: impl Fn(&mut Window, &mut App) + 'static,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         let view = this.clone();
-        let closed = Rc::new(Cell::new(false));
-        let on_close = Rc::new(move |window: &mut Window, cx: &mut App| {
-            if !closed.replace(true) {
-                on_close(window, cx);
-            }
-        });
-        window.open_dialog(cx, move |dialog, _, _| {
-            let (close, closed) = (on_close.clone(), on_close.clone());
-            dialog
-                .width(px(560.))
-                .title(t("cables.title"))
-                .child(view.clone())
-                .on_close(move |_, window, cx| closed(window, cx))
-                .footer(
-                    DialogFooter::new()
-                        .child(Button::new("dialog-cancel").label(t("modal.close")).on_click(move |_, window, cx| {
-                            window.close_dialog(cx);
-                            close(window, cx);
-                        }))
-                        .into_any_element(),
-                )
-        });
+        dialog::ask(
+            Question::new(t("cables.title")).width(560.).on_cancel(on_close),
+            move |_, _| view.clone().into_any_element(),
+            |_, _| {},
+            window,
+            cx,
+        );
     }
 }
 
@@ -278,19 +264,14 @@ impl Render for CablesDialog {
             .flex_col()
             .gap(theme::S4)
             .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(theme::S1)
-                    .child(t("cables.intro"))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .pl(theme::S2)
-                            .child(bullet(t("cables.reason_separate")))
-                            .child(bullet(t("cables.reason_features"))),
-                    ),
+                div().flex().flex_col().gap(theme::S1).child(t("cables.intro")).child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .pl(theme::S2)
+                        .child(bullet(t("cables.reason_separate")))
+                        .child(bullet(t("cables.reason_features"))),
+                ),
             )
             .child(rule())
             .child(self.vb.clone())
@@ -352,9 +333,10 @@ impl RenderOnce for CableNotes {
             .rounded(theme::RADIUS_CARD)
             .child(div().text_color(text_color).child(icon(name)))
             .child(div().flex_1().min_w(px(16. * 14.)).child(text))
-            .child(ui::button("cables-learn-more", t("cables.learn_more"), ButtonKind::Default).on_click(
-                move |_, window, cx| CablesDialog::open(&dialog, |_, _| {}, window, cx),
-            ))
+            .child(
+                ui::button("cables-learn-more", t("cables.learn_more"), ButtonKind::Default)
+                    .on_click(move |_, window, cx| CablesDialog::open(&dialog, |_, _| {}, window, cx)),
+            )
             .into_any_element()
     }
 }

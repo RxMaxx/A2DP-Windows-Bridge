@@ -19,7 +19,6 @@ use std::time::Duration;
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::Button;
-use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::radio::Radio;
 use gpui_kit::component::scroll::ScrollableElement as _;
@@ -158,44 +157,8 @@ async fn classic_profile(address: &str, saved: &str, audio: Option<&SetupAudio>,
     run_ok(save, cx).await.then_some(profile_name)
 }
 
-// ---- A dialog that waits for its request -------------------------------------
-
-/// A question whose confirming button runs a request: the dialog stays open
-/// (the button spinning while `busy`) until `on_confirm` closes it with
-/// `window.close_dialog(cx)`, so a failure can be tried again. Escape and
-/// Cancel close it.
-pub fn ask_busy(
-    question: Question,
-    busy: impl Fn(&App) -> bool + 'static,
-    body: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
-    on_confirm: impl Fn(&mut Window, &mut App) + 'static,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    let on_confirm = Rc::new(on_confirm);
-    window.open_dialog(cx, move |d, window, cx| {
-        let q = question.clone();
-        let busy = busy(cx);
-        let mut footer = DialogFooter::new()
-            .child(Button::new("dialog-cancel").label(q.cancel).on_click(|_, window, cx| window.close_dialog(cx)));
-        if let Some(label) = q.confirm {
-            let on_confirm = on_confirm.clone();
-            let kind = if q.danger { ButtonKind::Danger } else { ButtonKind::Strong };
-            let mut confirm = button("dialog-confirm", label, kind)
-                .loading(busy)
-                .disabled(busy)
-                .on_click(move |_, window, cx| on_confirm(window, cx));
-            if let Some(i) = q.confirm_icon {
-                confirm = confirm.icon(icon(i));
-            }
-            footer = footer.child(confirm);
-        }
-        d.width(px(q.width))
-            .title(q.title)
-            .child(div().flex().flex_col().gap(theme::S3).child(body(window, cx)))
-            .footer(footer.into_any_element())
-    });
-}
+// A dialog that waits for its request (moved to ui/dialog.rs)
+pub use super::dialog::ask_busy;
 
 /// A tag (`.tag`): a small rounded label
 pub fn tag(text: impl Into<SharedString>, cx: &App) -> Div {

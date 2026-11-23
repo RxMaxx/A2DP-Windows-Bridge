@@ -10,12 +10,9 @@
 //!
 //! Ported from app/src/ui/src/components/HidHost.tsx.
 
-use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::component::Disableable as _;
-use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, AsyncApp, Context, Div, Entity, FontWeight, IntoElement, ParentElement as _,
@@ -32,6 +29,7 @@ use crate::core::Core;
 use crate::screens::hid_enable_dialog::open_hid_enable_dialog;
 use crate::screens::service_addon::ServiceRow;
 use crate::theme::{self, ActivePalette as _};
+use crate::ui::dialog::{self, Question};
 use crate::ui::{self, BannerKind, ButtonKind, IconName, icon};
 
 /// How often the counts are read while the section is on screen
@@ -60,52 +58,21 @@ pub(crate) fn warn_dialog(
     cx: &mut App,
 ) {
     let (title, text, confirm) = (title.into(), text.into(), confirm.into());
-    let run = Rc::new(run);
-    let busy = cx.new(|_| false);
-    window.open_dialog(cx, move |dialog, _, cx| {
-        let is_busy = *busy.read(cx);
-        let cancel = ui::button("dialog-cancel", t("modal.cancel"), ButtonKind::Default)
-            .disabled(is_busy)
-            .on_click(|_, window, cx| window.close_dialog(cx));
-        let go = {
-            let (busy, run) = (busy.clone(), run.clone());
-            ui::button("dialog-confirm", confirm.clone(), ButtonKind::Strong).loading(is_busy).on_click(
-                move |_, window, cx| {
-                    if *busy.read(cx) {
-                        return;
-                    }
-                    busy.update(cx, |b, cx| {
-                        *b = true;
-                        cx.notify();
-                    });
-                    let task = run(cx);
-                    let busy = busy.clone();
-                    window
-                        .spawn(cx, async move |cx| {
-                            task.await;
-                            let _ = cx.update(|window, cx| {
-                                busy.update(cx, |b, cx| {
-                                    *b = false;
-                                    cx.notify();
-                                });
-                                window.close_dialog(cx);
-                            });
-                        })
-                        .detach();
-                },
-            )
-        };
-        let busy_now = busy.clone();
-        dialog
-            .width(px(480.))
-            .title(warn_title(title.clone(), cx))
-            .close_button(false)
-            .keyboard(!is_busy)
-            .overlay_closable(!is_busy)
-            .on_cancel(move |_, _, cx| !*busy_now.read(cx))
-            .child(div().child(text.clone()))
-            .footer(DialogFooter::new().child(cancel).child(go).into_any_element())
-    });
+    let busy = dialog::busy_state(cx);
+    dialog::ask_run(
+        move |_, _| Question::new(title.clone()).warn().confirm(confirm.clone()),
+        busy,
+        move |_, _| div().child(text.clone()).into_any_element(),
+        move |_, cx| {
+            let task = run(cx);
+            cx.spawn(async move |_: &mut AsyncApp| {
+                task.await;
+                true
+            })
+        },
+        window,
+        cx,
+    );
 }
 
 /// Asks before turning it off: the mouse in hand may be one of them

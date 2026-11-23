@@ -17,7 +17,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, AsyncApp, Context, Div, Entity, FontWeight, IntoElement, ParentElement as _,
-    SharedString, Styled as _, WeakEntity, Window, div, px,
+    Styled as _, WeakEntity, Window, div, px,
 };
 use ipc::{Device, DevicePairing, Method, ServiceList};
 use ui_model::i18n::t;
@@ -230,19 +230,9 @@ pub fn open(device: &Device, window: &mut Window, cx: &mut App) {
         s
     });
     let name = if device.name.is_empty() { t("device.name_unknown") } else { device.name.clone() };
-    // The device under the title (the TS dialog's subtitle)
-    let subtitle = SharedString::from(format!("{name} {}", device.address));
     dialog::ask(
-        Question::new(t("ui.pairing.services")).cancel(t("modal.close")).width(640.),
-        move |_, cx| {
-            div()
-                .flex()
-                .flex_col()
-                .gap(theme::S3)
-                .child(div().text_color(cx.palette().text_2).child(subtitle.clone()))
-                .child(body(&state, cx))
-                .into_any_element()
-        },
+        Question::new(t("ui.pairing.services")).subtitle(format!("{name} {}", device.address)).width(640.),
+        move |_, cx| body(&state, cx),
         |_, _| {},
         window,
         cx,

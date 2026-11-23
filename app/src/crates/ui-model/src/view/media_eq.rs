@@ -272,10 +272,7 @@ pub fn key_action(b: &EqPoint, key: EqKey, shift: bool) -> KeyAction {
 
 /// The EQ turned on or off: a new EQ starts with the default points
 pub fn toggled(eq: &MediaEq, on: bool) -> MediaEq {
-    MediaEq {
-        enabled: on,
-        bands: if on && eq.bands.is_empty() { DEFAULT_POINTS.to_vec() } else { eq.bands.clone() },
-    }
+    MediaEq { enabled: on, bands: if on && eq.bands.is_empty() { DEFAULT_POINTS.to_vec() } else { eq.bands.clone() } }
 }
 
 /// The points the graph shows: off without points, the ones turning it on

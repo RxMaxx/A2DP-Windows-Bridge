@@ -8,9 +8,10 @@ use std::time::Duration;
 use gpui_kit::{App, AppContext as _, AsyncApp, Context, Entity, Global, SharedString, Task, WeakEntity};
 use ipc::{ErrorInfo, Method, Settings, SettingsApplied};
 use serde::de::DeserializeOwned;
-use ui_model::i18n::{t, tm};
+use ui_model::i18n::{self, t, tm};
 
 use crate::core::Core;
+use crate::theme::{self, ThemeSetting};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RouteName {
@@ -98,8 +99,6 @@ pub fn parse_route(text: &str) -> Route {
 pub enum NoticeKind {
     /// Done ("Copied")
     Info,
-    /// What to do instead (no success mark)
-    Hint,
     Error,
 }
 
@@ -161,7 +160,29 @@ impl Global for Globals {}
 
 pub fn init(core: Entity<Core>, cx: &mut App) {
     let state = cx.new(|_| AppState::new());
+    follow_settings(&core, cx);
     cx.set_global(Globals { core, state });
+}
+
+/// Language and theme come from the core's settings, applied here once for
+/// every window (the main window and the flyout alike)
+fn follow_settings(core: &Entity<Core>, cx: &mut App) {
+    let (mut language, mut theme_name) = (String::new(), String::new());
+    cx.observe(core, move |core, cx| {
+        let Some(s) = core.read(cx).snap().map(|s| &s.settings) else { return };
+        let (new_language, new_theme) = (s.language.clone(), s.theme.clone());
+        if new_language != language {
+            language = new_language;
+            if i18n::set_language(&language) {
+                cx.refresh_windows();
+            }
+        }
+        if new_theme != theme_name {
+            theme_name = new_theme;
+            theme::apply(ThemeSetting::parse(&theme_name), cx);
+        }
+    })
+    .detach();
 }
 
 /// The core store

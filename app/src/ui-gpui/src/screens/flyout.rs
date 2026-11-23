@@ -19,7 +19,7 @@ use gpui_kit::{
     ParentElement as _, Render, Styled as _, Window, div, px,
 };
 use ipc::{ErrorInfo, StreamState};
-use ui_model::i18n::{self, t, tm};
+use ui_model::i18n::{t, tm};
 use ui_model::profile::{audio_entries, entry_of};
 use ui_model::view::flyout::{FixTarget, FlyoutError, fix_target, flyout_error, flyout_parts};
 use ui_model::view::stream::stream_status_text;
@@ -29,16 +29,19 @@ use crate::core::{self, Core, WantKind};
 use crate::screens::home::codec_picker;
 use crate::screens::status::capture_sign_to;
 use crate::shell;
-use crate::theme::{self, ActivePalette as _, ThemeSetting};
+use crate::theme::{self, ActivePalette as _};
 use crate::ui::device_switcher::device_switcher;
 use crate::ui::mixer::MixerList;
 use crate::ui::stream::{
     CodecBadge, ConnectButton, QualityIndicator, VolumeControl, adapter_drivers, battery_level, codec_badge,
-    copy_error, current_profile, dot, fix_for, fix_icon, is_app_fault, mic_row, report_error, ring, run_fix,
+    copy_error, current_profile, dot, fix_for, fix_icon, is_app_fault, mic_row, report_error, ring_sized, run_fix,
     state_colors,
 };
 use crate::ui::{self, ButtonKind, IconName, icon};
 use crate::windows;
+
+/// The ring's size (`.fly-head .ring-small`: 3.5rem)
+const FLY_RING: f32 = 56.;
 
 /// Makes the flyout's page
 pub fn open(window: &mut Window, cx: &mut App) -> AnyView {
@@ -63,15 +66,12 @@ pub struct Flyout {
     /// What clears it: the stream's state moving on, an adapter's driver
     /// changing (as on Home)
     seen: Option<(StreamState, String)>,
-    language: String,
-    theme: String,
 }
 
 impl Flyout {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Flyout {
         let core = app::core(cx);
         cx.observe(&core, |this: &mut Self, core, cx| {
-            this.follow_settings(cx);
             let now = core.read(cx).snap().map(|s| (s.stream.state, adapter_drivers(s)));
             if this.seen != now {
                 // As on Home: until the state moves on or an adapter's driver changes
@@ -97,36 +97,7 @@ impl Flyout {
         let volume = cx.new(|cx| VolumeControl::new(false, window, cx));
         let quality = cx.new(|cx| QualityIndicator::new(window, cx));
         let seen = core.read(cx).snap().map(|s| (s.stream.state, adapter_drivers(s)));
-        let mut this = Flyout {
-            core,
-            connect,
-            volume,
-            quality,
-            mixer: None,
-            req_error: None,
-            seen,
-            language: String::new(),
-            theme: String::new(),
-        };
-        this.follow_settings(cx);
-        this
-    }
-
-    /// Language and theme come from the core's settings, as in the main
-    /// window (which may not be open while the flyout is)
-    fn follow_settings(&mut self, cx: &mut Context<Self>) {
-        let Some(s) = self.core.read(cx).snap().map(|s| &s.settings) else { return };
-        let (language, theme_name) = (s.language.clone(), s.theme.clone());
-        if language != self.language {
-            self.language = language;
-            if i18n::set_language(&self.language) {
-                cx.refresh_windows();
-            }
-        }
-        if theme_name != self.theme {
-            self.theme = theme_name;
-            theme::apply(ThemeSetting::parse(&self.theme), cx);
-        }
+        Flyout { core, connect, volume, quality, mixer: None, req_error: None, seen }
     }
 
     /// As on Home (issue #86): no device yet, the way to add one
@@ -207,7 +178,7 @@ impl Flyout {
                 .flex()
                 .items_start()
                 .gap(theme::S3)
-                .child(ring("fly-ring", s.state, s.volume, true, icon(IconName::Headphones), cx))
+                .child(ring_sized("fly-ring", s.state, s.volume, FLY_RING, true, icon(IconName::Headphones), cx))
                 .child(
                     div()
                         .flex_1()

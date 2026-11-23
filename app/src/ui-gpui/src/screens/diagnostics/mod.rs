@@ -22,7 +22,6 @@ use std::rc::Rc;
 
 use gpui_kit::component::Disableable as _;
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::tab::{Tab as GpuiTab, TabBar};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -229,7 +228,8 @@ impl Diagnostics {
         app::send(Method::DiagSetVerbose { level: verbose_level(v) }, cx);
     }
 
-    fn save_bundle(&mut self, cx: &mut Context<Self>) {
+    /// -> whether it was saved (the dialog then closes; it stays after a failure)
+    fn save_bundle(&mut self, cx: &mut Context<Self>) -> Task<bool> {
         self.bundle_busy = true;
         cx.notify();
         let s = shared(cx);
@@ -237,6 +237,7 @@ impl Diagnostics {
         let task = app::request::<DiagBundle>(Method::DiagBundle(Some(params)), cx);
         cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let result = task.await;
+            let saved = result.is_ok();
             let _ = this.update(cx, |this, cx| {
                 this.bundle_busy = false;
                 match result {
@@ -245,15 +246,17 @@ impl Diagnostics {
                 }
                 cx.notify();
             });
+            saved
         })
-        .detach();
     }
 
     /// The bundle's options first: no bundle until Save in the dialog
     fn ask_bundle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let this = cx.entity().downgrade();
-        dialog::ask(
-            Question::new(t("ui.diag.bundle")).confirm(t("ui.diag.bundle_save")),
+        let busy = dialog::busy_state(cx);
+        dialog::ask_run(
+            |_, _| Question::new(t("ui.diag.bundle")).confirm(t("ui.diag.bundle_save")),
+            busy,
             |_, cx| {
                 let s = shared(cx);
                 let (hci, mask) = (s.with_hci, s.mask);
@@ -286,9 +289,7 @@ impl Diagnostics {
                     )
                     .into_any_element()
             },
-            move |_, cx| {
-                let _ = this.update(cx, |this, cx| this.save_bundle(cx));
-            },
+            move |_, cx| this.update(cx, |this, cx| this.save_bundle(cx)).unwrap_or_else(|_| Task::ready(false)),
             window,
             cx,
         );
@@ -399,8 +400,9 @@ impl Diagnostics {
         let verbose = self.core.read(cx).snap().and_then(|s| s.verbose);
         let choice = verbose_choice(verbose.as_ref());
         let saved = shared(cx).saved_bundle.clone();
-        let select = div().min_w(px(200.)).flex().justify_end().child(ui::select(
+        let select = div().min_w(px(200.)).flex().justify_end().child(ui::select_labelled(
             "verbose",
+            t("ui.diag.verbose"),
             &choice,
             vec![
                 Choice::new(VerboseChoice::Off, t("ui.diag.verbose_off")),
@@ -520,28 +522,6 @@ impl Diagnostics {
     }
 }
 
-/// The tabs with their icon before their name (ui::tab_bar shows the icon
-/// alone: the component draws a tab with an icon as icon-only)
-fn tab_bar(current: &Tab, tabs: Vec<Choice<Tab>>, on_select: impl Fn(Tab, &mut Window, &mut App) + 'static) -> TabBar {
-    let selected = tabs.iter().position(|c| c.value == *current).unwrap_or(0);
-    let values: Vec<Tab> = tabs.iter().map(|c| c.value).collect();
-    TabBar::new("diag-tabs")
-        .underline()
-        .selected_index(selected)
-        .children(tabs.into_iter().map(|c| {
-            let tab = GpuiTab::new().label(c.label);
-            match c.icon {
-                Some(i) => tab.prefix(div().pl(theme::S2).flex().items_center().child(icon(i))),
-                None => tab,
-            }
-        }))
-        .on_click(move |index: &usize, window, cx| {
-            if let Some(v) = values.get(*index) {
-                on_select(*v, window, cx);
-            }
-        })
-}
-
 impl Render for Diagnostics {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(recording) = self.core.read(cx).snap().map(|s| s.capture.is_some()) else {
@@ -570,7 +550,8 @@ impl Render for Diagnostics {
             .child(head)
             .child(report)
             .children(capture)
-            .child(tab_bar(&self.tab, tabs, move |tab: Tab, window, cx| {
+            .child(ui::tab_bar("diag-tabs", &self.tab, tabs, move |tab: &Tab, window, cx| {
+                let tab = *tab;
                 let _ = this.update(cx, |this, cx| this.select(tab, window, cx));
             }))
             .child(self.panel.clone())

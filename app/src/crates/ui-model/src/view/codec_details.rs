@@ -111,7 +111,8 @@ fn chip_row<T: PartialEq + Clone>(
     used: T,
     text: impl Fn(&T) -> String,
 ) -> CdRow {
-    let chips = chips(all, offered, used).into_iter().map(|c| CdChip { text: text(&c.value), state: c.state }).collect();
+    let chips =
+        chips(all, offered, used).into_iter().map(|c| CdChip { text: text(&c.value), state: c.state }).collect();
     CdRow::Chips { label, chips }
 }
 
@@ -272,7 +273,8 @@ pub fn codec_details_view(info: &StreamInfo, d: &CodecDetails) -> CodecDetailsVi
         sections.push(CdSection { title: info.codec.clone(), rows: device_rows(dev, info), hints: Vec::new() });
     }
     // Without the device's capabilities the chips show only what is used
-    let no_device = d.sbc.as_ref().is_some_and(|s| s.device.is_none()) || d.aac.as_ref().is_some_and(|a| a.device.is_none());
+    let no_device =
+        d.sbc.as_ref().is_some_and(|s| s.device.is_none()) || d.aac.as_ref().is_some_and(|a| a.device.is_none());
     let chips_shown = d.sbc.as_ref().is_some_and(|s| s.device.is_some())
         || d.aac.as_ref().is_some_and(|a| a.device.is_some())
         || d.device.is_some();
