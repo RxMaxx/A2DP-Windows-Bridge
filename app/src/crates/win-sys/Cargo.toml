@@ -25,6 +25,8 @@ features = [
     "Foundation_Collections",
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
+    # window.rs: the work area of the screen a flyout stands on
+    "Win32_Graphics_Gdi",
     "Win32_Globalization",
     "Win32_Security",
     "Win32_Security_Authorization",

@@ -10,6 +10,9 @@ publish.workspace = true
 name = "bluecaster-gpui"
 path = "src/main.rs"
 
+[build-dependencies]
+embed-resource = "3"
+
 [dependencies]
 ipc.workspace = true
 win-sys.workspace = true

@@ -17,6 +17,7 @@ use crate::core::{self, ConnStatus, Core, WantKind};
 use crate::screens;
 use crate::theme::{self, ActivePalette as _, ThemeSetting};
 use crate::ui::{self, IconName, icon};
+use crate::windows;
 
 const NAV: [(RouteName, IconName, &str); 9] = [
     (RouteName::Home, IconName::Home, "ui.nav.home"),
@@ -47,6 +48,8 @@ pub struct MainWindow {
     setup: Option<AnyView>,
     /// Whether the setup was decided for the state that first arrived
     setup_decided: bool,
+    /// The window has the setup's size
+    setup_sized: bool,
     language: String,
     theme: String,
 }
@@ -55,7 +58,21 @@ impl MainWindow {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> MainWindow {
         // Windows' accent colour and theme, read again when the window gets
         // the focus, so a change in Settings shows
-        cx.observe_window_activation(window, |_, _, cx| theme::refresh(cx)).detach();
+        cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active() {
+                theme::refresh(cx);
+                return;
+            }
+            // "Minimize to System Tray": the tray icon is the core's, so
+            // minimizing only has to take the window off the taskbar. The
+            // core says once that BlueCaster still runs in the tray (closing
+            // the window does the same, in windows.rs)
+            let to_tray = this.core.read(cx).snap().is_some_and(|s| s.settings.minimize_to_tray);
+            if to_tray && win_sys::window::is_minimized(windows::hwnd(window)) {
+                windows::hide_to_tray(window, cx);
+            }
+        })
+        .detach();
         cx.observe_window_appearance(window, |_, _, cx| theme::refresh(cx)).detach();
         let core = app::core(cx);
         let state = app::state(cx);
@@ -75,6 +92,7 @@ impl MainWindow {
             screen: None,
             setup: None,
             setup_decided: false,
+            setup_sized: false,
             language: String::new(),
             theme: String::new(),
         };
@@ -210,6 +228,11 @@ impl Render for MainWindow {
             self.screen = None;
             self.setup = None;
             return root.child(connection_screen(&self.core.read(cx).conn, false, cx)).into_any_element();
+        }
+        if setup_active != self.setup_sized {
+            // The first-run setup opened or closed: the window fits it
+            self.setup_sized = setup_active;
+            window.defer(cx, move |window, cx| windows::setup_window(setup_active, window, cx));
         }
         let body = if setup_active {
             self.screen = None;

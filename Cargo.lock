@@ -848,6 +848,7 @@ dependencies = [
 name = "bluecaster-ui-gpui"
 version = "3.0.4"
 dependencies = [
+ "embed-resource",
  "gpui-kit",
  "ipc",
  "raw-window-handle",

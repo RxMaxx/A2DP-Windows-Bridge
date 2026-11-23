@@ -13,6 +13,7 @@
 mod app;
 mod core;
 mod demo;
+mod flyout_window;
 mod host;
 mod screens;
 mod shell;
@@ -130,7 +131,7 @@ fn on_host_event(event: HostEvent, cx: &mut App) {
 fn on_launch(launch: Launch, cx: &mut App) {
     match launch {
         Launch::Main => windows::show_main(None, true, cx),
-        Launch::Flyout => screens::flyout::toggle(cx),
-        Launch::QuickSettings => screens::flyout::show_with_quick_settings(cx),
+        Launch::Flyout => flyout_window::toggle(cx),
+        Launch::QuickSettings => flyout_window::show_with_quick_settings(cx),
     }
 }

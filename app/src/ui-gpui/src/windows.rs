@@ -31,6 +31,9 @@ const MAIN_HEIGHT: f32 = 640.;
 const MAIN_MIN_WIDTH: f32 = 960.;
 const MAIN_MIN_HEIGHT: f32 = 520.;
 
+/// The icon resource build.rs embeds app.ico as
+const ICON_RESOURCE: u16 = 101;
+
 #[derive(Default)]
 struct Windows {
     main: Option<AnyWindowHandle>,
@@ -82,6 +85,7 @@ pub fn show_main(route: Option<Route>, focus: bool, cx: &mut App) {
     if let Some(route) = route {
         app::navigate(route, cx);
     }
+    crate::flyout_window::hide(cx);
     if let Some(main) = windows(cx).main {
         let shown = main.update(cx, |_, window, _| window.activate_window()).is_ok();
         if shown {
@@ -108,6 +112,11 @@ pub fn show_main(route: Option<Route>, focus: bool, cx: &mut App) {
         let dark = cx.palette().dark;
         main_hwnd = hwnd(window);
         win_sys::window::set_dark_title_bar(main_hwnd, dark);
+        // The title bar and taskbar icons at their own sizes from the .ico
+        // (issue #86: one image shrunk is a blue square at 100 % scaling)
+        if !win_sys::app_icon::set_window_icons(main_hwnd, ICON_RESOURCE) {
+            tracing::warn!("[main] window icons not set");
+        }
         window.on_window_should_close(cx, |window, cx| {
             main_closing(window, cx);
             true
