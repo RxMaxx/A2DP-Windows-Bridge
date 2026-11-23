@@ -430,6 +430,7 @@ refuses the Nth CIS of LE Create CIS with 0x1E; the others come up, with
 BlueCaster's controller), `--completion-delay-ms MS` (Number Of Completed
 Packets MS after delivery, with the matching FT in LE CIS Established),
 `--withhold-completions N` (the Nth CIS never completes while up),
+`--reject-enable` (every Enable is rejected with 0x0E after the CIG is set),
 `--mic [SINKS]` / `--mic-rates` (a
 microphone: Source PAC 16 / 32 kHz 10 ms, a source ASE, a 1 kHz tone sent
 from pre-encoded LC3 frames in `le_audio/mic_frames.py` once BlueCaster has
@@ -481,7 +482,7 @@ contains
 
 | File | Cases |
 |------|-------|
-| `core.py` | `stereo`, `two-ase`, `earbuds`, `mono-16k`, `link-loss`, `release-cis`, `contexts-later`, `afh`, `no-iso-buffers`, `cis-refused`, `cis-refused-late` |
+| `core.py` | `stereo`, `two-ase`, `earbuds`, `mono-16k`, `link-loss`, `release-cis`, `contexts-later`, `afh`, `no-iso-buffers`, `cis-refused`, `cis-refused-late`, `enable-rejected`, `slow-completions`, `cis-stalled` |
 | `privacy.py` | `privacy-rpa` |
 | `csip.py` | `csip-set`, `csip-encrypted-sirk`, `csip-missing-member`, `csip-both-named`, `csip-link-loss`, `csip-lock-denied`, `csip-no-lock` |
 | `vcp.py` | `vcp-set`, `vcp-remote`, `vcp-change-counter`, `vcp-earbuds`, `vcp-press-during-write`, `vcp-press-before-write` |
