@@ -151,7 +151,9 @@ fn select_named<T: Clone + PartialEq + 'static>(
     let name = label.map(|l| if current.is_empty() { l } else { format!("{l}: {current}").into() });
     let value = value.clone();
     let on_change = Rc::new(on_change);
-    let button = Button::new(id).label(current).dropdown_caret(true).disabled(disabled);
+    // The menu opens on the press itself; the click handler does nothing but
+    // tell assistive technology that the list can be pressed
+    let button = Button::new(id).label(current).dropdown_caret(true).disabled(disabled).on_click(|_, _, _| {});
     let button = match name {
         Some(name) => button.accessibility_label(name),
         None => button,
