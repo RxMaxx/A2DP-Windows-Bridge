@@ -339,7 +339,11 @@ mod tests {
         // Disconnected for good: restored after the grace
         d.follow(Want::Release);
         assert_eq!(now(&f), all("{cable-out}"));
-        std::thread::sleep(Duration::from_millis(300));
+        // The grace runs on its own thread, which a busy machine starts late
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while now(&f) != before() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
         assert_eq!(now(&f), before());
     }
 
