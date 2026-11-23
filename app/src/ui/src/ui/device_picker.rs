@@ -424,7 +424,7 @@ impl DevicePicker {
                     t("device.enter_name"),
                     Some(hint.clone().into()),
                     error,
-                    Input::new(&this.new_name),
+                    Input::new(&this.new_name).aria_label(t("device.enter_name")),
                     cx,
                 )
                 .into_any_element()
@@ -895,7 +895,16 @@ impl DevicePicker {
             .flex()
             .items_center()
             .gap(theme::S2)
-            .child(div().w(px(240.)).child(Input::new(&self.manual).font_family(theme::FONT_MONO)))
+            .child(
+                div().w(px(240.)).child(
+                    Input::new(&self.manual)
+                        .font_family(theme::FONT_MONO)
+                        // The field's label without its colon ("Manual:")
+                        .aria_label(SharedString::from(
+                            t("connection.manual").trim_end_matches([':', '：']).to_owned(),
+                        )),
+                ),
+            )
             .child(use_it);
         super::field_stacked(
             t("connection.manual"),

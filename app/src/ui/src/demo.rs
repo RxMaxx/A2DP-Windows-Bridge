@@ -10,6 +10,7 @@
 //! setup's step n (0 is the first), `BLUECASTER_UI_DIAG_TAB=<tab>` that tab
 //! of Diagnostics ("radio", "capture", "mic", "flow", "log"), and
 //! `BLUECASTER_UI_DIAG_SCAN=1` starts the Wi-Fi scan of Diagnostics > Radio.
+//! `BLUECASTER_UI_DEMO_CALLS=<file>` writes every request to that file.
 
 use std::sync::Arc;
 
@@ -72,12 +73,24 @@ pub fn from_env() -> Option<Arc<dyn Transport>> {
     Some(Arc::new(Demo { snapshot, answers }))
 }
 
+/// Appends each request as one JSON line to the file
+/// `BLUECASTER_UI_DEMO_CALLS` names, so a test can see what a press sent
+fn record_call(method: &str, params: Option<&Value>) {
+    use std::io::Write;
+    let Some(path) = std::env::var_os("BLUECASTER_UI_DEMO_CALLS") else { return };
+    let line = serde_json::json!({ "method": method, "params": params });
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{line}");
+    }
+}
+
 impl Transport for Demo {
     fn status(&self) -> ConnStatus {
         ConnStatus::Connected { server: "demo".into() }
     }
 
-    fn call(&self, method: String, _params: Option<Value>) -> oneshot::Receiver<Result<Value, ErrorInfo>> {
+    fn call(&self, method: String, params: Option<Value>) -> oneshot::Receiver<Result<Value, ErrorInfo>> {
+        record_call(&method, params.as_ref());
         let (tx, rx) = oneshot::channel();
         let answer = match method.as_str() {
             "state.snapshot" => Ok(self.snapshot.clone()),

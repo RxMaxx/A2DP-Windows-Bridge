@@ -157,7 +157,6 @@ fn body(state: &Entity<PairingState>, cx: &App) -> AnyElement {
             .ghost()
             .icon(icon(if s.keys_open { IconName::ChevronDown } else { IconName::ChevronRight }))
             .label(t("ui.pairing.key_title"))
-            .aria_expanded(s.keys_open)
             .on_click(move |_, _, cx| {
                 let _ = weak.update(cx, |s, cx| s.toggle_keys(cx));
             });

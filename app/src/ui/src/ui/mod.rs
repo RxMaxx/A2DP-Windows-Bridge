@@ -354,20 +354,24 @@ pub fn nav_row(
     cx: &App,
 ) -> impl IntoElement {
     let p = *cx.palette();
+    let (label, value): (SharedString, SharedString) = (label.into(), value.into());
     row()
         .id(id)
+        // A button for assistive technology, named "<label>: <value>"
+        .role(gpui_kit::Role::Button)
+        .aria_label(SharedString::from(format!("{label}: {value}")))
         .px(theme::S2)
         .rounded(theme::RADIUS)
         .when(!disabled, |d| d.cursor_pointer().hover(|s| s.bg(p.surface_2)).on_click(on_click))
         .when(disabled, |d| d.text_color(p.disabled_text))
-        .child(div().child(label.into()))
+        .child(div().child(label))
         .child(
             div()
                 .flex()
                 .items_center()
                 .gap(theme::S2)
                 .text_color(if disabled { p.disabled_text } else { p.text_2 })
-                .child(value.into())
+                .child(value)
                 .child(icon(IconName::ChevronRight).small()),
         )
 }
