@@ -532,7 +532,8 @@ mod tests {
         let counts = Arc::new(Mutex::new(Counts::default()));
         let running = cap.start(Box::new(TestSink(counts.clone()))).unwrap();
         child.wait().unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        // Windows reports the exit late on a busy machine
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
         while !running.ended() && std::time::Instant::now() < deadline {
             thread::sleep(Duration::from_millis(20));
         }
