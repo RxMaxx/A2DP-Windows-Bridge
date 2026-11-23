@@ -36,9 +36,8 @@ use gpui_kit::{
     WeakEntity, Window, div, px,
 };
 use ipc::{AudioDevice, Device, MicProcessing, Profile};
-use ui_model::codecs::{card_of, codec_spec};
 use ui_model::i18n::t;
-use ui_model::profile::{AudioEntry, HeadsetMode, entry_base, followed_name, normalize_profile};
+use ui_model::profile::HeadsetMode;
 use ui_model::t;
 use ui_model::view::devices::{InputSourceView, MicPatch, OutputSource, choose_mode, input_source_view};
 
@@ -51,48 +50,7 @@ use crate::app;
 use crate::core::Core;
 use crate::theme::{self, ActivePalette as _};
 
-/// Saves the device's profile as `edit` changes it (the profile is made
-/// when the device has none yet); its name follows the codec while it is
-/// "<device> | <codec>". The profile's name once saved, None if that failed.
-// TODO(merge): use crate::screens::codecs::save_entry (screens/Codecs.tsx saveEntry)
-fn save_entry(entry: &AudioEntry, edit: impl FnOnce(&mut Profile), cx: &App) -> Task<Option<String>> {
-    let Some(snap) = app::core(cx).read(cx).snap() else { return Task::ready(None) };
-    let cur = entry.profile.clone();
-    let mut next =
-        cur.clone().unwrap_or_else(|| entry_base(&entry.address, &entry.name, entry.le_audio, &snap.profiles));
-    edit(&mut next);
-    let taken: Vec<&str> = snap
-        .profiles
-        .iter()
-        .map(|p| p.name.as_str())
-        .filter(|n| Some(*n) != cur.as_ref().map(|c| c.name.as_str()))
-        .collect();
-    let codec = if entry.le_audio { String::new() } else { t(codec_spec(card_of(&next.codec, &next.quality)).label) };
-    next.name = followed_name(&next, &codec, &taken);
-    if cur.as_ref() == Some(&next) {
-        return Task::ready(Some(next.name));
-    }
-    let saved = normalize_profile(&next);
-    let name = saved.name.clone();
-    let task = app::run(
-        app::request::<serde_json::Value>(
-            ipc::Method::ProfileSave { profile: Box::new(saved), original_name: cur.map(|c| c.name) },
-            cx,
-        ),
-        cx,
-    );
-    cx.spawn(async move |_: &mut AsyncApp| task.await.map(|_| name))
-}
-
-/// Saves a device's headset mode, microphone output, default input, the
-/// microphone's processing (Audio Devices) or mute (Home's and the flyout's
-/// chip). The core opens or closes the microphone link (Auto: as apps record
-/// from the output); the processing applies in place. True once saved.
-// TODO(merge): use crate::screens::codecs::save_headset_mic (screens/Codecs.tsx saveHeadsetMic)
-pub fn save_headset_mic(entry: &AudioEntry, patch: impl FnOnce(&mut Profile), cx: &App) -> Task<bool> {
-    let task = save_entry(entry, patch, cx);
-    cx.spawn(async move |_: &mut AsyncApp| task.await.is_some())
-}
+pub use crate::screens::codecs::save_headset_mic;
 
 /// What the parent shows of the device: its outputs and its output source
 pub struct InputSourceProps {

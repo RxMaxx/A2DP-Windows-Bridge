@@ -39,14 +39,13 @@ use gpui_kit::{
     ScrollEvent, StatefulInteractiveElement as _, Styled as _, Subscription, Task, WeakEntity, Window, anchored, canvas,
     deferred, div, point, px, relative,
 };
-use ipc::{Device, EqBandType, EqPoint, MediaEq, Method, Profile, StreamState};
-use ui_model::codecs::{card_of, codec_spec};
+use ipc::{Device, EqBandType, EqPoint, MediaEq, Method, StreamState};
 use ui_model::eq::{
     BAND_TYPES, DEFAULT_POINTS, GRAPH_RATE, MAX_POINTS, eq_apo_text, has_q, is_default_points,
     response_curve, with_type,
 };
 use ui_model::i18n::t;
-use ui_model::profile::{AudioEntry, audio_entries, device_key, entry_base, followed_name, normalize_profile};
+use ui_model::profile::{AudioEntry, audio_entries, device_key};
 use ui_model::t;
 use ui_model::view::media_eq::{
     self as rules, EXPORT_NAME, EqKey, FREQ_FIELD, GAIN_FIELD, GRID_DB, GRID_F, H, KeyAction, PLOT_BOTTOM, PLOT_LEFT,
@@ -96,45 +95,9 @@ fn entry_of(key: &str, cx: &App) -> Option<AudioEntry> {
     audio_entries(snap).into_iter().find(|e| e.key == key)
 }
 
-// ---- saving (screens/Codecs.tsx saveEntry, saveMediaEq) -------------------------
+// ---- saving (screens/Codecs.tsx saveMediaEq) -------------------------------------
 
-/// Saves the device's profile as `edit` changes it (the profile is made
-/// when the device has none yet); its name follows the codec while it is
-/// "<device> | <codec>". The profile's name once saved, None if that failed.
-// TODO(merge): use screens/codecs.rs save_entry
-fn save_entry(entry: &AudioEntry, edit: impl FnOnce(&mut Profile), cx: &App) -> Task<Option<String>> {
-    let core = app::core(cx);
-    let Some(snap) = core.read(cx).snap() else { return Task::ready(None) };
-    let cur = entry.profile.clone();
-    let mut next = cur.clone().unwrap_or_else(|| entry_base(&entry.address, &entry.name, entry.le_audio, &snap.profiles));
-    edit(&mut next);
-    let cur_name = cur.as_ref().map(|c| c.name.clone());
-    let taken: Vec<&str> =
-        snap.profiles.iter().map(|p| p.name.as_str()).filter(|n| Some(*n) != cur_name.as_deref()).collect();
-    let label = if entry.le_audio { String::new() } else { t(codec_spec(card_of(&next.codec, &next.quality)).label) };
-    next.name = followed_name(&next, &label, &taken);
-    if cur.as_ref() == Some(&next) {
-        return Task::ready(Some(next.name));
-    }
-    let saved = normalize_profile(&next);
-    let name = saved.name.clone();
-    let task = app::run(
-        app::request::<serde_json::Value>(
-            Method::ProfileSave { profile: Box::new(saved), original_name: cur_name },
-            cx,
-        ),
-        cx,
-    );
-    cx.spawn(async move |_: &mut AsyncApp| task.await.map(|_| name))
-}
-
-/// Saves a device's playback EQ (Audio Devices). A stream of it takes the
-/// change in place. True once saved.
-// TODO(merge): use screens/codecs.rs save_media_eq
-pub fn save_media_eq(entry: &AudioEntry, eq: MediaEq, cx: &App) -> Task<bool> {
-    let task = save_entry(entry, move |p| p.media_eq = eq, cx);
-    cx.spawn(async move |_: &mut AsyncApp| task.await.is_some())
-}
+pub use crate::screens::codecs::save_media_eq;
 
 // ---- the editor ---------------------------------------------------------------------
 

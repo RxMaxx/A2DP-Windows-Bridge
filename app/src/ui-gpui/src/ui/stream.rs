@@ -11,10 +11,6 @@
 //! and the parts of screens/Home.tsx other screens import (entryState, MicRow,
 //! HeadsetChip, AdapterHung, V1Running).
 
-// TODO(merge): Home and the flyout (not ported yet) use the ring, the
-// buttons, the volume and the link quality; drop this then
-#![allow(dead_code)]
-
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::Mutex;
@@ -37,11 +33,10 @@ use ipc::{
     AdapterInfo, DiagInfo, DiagInfoParams, ErrorInfo, Method, Msg, Profile, SourceInfo, StreamState,
     WindowsPairedDevice,
 };
-use ui_model::codecs::{card_of, codec_spec};
 use ui_model::format::{kbps, khz, percent_to_volume, volume_percent};
 use ui_model::i18n::{t, tm};
 use ui_model::links::{BugReport, bug_report_url};
-use ui_model::profile::{AudioEntry, entry_base, followed_name, normalize_profile};
+use ui_model::profile::AudioEntry;
 use ui_model::t;
 use ui_model::view::stream::{self as model, BatteryTone, FixAction, QualityStatus, SourceIcon};
 
@@ -105,8 +100,20 @@ pub fn ring(
     child: impl IntoElement,
     cx: &App,
 ) -> AnyElement {
+    ring_sized(id, state, volume, if small { 44. } else { 120. }, small, child, cx)
+}
+
+/// [`ring`] at its own size (`--size`: Home's cards 88 px, `.home-device .ring`)
+pub fn ring_sized(
+    id: impl Into<ElementId>,
+    state: StreamState,
+    volume: Option<u8>,
+    size: f32,
+    small: bool,
+    child: impl IntoElement,
+    cx: &App,
+) -> AnyElement {
     let p = *cx.palette();
-    let size = if small { 44. } else { 120. };
     let inner = if small { size - 8. } else { size - 20. };
     let glow = volume.map_or(0.6, |v| 0.35 + (0.65 * f32::from(v)) / 127.);
     let border = match state {
@@ -579,7 +586,8 @@ pub fn codec_badge(opts: CodecBadge, cx: &App) -> Option<AnyElement> {
             .text_size(theme::FS_12)
             .text_color(p.text_2)
             .child(div().flex_none().text_color(p.warn_text).child(icon(IconName::Warning).small()))
-            .child(t("ui.codec.slow_link"))
+            // Wraps within the card
+            .child(div().flex_1().min_w_0().child(t("ui.codec.slow_link")))
     });
 
     Some(
@@ -667,31 +675,9 @@ fn set_mic_saving(key: &str, on: bool) {
     }
 }
 
-/// Saves the device's profile with the microphone muted or not (the profile
-/// is made when the device has none yet); its name follows the codec while
-/// it is "<device> | <codec>" -> true once saved.
-// TODO(merge): use the Codecs screen's save_headset_mic (Codecs.tsx saveEntry)
+/// Saves the device's profile with the microphone muted or not -> true once saved
 fn save_headset_mic(entry: &AudioEntry, mic_muted: bool, cx: &App) -> Task<bool> {
-    let Some(snap) = snap(cx) else { return Task::ready(false) };
-    let cur = entry.profile.clone();
-    let mut next =
-        cur.clone().unwrap_or_else(|| entry_base(&entry.address, &entry.name, entry.le_audio, &snap.profiles));
-    next.mic_muted = mic_muted;
-    let taken: Vec<&str> = snap
-        .profiles
-        .iter()
-        .map(|p| p.name.as_str())
-        .filter(|n| Some(*n) != cur.as_ref().map(|c| c.name.as_str()))
-        .collect();
-    let label = if entry.le_audio { String::new() } else { t(codec_spec(card_of(&next.codec, &next.quality)).label) };
-    next.name = followed_name(&next, &label, &taken);
-    if cur.as_ref() == Some(&next) {
-        return Task::ready(true);
-    }
-    let saved = normalize_profile(&next);
-    let method = Method::ProfileSave { profile: Box::new(saved), original_name: cur.map(|c| c.name) };
-    let task = app::run(app::request::<serde_json::Value>(method, cx), cx);
-    cx.spawn(async move |_: &mut AsyncApp| task.await.is_some())
+    crate::screens::codecs::save_headset_mic(entry, move |p| p.mic_muted = mic_muted, cx)
 }
 
 /// The headset microphone's mute at one click (Home's card and the
@@ -775,6 +761,8 @@ pub fn mic_row(entry: &AudioEntry, cx: &App) -> Option<AnyElement> {
 }
 
 /// The symbol of what a stream captures
+// TODO(merge): stream.tsx exports it (with source_text); no port draws it yet
+#[allow(dead_code)]
 pub fn source_icon(i: SourceIcon) -> IconName {
     match i {
         SourceIcon::MusicNote2 => IconName::MusicNote2,
@@ -786,6 +774,7 @@ pub fn source_icon(i: SourceIcon) -> IconName {
 
 /// What a running stream captures (StreamInfo.source), in words: the
 /// profile's application name when the executable is the profile's
+#[allow(dead_code)]
 pub fn source_text(src: &SourceInfo, profile: Option<&Profile>) -> (IconName, String, bool) {
     let s = model::source_text(src, profile);
     (source_icon(s.icon), s.text, s.waiting)

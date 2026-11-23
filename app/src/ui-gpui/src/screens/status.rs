@@ -32,6 +32,11 @@ use crate::ui::{self, BannerKind, ButtonKind, IconName, icon};
 
 /// A small red sign while an HCI capture runs; it leads to Diagnostics
 pub fn capture_sign(collapsed: bool, cx: &App) -> impl IntoElement + use<> {
+    capture_sign_to(collapsed, |cx| app::navigate(RouteName::Diagnostics, cx), cx)
+}
+
+/// The capture sign leading elsewhere (the flyout opens the main window)
+pub fn capture_sign_to<F: Fn(&mut App) + 'static>(collapsed: bool, on_open: F, cx: &App) -> impl IntoElement + use<F> {
     let p = *cx.palette();
     let core = app::core(cx);
     let capture = core.read(cx).snap().and_then(|s| s.capture.clone());
@@ -51,7 +56,7 @@ pub fn capture_sign(collapsed: bool, cx: &App) -> impl IntoElement + use<> {
                 .tooltip(format!("{text}\n{}", c.path))
                 .child(dot(p.bad))
                 .when(!collapsed, |b| b.child(div().min_w_0().truncate().child(text)))
-                .on_click(|_, _, cx| app::navigate(RouteName::Diagnostics, cx)),
+                .on_click(move |_, _, cx| on_open(cx)),
         )
     })
 }

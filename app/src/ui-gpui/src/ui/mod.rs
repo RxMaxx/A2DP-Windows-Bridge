@@ -11,6 +11,7 @@
 pub mod cable_notes;
 pub mod capture_picker;
 pub mod charts;
+pub mod codec_cards;
 pub mod codec_details;
 pub mod device_picker;
 pub mod device_settings;

@@ -177,8 +177,27 @@ fn place(cx: &mut App) {
             by_tray(area, width, height, margin)
         }
     };
-    if native::outer_rect(hwnd) != Some(Area { left: x, top: y, right: x + width, bottom: y + height }) {
+    // The window keeps invisible resize borders (left, right, bottom)
+    // around the page: the page gets the width and height above, the
+    // borders come on top
+    let outer = native::outer_rect(hwnd);
+    let viewport = flyout(cx).window.and_then(|w| w.update(cx, |_, window, _| window.viewport_size()).ok());
+    let (frame_w, frame_h) = match (outer, viewport) {
+        (Some(o), Some(v)) => (
+            (o.right - o.left - physical(f32::from(v.width))).max(0),
+            (o.bottom - o.top - physical(f32::from(v.height))).max(0),
+        ),
+        _ => (0, 0),
+    };
+    let (x, width, height) = (x - frame_w / 2, width + frame_w, height + frame_h);
+    if outer != Some(Area { left: x, top: y, right: x + width, bottom: y + height }) {
         native::set_bounds(hwnd, x, y, width, height);
+        // The window's resize event came while the app was busy (this
+        // runs in an update) and was dropped: without this the page keeps
+        // its old size and a taller window shows nothing under it
+        if let Some(window) = flyout(cx).window {
+            let _ = window.update(cx, |_, window, cx| window.bounds_changed(cx));
+        }
     }
 }
 
@@ -354,7 +373,8 @@ impl FlyoutRoot {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> FlyoutRoot {
         cx.observe_window_activation(window, |_, window, cx| {
             // While it goes with Quick Settings it never has the focus
-            if window.is_window_active() || flyout(cx).quick.is_some() {
+            // The demo's screenshots: it stays while the focus is elsewhere
+            if window.is_window_active() || flyout(cx).quick.is_some() || crate::demo::route().is_some() {
                 return;
             }
             if opening(cx) {

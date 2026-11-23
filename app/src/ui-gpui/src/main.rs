@@ -95,11 +95,16 @@ fn main() {
         });
 
         if let Some(route) = demo::route() {
-            if route == "setup" {
-                app::state(cx).update(cx, |s, cx| s.set_setup_active(true, cx));
+            // Demo only: "flyout" shows the tray flyout instead of the main window
+            if route == "flyout" {
+                flyout_window::show(cx);
+            } else {
+                if route == "setup" {
+                    app::state(cx).update(cx, |s, cx| s.set_setup_active(true, cx));
+                }
+                app::navigate(app::parse_route(&route), cx);
+                windows::show_main(None, false, cx);
             }
-            app::navigate(app::parse_route(&route), cx);
-            windows::show_main(None, false, cx);
         } else {
             on_launch(launch, cx);
         }
