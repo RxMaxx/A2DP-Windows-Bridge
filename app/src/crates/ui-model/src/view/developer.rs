@@ -1,8 +1,5 @@
 //! The Developer screen's rules: what counts as changed, how its number and
 //! text fields read what is typed, and the vendors' overrides (issue #237).
-//!
-//! Ported from app/src/ui/src/screens/Developer.tsx (and its tests in
-//! Developer.test.tsx).
 
 use std::collections::BTreeMap;
 

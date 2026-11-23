@@ -1,7 +1,5 @@
 //! The device's Services dialog (issue #86): names of well-known service
 //! UUIDs, the Bluetooth SIG's (classic and LE GATT services) and some vendors'.
-//!
-//! Ported from app/src/ui/src/lib/pairing.ts
 
 use ipc::DeviceService;
 
@@ -113,7 +111,7 @@ pub fn service_label(s: &DeviceService) -> Option<String> {
         .or_else(|| s.uuids.iter().find_map(|u| vendor_service_name(u)).map(str::to_owned))
 }
 
-// The pairing dialog's helpers (pairing.test.ts)
+// The pairing dialog's helpers
 #[cfg(test)]
 mod tests {
     use super::*;

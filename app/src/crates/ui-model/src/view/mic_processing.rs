@@ -1,7 +1,5 @@
-//! The headset microphone's processing (components/MicProcessing.tsx): the
-//! sliders' ranges and the texts of their values.
-//!
-//! Ported from app/src/ui/src/components/MicProcessing.tsx.
+//! The headset microphone's processing: the sliders' ranges and the texts
+//! of their values.
 
 use ipc::MicProcessing;
 

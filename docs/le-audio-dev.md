@@ -43,7 +43,7 @@ for reference (`git show b819893:app/src/le_audio/<file>`).
 | `app/src/crates/core/src/devices.rs` | `le_audio_devices.txt` (`load_le` / `save_le` / `remove_le`) |
 | `app/src/core/src/cli.rs` | `--le-audio`, `--le-device`, `--le-preset`, `--le-low-latency`, `--le-scan`, `--le-sim-volume`, `--mcp-dry-run`, `--ccp-sim`, `--ccp-console` (v1 `le_audio_cli.cpp`'s flow and lines); `--headset-mic`, `--mic-output` (the microphone) |
 | `app/src/core/src/state.rs`, `resident.rs` | The UI's state: LE settings, LE devices, `le_scanning`, `StreamInfo.le`, `LinkSample.iso`, `settings.set`'s `le_audio_deferred`; diagnostics section `[LE Audio (experimental)]` (`crates/core/src/diag.rs`) |
-| `app/src/ui/src/` | The Codecs screen's LC3 and LC3 LL cards (LC3 LL = the profile's `le_low_latency`), DevicePicker's LE tags, Diagnostics' ISO counters; `?mock=le` mocks LE |
+| `app/src/ui/src/`, `app/src/crates/ui-model/src/` | The Codecs screen's LC3 and LC3 LL cards (LC3 LL = the profile's `le_low_latency`), the device picker's LE tags, Diagnostics' ISO counters |
 | `tools/a2dp_decode/le_audio_decode.cpp` | `bluecaster_decode --le-audio` |
 | `tools/emu/emu_le_audio_sink.py`, `tools/emu/le_audio/` | Bumble LE Audio sink(s); `le_audio/<profile>.py` = the sink side of each profile; `le_audio/mic.py` + `mic_frames.py` = the headset microphone (`--mic`) |
 | `tools/emu/le_audio_tests/` | `run_test.py --le-audio` cases and checks, one file per profile (`core.py`, `privacy.py`, `csip.py`, `vcp.py`, `mcp.py`, `ccp.py`, `tmap_gmap.py`, `bas.py`, `mic.py`, `gatt_cache.py`) |
@@ -811,8 +811,8 @@ LE keys of classic devices (issue #86):
   `le-audio` (`run_test.py --scan le-audio`).
 - **Devices and profiles.** A dual-mode device has two entries (classic and
   LE Audio, same address) in the core; an LE scan never marks a classic
-  entry. The UI shows them as one (issue #86, `lib/profile.ts`
-  `listedDevices`): with the setting on, the LE Audio entry represents both,
+  entry. The UI shows them as one (issue #86, `ui-model/src/profile.rs`
+  `listed_devices`): with the setting on, the LE Audio entry represents both,
   Add / Rename / Forget act on both and Add makes both profiles; a
   scan that finds the other entry of a saved device saves that entry too
   (`service.rs` `save_twins`). Turning the setting on or off while a device

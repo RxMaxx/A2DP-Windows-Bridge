@@ -1,7 +1,5 @@
-//! Small display helpers
-//!
-//! Ported from app/src/ui/src/lib/format.ts (copyText stays with the
-//! window: it needs the clipboard).
+//! Small display helpers (copying text stays with the window: it needs the
+//! clipboard)
 
 use std::sync::Mutex;
 

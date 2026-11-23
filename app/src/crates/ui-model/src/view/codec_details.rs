@@ -1,11 +1,9 @@
-//! Diagnostics' codec details card (components/CodecDetails.tsx) as rows of
+//! Diagnostics' codec details card as rows of
 //! text: what an A2DP stream's codec runs with, next to what the device
 //! offered (the SBC bitpool range, channel modes, AAC object types ...; for
 //! the other codecs the rates, bit depths and peak bit rate their endpoint
 //! lists, issue #86), and how the codec frames fill a packet. The window
 //! draws these; the numbers behind them are [`crate::codecdetails`].
-//!
-//! Ported from app/src/ui/src/components/CodecDetails.tsx.
 
 use ipc::{AacDetails, CodecDetails, CodecDeviceCaps, SbcDetails, StreamInfo};
 

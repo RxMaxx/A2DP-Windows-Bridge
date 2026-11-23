@@ -5,11 +5,10 @@
 //! every start ends the UI instead of looping; the next click on the tray
 //! icon starts it afresh.
 //!
-//! With WebView2 this was the recovery from its browser process dying
-//! under the windows (a DLL that other software injects into every
+//! The WebView2 window of 3.0.x restarted this way when WebView2's browser
+//! process died under it (a DLL that other software injects into every
 //! process, RivaTuner's RTSSHooks64.dll, took it down on 2026-10-22). The
-//! watching of WebView2's processes and the page reload are gone with the
-//! webview; the restart itself stays for the window to use.
+//! GPUI window has no such process to lose; the restart stays for it to use.
 
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

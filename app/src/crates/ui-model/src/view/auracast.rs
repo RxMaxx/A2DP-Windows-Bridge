@@ -2,8 +2,6 @@
 //! mixer: the broadcast's choices and the request they make, when the
 //! broadcast counts as live, the length checks, the adapter list, and the
 //! mixer's fields.
-//!
-//! Ported from app/src/ui/src/screens/Auracast.tsx and screens/AuracastMixer.tsx.
 
 use ipc::{AdapterInfo, DriverKind, Method, StreamState, StreamStatus};
 
@@ -376,7 +374,7 @@ mod tests {
 
     use super::*;
 
-    // Auracast.test.ts
+    // The broadcast form
     #[test]
     fn names_the_layout_as_the_core_takes_it() {
         let (f, r) = (PairMode::Stereo, PairMode::Separate);
@@ -392,7 +390,7 @@ mod tests {
         assert_eq!(all.map(pair_bigs), [1, 2, 1, 0]);
     }
 
-    // AuracastMixer.test.ts
+    // The matrix mixer
     #[test]
     fn shows_delays_in_ms_or_metres_and_reads_them_back_in_ms() {
         assert_eq!(delay_in(1.234, Unit::Ms), "1.23");
@@ -429,7 +427,7 @@ mod tests {
         assert!(!can_save_preset("  ", &[]));
     }
 
-    // Developer.test.tsx "Auracast tab"
+    // The Auracast tab of the Developer screen
     #[test]
     fn takes_a_matrix_rates_from_the_front_and_rear_rows_not_quality() {
         let c = Choices {

@@ -1,12 +1,9 @@
-//! The rules behind the Audio Devices screen and the device components
-//! (DevicePicker, DeviceSettings, InputSource, CapturePicker, PairingDialog,
-//! ImportPairings, DeviceSwitcher): which devices are listed, the choices of
-//! the capture source and the microphone, the warnings and the keys shown.
-//! The window (ui-gpui) draws what these return.
-//!
-//! Ported from app/src/ui/src/components/DevicePicker.tsx, CapturePicker.tsx,
-//! DeviceSettings.tsx, InputSource.tsx, PairingDialog.tsx, ImportPairings.tsx
-//! and DeviceSwitcher.tsx (their logic; the drawing is in ui-gpui).
+//! The rules behind the Audio Devices screen and the device components (the
+//! device picker and settings, the input source, the capture picker, the
+//! pairing dialog, importing pairings, the device switcher): which devices
+//! are listed, the choices of the capture source and the microphone, the
+//! warnings and the keys shown. The window (app/src/ui) draws what these
+//! return.
 
 use ipc::{
     AudioApp, AudioDevice, Device, DevicePairing, DriverKind, Profile, Snapshot, StreamState, WindowsImport,

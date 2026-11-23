@@ -10,8 +10,6 @@
 //! already contains, so the state events that arrive while it is on its way
 //! are kept and applied again on top of it, in order: each replaces a whole
 //! part, so the newest one of each part ends up in place.
-//!
-//! Ported from app/src/ui/src/ipc/store.ts (the part without the transport).
 
 use std::collections::{HashSet, VecDeque};
 
@@ -259,9 +257,9 @@ impl Store {
     }
 }
 
-/// Ported from app/src/ui/src/ipc/store.test.ts: the cases about the state
-/// itself. A test's "f.calls has state.snapshot" is `Applied::resync` (and
-/// the caller's [`Store::begin_resync`]); "the answer" is [`Store::finish_resync`].
+/// The cases about the state itself. A resync the store asks for (a
+/// state.snapshot request) is `Applied::resync` and the caller's
+/// [`Store::begin_resync`]; its answer is [`Store::finish_resync`].
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
@@ -435,7 +433,7 @@ mod tests {
     }
 
     /// The event that showed the gap is applied again on top of the answer,
-    /// like the ones that came after it (store.ts asks before applying it)
+    /// like the ones that came after it
     #[test]
     fn the_event_that_shows_a_gap_goes_on_top_of_the_answer() {
         let mut s = Store::new();

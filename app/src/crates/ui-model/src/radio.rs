@@ -1,8 +1,6 @@
 //! The 2.4 GHz band as the Radio tab draws it: Bluetooth channel n is at
 //! 2402 + n MHz (79 channels), a Wi-Fi channel spreads +-11 MHz around its
 //! center (the same width bt-host's afh module avoids).
-//!
-//! Ported from app/src/ui/src/lib/radio.ts
 
 pub const BT_CHANNELS: usize = 79;
 pub const BT_FIRST_MHZ: u32 = 2402;

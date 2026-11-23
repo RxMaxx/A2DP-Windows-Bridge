@@ -1,8 +1,6 @@
 //! Which subscription (diag.subscribe) the window sends: views ask for what
 //! they show while they live; the window asks for nothing while none of its
 //! windows shows. The backend merges both windows' subscriptions.
-//!
-//! Ported from app/src/ui/src/ipc/store.ts (pushSubscription).
 
 use ipc::LogLevel;
 

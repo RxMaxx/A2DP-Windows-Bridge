@@ -1,17 +1,18 @@
 //! What a window of another toolkit needs from Windows itself: the title
-//! bar's light or dark look, and placing a window that has no frame (the
-//! tray flyout) in physical pixels.
+//! bar's light or dark look, placing a window that has no frame (the tray
+//! flyout) in physical pixels, and a minimum size that can change.
 
-use windows::Win32::Foundation::{HWND, POINT, RECT};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
+use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_EXSTYLE, GetWindowLongPtrW, GetWindowRect, IsIconic, SPI_GETWORKAREA, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-    SystemParametersInfoW, WS_EX_NOACTIVATE,
+    GWL_EXSTYLE, GetWindowLongPtrW, GetWindowRect, IsIconic, MINMAXINFO, SPI_GETWORKAREA, SW_HIDE, SW_SHOW,
+    SWP_NOACTIVATE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetWindowLongPtrW,
+    SetWindowPos, ShowWindow, SystemParametersInfoW, WM_GETMINMAXINFO, WM_NCDESTROY, WS_EX_NOACTIVATE,
 };
 
 /// A rectangle on the desktop (physical pixels, for a DPI-aware process)
@@ -164,4 +165,58 @@ pub fn set_no_activate(hwnd: isize, on: bool) {
 pub fn is_minimized(hwnd: isize) -> bool {
     // SAFETY: a plain query; an invalid handle answers false
     unsafe { IsIconic(handle(hwnd)).as_bool() }
+}
+
+/// The subclass that [`raise_min_size`] installs (one per window)
+const MIN_SIZE_SUBCLASS: usize = 0x4243_4d53;
+
+/// Raises the window's minimum size by `width` × `height` logical pixels
+/// over the one its toolkit fixed when it made the window (GPUI cannot
+/// change it later); 0 × 0 takes the raise away. Call it on the thread that
+/// owns the window. False when the window could not be subclassed.
+pub fn raise_min_size(hwnd: isize, width: u16, height: u16) -> bool {
+    let data = (usize::from(width) << 16) | usize::from(height);
+    if data == 0 {
+        // SAFETY: removes our own subclass; a window without it (or an
+        // invalid handle) only makes the call fail
+        let _ = unsafe { RemoveWindowSubclass(handle(hwnd), Some(min_size_proc), MIN_SIZE_SUBCLASS) };
+        return true;
+    }
+    // SAFETY: min_size_proc stays valid for the program's lifetime and takes
+    // its data by value; installing it again only replaces the data
+    unsafe { SetWindowSubclass(handle(hwnd), Some(min_size_proc), MIN_SIZE_SUBCLASS, data) }.as_bool()
+}
+
+/// Lets the window answer WM_GETMINMAXINFO first, then adds the raise
+unsafe extern "system" fn min_size_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    id: usize,
+    data: usize,
+) -> LRESULT {
+    // SAFETY: passes the message on unchanged, as a subclass procedure must
+    let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+    match msg {
+        WM_GETMINMAXINFO if lparam.0 != 0 => {
+            // SAFETY: a plain query on the window the message is for
+            let dpi = match unsafe { GetDpiForWindow(hwnd) } {
+                0 => 96,
+                d => d as i32,
+            };
+            let scale = |v: usize| ((v & 0xFFFF) as i32 * dpi + 48) / 96;
+            // SAFETY: WM_GETMINMAXINFO's lparam points to the MINMAXINFO the
+            // system reads back after this call
+            let info = unsafe { &mut *(lparam.0 as *mut MINMAXINFO) };
+            info.ptMinTrackSize.x += scale(data >> 16);
+            info.ptMinTrackSize.y += scale(data);
+        }
+        WM_NCDESTROY => {
+            // SAFETY: removes this subclass from the window being destroyed
+            let _ = unsafe { RemoveWindowSubclass(hwnd, Some(min_size_proc), id) };
+        }
+        _ => {}
+    }
+    result
 }

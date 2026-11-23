@@ -1714,7 +1714,7 @@ fn tool_profile<'a>(s: &'a Snapshot, name: Option<&str>) -> Result<&'a Profile, 
 }
 
 /// profile.set_headset_mic: `p` with the headset mode `mode` as the window's
-/// mode buttons set it (InputSource.tsx): Off mutes a profile whose mode is
+/// mode buttons set it (the window's ui/input_source.rs): Off mutes a profile whose mode is
 /// Auto or On, the others set the mode and unmute. None: the mode shown is
 /// `mode` already (Off while muted; On outside developer mode shows as Auto).
 fn tool_headset_mic(p: &Profile, mode: ipc::HeadsetMicMode, developer: bool) -> Result<Option<Profile>, ErrorInfo> {
@@ -1751,7 +1751,7 @@ fn tool_mic_muted(p: &Profile, muted: bool) -> Result<Option<Profile>, ErrorInfo
     }
 }
 
-/// The points the window's playback EQ starts with (lib/eq.ts
+/// The points the window's playback EQ starts with (ui-model's eq.rs
 /// DEFAULT_POINTS): flat, so turning it on changes nothing yet
 const FLAT_EQ_HZ: [f32; 10] = [31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0];
 

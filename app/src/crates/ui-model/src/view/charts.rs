@@ -1,8 +1,6 @@
-//! The geometry of the small charts (components/charts.tsx): polylines in a
-//! drawing of a fixed size, which the window stretches to the chart's box
-//! (SVG's `preserveAspectRatio="none"`), and the status colour of a value.
-//!
-//! Ported from app/src/ui/src/components/charts.tsx.
+//! The geometry of the small charts: polylines in a drawing of a fixed size,
+//! which the window stretches to the chart's box, and the status colour of
+//! a value.
 
 use crate::series::GAP_MS;
 

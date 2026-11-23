@@ -1,5 +1,5 @@
 //! The rules of the screens' components that the window draws: what is
-//! listed, shown or enabled, with the TS tests that checked them.
+//! listed, shown or enabled, with their tests.
 
 pub mod about;
 pub mod adapter;

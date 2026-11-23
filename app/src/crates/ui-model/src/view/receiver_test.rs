@@ -1,8 +1,6 @@
 //! The peer receiver test's form: what stays chosen when the codec changes,
 //! which codecs the receiver offers, how a receiver found is addressed. The
 //! measurement itself is in crate::receiver.
-//!
-//! Ported from app/src/ui/src/screens/ReceiverTest.tsx.
 
 use chrono::{Local, TimeZone as _, Timelike as _};
 use ipc::{ReceiverInfo, ReceiverState};

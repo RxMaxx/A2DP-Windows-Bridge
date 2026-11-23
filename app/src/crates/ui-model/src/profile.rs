@@ -7,8 +7,8 @@
 //! using wait in its codec_settings. The core folds older extra profiles
 //! into it at start (crates/core/src/profiles.rs consolidate).
 //!
-//! Ported from app/src/ui/src/lib/profile.ts (appCaptureSupport, which asks
-//! the browser, is left out: [`app_capture_support_from`] takes the values).
+//! [`app_capture_support_from`] takes the platform and its version as
+//! values, so the tests can give any.
 
 use ipc::{
     AudioDevice, CodecValues, Device, HeadsetMicMode, MediaEq, Method, MicProcessing, Profile, Settings, Snapshot,

@@ -2,10 +2,7 @@
 //! in which order, which one is chosen and how; the call codec and LE Audio
 //! cards; and what a codec's "..." dialog offers (quality, sample rate, bit
 //! depth, ABR, the SBC bitpool and frame setup) with the labels it shows.
-//! The window (ui-gpui screens/codecs.rs, ui/codec_cards.rs) draws these.
-//!
-//! Ported from app/src/ui/src/screens/Codecs.tsx and
-//! components/CodecCards.tsx (their logic; the drawing is the window's).
+//! The window (app/src/ui: screens/codecs.rs, ui/codec_cards.rs) draws these.
 
 use ipc::{CodecValues, Profile, Snapshot, StreamInfo, StreamState};
 
@@ -60,8 +57,8 @@ pub fn only_bitpools(p: &Profile, values: &CodecChoice) -> bool {
         && p.lhdcv5_low_latency == values.lhdcv5_low_latency
 }
 
-/// A "..." dialog's values as a profile keeps them for a codec (TS
-/// `Omit<CodecChoice, "codec">`)
+/// A "..." dialog's values as a profile keeps them for a codec (the choice
+/// without the codec)
 pub fn values_of(c: &CodecChoice) -> CodecValues {
     CodecValues {
         quality: c.quality.clone(),
@@ -446,7 +443,7 @@ pub fn mic_rate_options(value: u32, rates: &[u32]) -> Option<Vec<Opt<u32>>> {
     Some(out)
 }
 
-// ---- a codec's "..." dialog (CodecCards.tsx CodecSettings) ------------------------
+// ---- a codec's "..." dialog --------------------------------------------------------
 
 /// The SBC / SBC XQ bitpool range the dialog offers
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

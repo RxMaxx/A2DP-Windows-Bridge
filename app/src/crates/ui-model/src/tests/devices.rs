@@ -1,7 +1,6 @@
-//! view/devices.rs' tests: components/capturePicker.test.tsx ("choices"),
-//! screens/forgetDevices.test.tsx (each entry Home shows has its Remove
-//! button), screens/pairing.test.tsx (the keys' rows) and the device
-//! picker's order
+//! view/devices.rs' tests: the capture picker's choices, the Remove button
+//! of each entry Home shows, the keys' rows of the pairing dialog and the
+//! device picker's order
 
 use ipc::{
     AudioApp, AudioDevice, Device, DevicePairing, LeKeysInfo, LeKeysMissing, LinkKeyInfo, Profile, WindowsImport,
@@ -40,7 +39,7 @@ fn labels(c: &[CaptureChoice]) -> Vec<&str> {
     c.iter().map(|x| x.label.as_str()).collect()
 }
 
-// ---- capturePicker.test.tsx: choices ----
+// ---- the capture picker's choices ----
 
 #[test]
 fn offers_virtual_devices_and_playing_apps_and_keeps_the_profiles_own() {
@@ -192,7 +191,7 @@ fn off_mutes_a_device_with_a_mode_and_turns_the_others_off() {
     assert_eq!(choose_mode(Auto, Auto, Auto), None);
 }
 
-// ---- forgetDevices.test.tsx: each entry Home shows has its Remove button ----
+// ---- each entry Home shows has its Remove button ----
 
 fn saved(address: &str, name: &str, le_audio: bool) -> Device {
     Device { name: name.into(), saved: true, le_audio, ..sample_device(address) }
@@ -258,7 +257,7 @@ fn says_what_an_import_did() {
     assert_eq!(import_notice(&none), t("ui.adapter.import_none"));
 }
 
-// ---- pairing.test.tsx: the keys ----
+// ---- the pairing dialog's keys ----
 
 fn link_key() -> Option<LinkKeyInfo> {
     Some(LinkKeyInfo { key: "00112233445566778899aabbccddeeff".into(), key_type: 4 })

@@ -4,8 +4,6 @@
 //! (crates/codec/src/sbc/mod.rs, caps.rs RemoteCaps::sbc_params): a value the
 //! headphones do not list falls back to the default when connecting, Auto
 //! takes the default, the bitpool stays within the headphones' range.
-//!
-//! Ported from app/src/ui/src/lib/sbc.ts
 
 use ipc::Device;
 
@@ -206,7 +204,7 @@ pub fn sbc_kbps_text(p: &impl CodecFields, caps: Option<&SbcCaps>) -> String {
     format!("≈ {} kbps", sbc_setup(p, rate, caps).kbps)
 }
 
-/// Test data shared by the modules' tests (ipc/mock.ts)
+/// Test data shared by the modules' tests
 #[cfg(test)]
 pub(crate) mod mock {
     use ipc::{Device, MediaEq, MicProcessing, Profile};

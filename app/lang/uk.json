@@ -1109,7 +1109,7 @@
   "error.driver_restore_other_radio": "Драйвер повернуто, але Windows працює лише з одним адаптером Bluetooth одночасно, а зараз використовується %s. Щоб використовувати цей адаптер у Windows, вимкніть той у Диспетчері пристроїв, а потім від'єднайте й знову під'єднайте цей.",
   "ui.v1_running.title": "Запущено інший екземпляр BlueCaster",
   "ui.v1_running.text": "Дві копії не можуть спільно використовувати адаптер Bluetooth. Закрийте іншу через її значок в області сповіщень.",
-  "help.third_party": "Також містить libldac (Apache-2.0), libopenaptx (LGPL-2.1+, © 2017 Aurelien Jacobs, © 2018-2020 Pali Rohár), Fraunhofer FDK AAC, Bluedroid SBC (Apache-2.0), кодувальник LHDC V5 (Apache-2.0, похідний від AOSP; FFT з KISS FFT, BSD-3-Clause), libopus (BSD-3-Clause), liblc3 (Apache-2.0), Tauri, SolidJS та інші бібліотеки Rust і JavaScript. Тексти ліцензій — у папці «licenses» поруч із програмою.",
+  "help.third_party": "Також містить libldac (Apache-2.0), libopenaptx (LGPL-2.1+, © 2017 Aurelien Jacobs, © 2018-2020 Pali Rohár), Fraunhofer FDK AAC, Bluedroid SBC (Apache-2.0), кодувальник LHDC V5 (Apache-2.0, похідний від AOSP; FFT з KISS FFT, BSD-3-Clause), libopus (BSD-3-Clause), liblc3 (Apache-2.0), GPUI та інші бібліотеки Rust. Тексти ліцензій — у папці «licenses» поруч із програмою.",
   "ui.settings.core_version": "ядро %s",
   "dbgc.col_step": "Крок",
   "dbgc.col_status": "Стан",

@@ -1109,7 +1109,7 @@
   "error.driver_restore_other_radio": "ドライバーは元に戻りましたが、Windows が同時に使える Bluetooth アダプターは 1 つだけで、現在は %s が使われています。このアダプターを Windows で使うには、デバイス マネージャーでそちらを無効にしてから、このアダプターを抜いて挿し直してください。",
   "ui.v1_running.title": "別の BlueCaster が起動しています",
   "ui.v1_running.text": "2 つの BlueCaster で同じ Bluetooth アダプターは使えません。もう一方をトレイアイコンから終了してください。",
-  "help.third_party": "このほか libldac（Apache-2.0）、libopenaptx（LGPL-2.1+、© 2017 Aurelien Jacobs、© 2018-2020 Pali Rohár）、Fraunhofer FDK AAC、Bluedroid SBC（Apache-2.0）、LHDC V5 エンコーダー（Apache-2.0、AOSP 由来。FFT は KISS FFT、BSD-3-Clause）、libopus（BSD-3-Clause）、liblc3（Apache-2.0）、Tauri、SolidJS ほかの Rust と JavaScript のライブラリを含みます。ライセンス全文はプログラムと同じ場所の「licenses」フォルダーにあります。",
+  "help.third_party": "このほか libldac（Apache-2.0）、libopenaptx（LGPL-2.1+、© 2017 Aurelien Jacobs、© 2018-2020 Pali Rohár）、Fraunhofer FDK AAC、Bluedroid SBC（Apache-2.0）、LHDC V5 エンコーダー（Apache-2.0、AOSP 由来。FFT は KISS FFT、BSD-3-Clause）、libopus（BSD-3-Clause）、liblc3（Apache-2.0）、GPUI などの Rust ライブラリを含みます。ライセンス全文はプログラムと同じ場所の「licenses」フォルダーにあります。",
   "ui.settings.core_version": "コア %s",
   "dbgc.col_step": "手順",
   "dbgc.col_status": "状態",

@@ -1,6 +1,5 @@
-//! stream.rs' tests: components/stream.test.ts, the helpers of
-//! app/shell.test.tsx and the headset chip's cases of
-//! screens/headsetMic.test.tsx
+//! stream.rs' tests: the streaming controls, the main window's helpers and
+//! the headset chip
 
 use ipc::{
     AdapterState, CodecDetails, CodecStop, Device, LinkSample, Msg, Profile, SbcDetails, Settings, Snapshot,
@@ -189,7 +188,7 @@ fn says_beside_the_codec_why_the_chosen_one_is_not_used() {
     assert_eq!(fallback_note(&sbc_info(), "status.connected"), "");
 }
 
-// ---- helpers (app/shell.test.tsx) ----
+// ---- the main window's helpers ----
 
 #[test]
 fn source_text_names_what_a_stream_captures() {

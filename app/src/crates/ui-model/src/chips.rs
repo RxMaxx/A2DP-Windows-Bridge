@@ -1,8 +1,6 @@
 //! Bluetooth chips for the firmware (settings.bt_chip_pid / bt_chip_fw_stem),
 //! the table of v1 (bt_adapter_enum.cpp chip_db, develop branch) and the core
 //! (crates/bt-host/src/chips.rs).
-//!
-//! Ported from app/src/ui/src/lib/chips.ts
 
 use std::collections::HashSet;
 
@@ -215,7 +213,7 @@ pub enum ChipStatus {
 }
 
 impl ChipStatus {
-    /// The TypeScript `kind`: "present", "missing", ... "select_chip"
+    /// The status as a name: "present", "missing", ... "select_chip"
     pub fn kind(&self) -> &'static str {
         match self {
             ChipStatus::Present { .. } => "present",

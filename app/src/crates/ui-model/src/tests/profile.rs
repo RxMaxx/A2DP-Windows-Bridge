@@ -1,6 +1,5 @@
-//! profile.rs' tests: lib.test.ts ("a device's profile", "profiles",
-//! "VB-Cable", "the first-run setup's sound and microphone") and
-//! device.test.ts
+//! profile.rs' tests: a device's profile, profiles, VB-Cable, the first-run
+//! setup's sound and microphone, and the codecs a device offers
 
 use std::collections::BTreeMap;
 
@@ -291,7 +290,7 @@ mod setup {
     }
 }
 
-// ---- device.test.ts ----
+// ---- the codecs a device offers ----
 
 fn dev(address: &str, codecs: &[&str]) -> Device {
     Device { saved: true, codecs: codecs.iter().map(|c| (*c).to_owned()).collect(), ..sample_device(address) }

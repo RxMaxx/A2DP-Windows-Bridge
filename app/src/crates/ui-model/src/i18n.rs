@@ -1,7 +1,5 @@
 //! Translations: the flat JSON files of app/lang (shared with the core), all
 //! built in. A key missing from a language shows the English text, as in v1.
-//!
-//! Ported from app/src/ui/src/i18n (index.ts, printf.ts).
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, RwLock};

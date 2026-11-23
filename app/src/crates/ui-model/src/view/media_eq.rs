@@ -1,9 +1,7 @@
-//! The playback EQ editor's rules (components/MediaEq.tsx): the graph's
+//! The playback EQ editor's rules: the graph's
 //! geometry, what dragging, the keys, the wheel and the menu do to a point,
 //! where Add point puts one, the fields' values and which controls are
 //! enabled. The maths of the curve is [`crate::eq`].
-//!
-//! Ported from app/src/ui/src/components/MediaEq.tsx.
 
 use ipc::{EqBandType, EqPoint, MediaEq};
 

@@ -1,8 +1,6 @@
 //! The log of the Diagnostics screen: level, text and "this attempt only"
 //! filters, the line text copies use, and the window of lines drawn, as
 //! v1's debug console (wx_debug_console_dialog.cpp on the develop branch) had them.
-//!
-//! Ported from app/src/ui/src/lib/logview.ts
 
 use chrono::{Local, TimeZone, Timelike};
 use ipc::{FlowView, LogLevel, LogLine};

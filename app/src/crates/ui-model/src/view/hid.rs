@@ -1,9 +1,6 @@
 //! Keyboards and mice through BlueCaster (experimental, developer mode,
 //! issue #413): when it is in force, which scanned devices are offered,
 //! and when the dialog that turns it on lets the user go on.
-//!
-//! Ported from app/src/ui/src/components/HidHost.tsx and HidEnableDialog.tsx
-//! (and their tests in hidHost.test.tsx).
 
 use ipc::{Device, HidDevice, Settings, Snapshot};
 

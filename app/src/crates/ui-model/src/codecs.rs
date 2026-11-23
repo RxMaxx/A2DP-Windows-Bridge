@@ -11,9 +11,9 @@
 //! the Codecs screen a card of its own, aptX Adaptive LL: issue #86).
 //! aptX HD and aptX Adaptive always carry 24-bit (no choice).
 //!
-//! Ported from app/src/ui/src/lib/codecs.ts. Codec ids (TS `CodecId`) are
-//! `&'static str`: "auto", "ldac", "aptxhd", "aptxll", "aptx", "aptxad",
-//! "aptxadll", "lhdcv5", "opus", "aac", "sbcxq", "sbc", "faststream", "opus05".
+//! Codec ids are `&'static str`: "auto", "ldac", "aptxhd", "aptxll", "aptx",
+//! "aptxad", "aptxadll", "lhdcv5", "opus", "aac", "sbcxq", "sbc",
+//! "faststream", "opus05".
 
 use ipc::{DevOverrides, Profile, Settings};
 
@@ -1179,7 +1179,7 @@ mod tests {
         assert_eq!(codec_label_key("SBC XQ"), "codec.sbc_xq");
         assert_eq!(codec_label_key("FastStream"), "codec.faststream");
         assert_eq!(codec_label_key("Ldac"), "codec.ldac");
-        // LE Audio streams LC3 (device.test.ts)
+        // LE Audio streams LC3
         assert_eq!(codec_label_key("LC3"), "ui.codec.lc3");
     }
 
@@ -1224,7 +1224,7 @@ mod tests {
         assert_eq!(tag("auto", "hq", 0, false, true), None);
     }
 
-    // ---- codecs a device offers (device.test.ts) ----
+    // ---- codecs a device offers ----
 
     #[test]
     fn is_unknown_until_the_device_connected_once() {

@@ -26,10 +26,10 @@ members = [
     "app/src/crates/session-host",
     "app/src/core",
     "app/src/driver",
-    "app/src/ui/src-tauri",
-    "app/src/ui-gpui",
+    "app/src/ui",
     "app/src/crates/ui-model",
     "app/src/crates/ui-host",
+    "tools/sign-update",
 ]
 # Vendored aptX Adaptive encoder: a path dependency of codec, kept out of the
 # workspace (its unit tests read upstream's reference vectors, not vendored).

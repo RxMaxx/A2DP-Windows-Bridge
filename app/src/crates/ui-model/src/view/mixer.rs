@@ -1,8 +1,6 @@
 //! The decisions behind the Volume Mixer: each app's name and mute button,
 //! the requests, how often a dragged slider is sent, and how a refresh
 //! keeps the rows.
-//!
-//! Ported from app/src/ui/src/screens/Mixer.tsx and components/Mixer.tsx.
 
 use ipc::{Method, MixerApp};
 
@@ -70,7 +68,7 @@ mod tests {
         assert_eq!(mute_label(true), t("ui.volume.unmute"));
     }
 
-    // Mixer.test.tsx "sets an app's volume and mute"
+    // Sets an app's volume and mute
     #[test]
     fn requests() {
         assert_eq!(

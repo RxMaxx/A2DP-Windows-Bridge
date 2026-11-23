@@ -1,9 +1,7 @@
 //! The first-run setup's rules: when it is needed, its steps, the adapter it
 //! chooses and their order, when Next may be pressed, what the driver step
-//! does, and when the device step's scan resumes.
-//!
-//! Ported from app/src/ui/src/screens/Setup.tsx (the logic; the drawing is in
-//! ui-gpui's screens/setup.rs).
+//! does, and when the device step's scan resumes. The window draws them
+//! (app/src/ui: screens/setup.rs).
 
 use ipc::{AdapterInfo, DriverKind, Profile, Snapshot, StreamState, StreamStatus, WindowsPairedDevice};
 
@@ -214,7 +212,7 @@ mod tests {
         vec![AdapterInfo { driver: DriverKind::Other, ..mediatek() }, dongle]
     }
 
-    // ---- setup.test.ts "setup adapter order" ----
+    // ---- the setup's adapter order ----
 
     #[test]
     fn puts_a_realtek_dongle_before_the_built_in_intel_adapter_on_the_same_driver() {
@@ -227,7 +225,7 @@ mod tests {
         assert_eq!(ids(&supported_first(&[winusb(intel()), winusb(rtl())])), ["rtl", "intel"]);
     }
 
-    // ---- screens.test.tsx "the first-run setup when no adapter is on WinUSB" ----
+    // ---- the first-run setup when no adapter is on WinUSB ----
 
     #[test]
     fn is_needed_without_a_profile_or_an_adapter_on_winusb() {
@@ -276,7 +274,7 @@ mod tests {
         assert_eq!(firmware_to_download(&manual), None);
     }
 
-    // ---- shell.test.tsx "setup adapter step" ----
+    // ---- the setup's adapter step ----
 
     #[test]
     fn chooses_the_supported_adapter_and_lists_the_other_last() {
@@ -294,7 +292,7 @@ mod tests {
         assert_eq!(chosen_adapter(&[], None), None);
     }
 
-    // ---- screens.test.tsx "the setup names the devices Windows loses" ----
+    // ---- the setup names the devices Windows loses ----
 
     #[test]
     fn names_every_device_windows_loses_but_the_audio_ones() {
@@ -312,7 +310,7 @@ mod tests {
         assert!(losing_devices(Vec::new()).is_empty());
     }
 
-    // ---- shell.test.tsx "setup device step" ----
+    // ---- the setup's device step ----
 
     #[test]
     fn four_steps_with_their_titles() {

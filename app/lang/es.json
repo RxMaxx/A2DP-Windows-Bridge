@@ -1109,7 +1109,7 @@
   "error.driver_restore_other_radio": "El controlador se restauró, pero Windows usa un solo adaptador Bluetooth a la vez y %s está en uso. Para usar este adaptador en Windows, deshabilite el otro en el Administrador de dispositivos y luego desconecte y vuelva a conectar este.",
   "ui.v1_running.title": "Hay otro BlueCaster en ejecución",
   "ui.v1_running.text": "Dos copias no pueden compartir el adaptador Bluetooth. Cierre la otra desde su icono de la bandeja.",
-  "help.third_party": "También incluye libldac (Apache-2.0), libopenaptx (LGPL-2.1+, © 2017 Aurelien Jacobs, © 2018-2020 Pali Rohár), Fraunhofer FDK AAC, Bluedroid SBC (Apache-2.0), el codificador LHDC V5 (Apache-2.0, derivado de AOSP; FFT de KISS FFT, BSD-3-Clause), libopus (BSD-3-Clause), liblc3 (Apache-2.0), Tauri, SolidJS y otras bibliotecas de Rust y JavaScript. Los textos de las licencias están en la carpeta \"licenses\" junto al programa.",
+  "help.third_party": "También incluye libldac (Apache-2.0), libopenaptx (LGPL-2.1+, © 2017 Aurelien Jacobs, © 2018-2020 Pali Rohár), Fraunhofer FDK AAC, Bluedroid SBC (Apache-2.0), el codificador LHDC V5 (Apache-2.0, derivado de AOSP; FFT de KISS FFT, BSD-3-Clause), libopus (BSD-3-Clause), liblc3 (Apache-2.0), GPUI y otras bibliotecas de Rust. Los textos de las licencias están en la carpeta \"licenses\" junto al programa.",
   "ui.settings.core_version": "núcleo %s",
   "dbgc.col_step": "Paso",
   "dbgc.col_status": "Estado",

@@ -1,6 +1,5 @@
-//! home.rs' tests: the Home cases of screens/screens.test.tsx and
-//! app/shell.test.tsx (their logic; what they check of the page's markup is
-//! the window's)
+//! home.rs' tests: Home's rules (how the window draws them is not tested
+//! here)
 
 use ipc::{
     AdapterInfo, AdapterState, AdapterStatus, Device, DriverKind, ErrorInfo, Msg, OtherRadio, Profile, Settings,

@@ -1,7 +1,5 @@
 //! The tray flyout's rules: which parts of its page show (as Home's card,
 //! issue #86), the error it shows, and where an error's fix leads from it.
-//!
-//! Ported from app/src/ui/src/screens/Flyout.tsx.
 
 use ipc::{ErrorInfo, Msg, Snapshot, StreamState};
 
@@ -128,7 +126,7 @@ mod tests {
         snap
     }
 
-    // screens.test.tsx "the flyout": Open BlueCaster beside Connect, not in
+    // The flyout: Open BlueCaster beside Connect, not in
     // a row of its own (issue #86)
     #[test]
     fn open_goes_beside_connect_with_no_footer() {
@@ -139,7 +137,7 @@ mod tests {
         assert!(!parts.volume && !parts.battery);
     }
 
-    // shell.test.tsx "the flyout offers to add one, as Home does (issue #86)"
+    // The flyout offers to add one, as Home does (issue #86)
     #[test]
     fn with_no_device_it_offers_to_add_one_and_open_keeps_its_own_row() {
         let mut snap = snapshot();
@@ -159,7 +157,7 @@ mod tests {
         assert!(!parts.profile && !parts.actions && parts.footer);
     }
 
-    // screens.test.tsx "the flyout looks like Home's card": the volume once
+    // The flyout looks like Home's card: the volume once
     // connected, then Disconnect
     #[test]
     fn volume_and_battery_while_a_device_is_in_use() {
@@ -189,8 +187,8 @@ mod tests {
         assert!(parts.update && parts.footer && parts.actions);
     }
 
-    // shell.test.tsx "shows the capture sign (the capture source is chosen
-    // in the main window)"
+    // The capture sign shows (the capture source is chosen in the main
+    // window)
     #[test]
     fn the_capture_sign_shows_while_a_capture_runs() {
         let mut snap = snapshot();

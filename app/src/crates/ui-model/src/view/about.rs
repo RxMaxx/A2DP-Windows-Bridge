@@ -1,9 +1,6 @@
 //! The decisions behind About, the service add-on (its row on the Developer
 //! screen and the connection screen's notices) and VB-Audio's cables (the
 //! line, the dialog, the dialog once after an update).
-//!
-//! Ported from app/src/ui/src/screens/About.tsx, components/ServiceAddon.tsx
-//! and components/CableNotes.tsx.
 
 use ipc::{AudioDevice, Settings};
 
@@ -252,8 +249,8 @@ mod tests {
         );
     }
 
-    // serviceAddon.test.tsx: "is offered by what it gives", "removes it
-    // after asking", the connection screen's Start
+    // The service add-on is offered by what it gives, removed after asking,
+    // and started from the connection screen
     #[test]
     fn service_row_buttons_by_state() {
         assert_eq!(service_buttons(ServiceKind::NotAdded), (Some(ServiceButton::Add), false));
@@ -275,7 +272,7 @@ mod tests {
         assert_eq!(setup_error(SetupOutcome::NotStarted), Some(t("ui.service.not_started")));
     }
 
-    // shell.test.tsx "Audio Devices without a virtual device": the line, and
+    // Audio Devices without a virtual device: the line, and
     // the developer switch that hides it only in developer mode
     #[test]
     fn the_line_amber_green_or_hidden() {

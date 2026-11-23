@@ -5,8 +5,7 @@
 //! this tracker is the mock core's, with rules for the messages of the v2
 //! core (crates/core/src/stream.rs and service.rs, crates/bt-host/src).
 //!
-//! Ported from app/src/ui/src/lib/flow.ts. The TypeScript's regular
-//! expressions are spelled out as [`Needle`] variants (no regex crate).
+//! The patterns are spelled out as [`Needle`] variants (no regex crate).
 
 use std::ops::{Index, IndexMut};
 
@@ -620,7 +619,7 @@ mod tests {
     #[test]
     fn shows_the_cores_computed_step_details_in_the_ui_language() {
         // English only: the language is process-wide and tests run in
-        // parallel (the TypeScript test also checks Japanese)
+        // parallel
         let live = Msg { key: "dbgc.audio_live".to_owned(), args: vec!["120".to_owned(), "990".to_owned()] };
         assert_eq!(step_detail("120 packets/s, 990 kbps", Some(&live)), "120 packets/s, 990 kbps");
         assert_eq!(step_detail("reconnecting to AA:BB", None), "reconnecting to AA:BB");

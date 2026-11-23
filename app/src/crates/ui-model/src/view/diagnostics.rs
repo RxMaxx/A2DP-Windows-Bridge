@@ -1,9 +1,6 @@
 //! The Diagnostics screen's texts and rules: the rows of the stream, radio,
 //! capture and microphone tabs, the verbose logging choice, the Wi-Fi scan's
-//! bands. The screen (ui-gpui screens/diagnostics) only draws them.
-//!
-//! Ported from app/src/ui/src/screens/Diagnostics.tsx and
-//! screens/diagnostics/{StreamPanel,RadioPanel,CapturePanel,MicPanel,ChannelMap}.tsx.
+//! bands. The screen (app/src/ui: screens/diagnostics) only draws them.
 
 use chrono::{Local, TimeZone};
 use ipc::{
@@ -449,7 +446,7 @@ mod tests {
         }
     }
 
-    // lib/series.test.ts (the cases of CapturePanel and RadioPanel)
+    // The series of the capture and radio tabs
     #[test]
     fn gaps_row_is_the_count_with_the_audio_lost_when_known() {
         assert_eq!(gaps_text(0, Some(0.0)), "0");
@@ -468,7 +465,7 @@ mod tests {
         assert_eq!(chip_packet_text(None), DASH);
     }
 
-    // screens/Diagnostics.test.tsx
+    // The Diagnostics screen
     #[test]
     fn verbose_logging_choice_follows_the_cores_state() {
         assert_eq!(verbose_choice(None), VerboseChoice::Off);

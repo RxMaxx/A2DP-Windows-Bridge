@@ -1,12 +1,8 @@
 //! The decisions behind the streaming controls shared by Home, the flyout
 //! and the navigation's status block: state labels, the codec's line, the
 //! headset microphone's chip, link quality, the error panel's fix and the
-//! bug report's text.
-//!
-//! Ported from app/src/ui/src/components/stream.tsx, with the parts of
-//! screens/Home.tsx (entryState, HeadsetChip), app/indicators.tsx
-//! (captureRunningText, crashHead, noteLines) and app/App.tsx (DevicePill)
-//! that decide what shows.
+//! bug report's text; also Home's entry state and headset chip, and the
+//! main window's indicators (capture running, crash, notes, device pill).
 
 use ipc::{AdapterInfo, CodecStop, CodecStopKind, CrashReport, DriverKind, LinkSample, Msg, Profile, Snapshot};
 use ipc::{SourceInfo, StreamInfo, StreamState, StreamStatus};
@@ -498,7 +494,7 @@ pub fn headset_chip(snap: &Snapshot, entry: &AudioEntry) -> Option<HeadsetChip> 
 }
 
 // ---------------------------------------------------------------------------
-// The navigation's status block (App.tsx DevicePill)
+// The navigation's status block (the device pill)
 // ---------------------------------------------------------------------------
 
 /// The state a device's block shows; without devices, the stream's
@@ -757,7 +753,7 @@ pub fn report_text(head: &str, details: &str, info: &str) -> ReportText {
 }
 
 // ---------------------------------------------------------------------------
-// What the main window shows around every screen (app/indicators.tsx)
+// What the main window shows around every screen
 // ---------------------------------------------------------------------------
 
 /// "HCI capture running" from v1's title suffix (" - [HCI capture running]")

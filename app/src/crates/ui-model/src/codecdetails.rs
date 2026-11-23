@@ -1,7 +1,5 @@
 //! What Diagnostics' codec details card shows: each codec setting with what
 //! the device offered, the SBC bitpool bar's scale and how full a packet is.
-//!
-//! Ported from app/src/ui/src/lib/codecdetails.ts
 
 use ipc::{CodecDetails, StreamInfo};
 

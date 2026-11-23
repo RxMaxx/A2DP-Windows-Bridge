@@ -2,9 +2,8 @@
 //! (dsp::biquad: RBJ "Audio EQ Cookbook" biquads), and the editing rules of
 //! its points (the ranges the core holds them to, rounding, defaults).
 //!
-//! Ported from app/src/ui/src/lib/eq.ts. The points are the core's
-//! `EqPoint` (f32); everything here computes in f64, as the TypeScript did
-//! with the f32 values.
+//! The points are the core's `EqPoint` (f32); everything here computes in
+//! f64 from the f32 values.
 
 use std::f64::consts::{FRAC_1_SQRT_2, PI};
 

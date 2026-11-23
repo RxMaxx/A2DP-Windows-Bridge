@@ -1,8 +1,7 @@
 //! Home's rules: the bars over the cards (firmware, another adapter, Hi-Res),
-//! the error shown, and what each device's card shows and does.
-//!
-//! Ported from app/src/ui/src/screens/Home.tsx (the parts other screens
-//! import are in `view::stream`: entry_state, hidden_by_hung, headset_chip).
+//! the error shown, and what each device's card shows and does. The parts
+//! other screens use are in `view::stream` (entry_state, hidden_by_hung,
+//! headset_chip).
 
 use ipc::{AdapterInfo, AdapterStatus, DriverKind, ErrorInfo, Msg, Snapshot, StreamState};
 

@@ -3,9 +3,10 @@
 //! show (`--flyout`, `--quick-settings`, or nothing: the main window) to
 //! the running one and exits.
 //!
-//! The running instance holds a named mutex (session-local, the name
-//! Tauri's single-instance plugin used: an older Tauri build and this one
-//! exclude each other) and serves a Named Pipe of its own, open only to
+//! The running instance holds a named mutex (session-local, `<identifier>-sim`:
+//! the name the Tauri window of 3.0.x took from its single-instance plugin,
+//! so that a 3.0.x window and this one exclude each other, and the installer
+//! finds either) and serves a Named Pipe of its own, open only to
 //! this user (and SYSTEM), named after the user and the session. A second
 //! launch hands the foreground right it got from the user's click to the
 //! running one (so that its window can come to the front), sends its
@@ -19,7 +20,8 @@ use tokio::net::windows::named_pipe::NamedPipeServer;
 use tokio::sync::{mpsc, oneshot};
 use win_sys::single_instance::SingleInstance;
 
-/// The installed app's identifier (Tauri's, tauri.conf.json)
+/// The installed app's identifier: the AppUserModelID of its windows and of
+/// the installer's shortcuts (installer/BlueCaster.iss AppUserModelId)
 pub const IDENTIFIER: &str = "io.github.seiyafunaokajp.bluecaster";
 /// Development: another identifier, so that a development build runs beside
 /// the installed app

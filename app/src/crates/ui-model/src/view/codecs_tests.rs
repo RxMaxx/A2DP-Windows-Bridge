@@ -1,7 +1,5 @@
-//! codecs.rs' tests: the logic cases of screens/codecs.test.tsx, the
-//! Codecs parts of screens/headsetMic.test.tsx and screens/leAudio.test.tsx,
-//! and components/codecDetails.test.tsx's bitpoolRange case. The device
-//! fixtures are ipc/mock.ts's.
+//! codecs.rs' tests: the Codecs screen's rules, the headset microphone's and
+//! LE Audio's codecs, and the SBC XQ bitpool range.
 
 use ipc::{
     AdapterState, CodecDeviceCaps, Device, Msg, Profile, Settings, Snapshot, StreamInfo, StreamState, StreamStatus,
@@ -49,7 +47,7 @@ fn saved(address: &str, name: &str, codecs: &[&str]) -> Device {
     }
 }
 
-/// mock.ts' "normal" and "capped" devices: the WH-1000XM5 (SBC, AAC, LDAC,
+/// The test devices, "normal" and "capped": the WH-1000XM5 (SBC, AAC, LDAC,
 /// with its profile on LDAC), the SRS-XB13 (never connected, its profile on
 /// AAC), the moto buds+ (SBC max bitpool 39, AAC at 131 kbps, LHDC V5), two
 /// aptX Adaptive earbuds, Huawei earbuds that offer LDAC once asked, and a
@@ -781,7 +779,7 @@ fn abr_does_not_carry_between_sbc_sbc_xq_and_ldac() {
 
 #[test]
 fn the_bitpool_range_goes_up_to_sbcs_53_when_not_held_to_the_devices_list() {
-    // components/codecDetails.test.tsx's "SBC XQ bitpool range"
+    // The SBC XQ bitpool range
     assert_eq!(bitpool_range("sbcxq", None, 48000, false), BitpoolRange { min: 2, max: 43 });
     assert_eq!(bitpool_range("sbcxq", None, 48000, true), BitpoolRange { min: 2, max: 53 });
     assert_eq!(bitpool_range("sbc", None, 48000, true), BitpoolRange { min: 2, max: 53 });
@@ -789,7 +787,7 @@ fn the_bitpool_range_goes_up_to_sbcs_53_when_not_held_to_the_devices_list() {
     assert_eq!(bitpool_range("sbc", Some(&capped), 48000, false), BitpoolRange { min: 10, max: 39 });
 }
 
-// ---- the microphone's codec (headsetMic.test.tsx, leAudio.test.tsx) ----
+// ---- the microphone's codec (headset microphone, LE Audio) ----
 
 #[test]
 fn call_codec_cards_show_those_the_headphones_list_tagged_with_every_one_shown() {

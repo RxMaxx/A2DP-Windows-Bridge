@@ -1,6 +1,4 @@
 //! Web pages the UI opens (the same ones v1 opened)
-//!
-//! Ported from app/src/ui/src/lib/links.ts
 
 use crate::format::js_space;
 
@@ -12,7 +10,7 @@ macro_rules! repo {
 
 const REPO: &str = repo!();
 
-/// The pages, as LINKS in links.ts
+/// The pages
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Links {
     pub repo: &'static str,
@@ -531,7 +529,7 @@ mod tests {
         assert!(chip_report_url(&ChipReport { report: "not json".into(), ..Default::default() }).attach);
     }
 
-    // adapter.test.tsx "chipReportUrl"
+    // The chip report's URL
 
     fn chip_base(report: String) -> ChipReport {
         ChipReport {

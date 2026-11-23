@@ -1,10 +1,8 @@
 //! The Adapter screen's rules: the order of the adapters, their names and
 //! ids, the adapter to use, which firmware controls an adapter's card shows,
 //! the loader line, AFH's mode and channels, LE Audio's switch, and when the
-//! chip tools may run a script.
-//!
-//! Ported from app/src/ui/src/screens/Adapter.tsx and ChipTools.tsx (the
-//! logic; the drawing is in ui-gpui's screens/adapter.rs and chip_tools.rs).
+//! chip tools may run a script. The window draws them (app/src/ui:
+//! screens/adapter.rs and chip_tools.rs).
 
 use ipc::{ActiveAdapter, AdapterInfo, AdapterState, AdapterStatus, DriverKind, LoaderStatus, ScriptCheck, Settings};
 
@@ -464,7 +462,7 @@ mod tests {
         }
     }
 
-    // ---- adapter.test.tsx "adapter names" ----
+    // ---- adapter names ----
 
     #[test]
     fn adapter_names() {
@@ -497,7 +495,7 @@ mod tests {
         assert_eq!(adapter_name(&intel), "Intel");
     }
 
-    // ---- adapter.test.tsx "Adapter to use" ----
+    // ---- the adapter to use ----
 
     #[test]
     fn marks_the_adapter_in_use_and_offers_the_ones_on_winusb() {
@@ -536,7 +534,7 @@ mod tests {
         assert!(!show_choice(&[rtl, windows], " "));
     }
 
-    // ---- adapter.test.tsx "Adapter firmware" (the card's rules) ----
+    // ---- adapter firmware (the card's rules) ----
 
     fn mediatek() -> AdapterInfo {
         AdapterInfo {
@@ -640,7 +638,7 @@ mod tests {
         assert_eq!(detected_chip(&[intel(), realtek()]), Some("RTL8761BU"));
     }
 
-    // ---- adapter.test.tsx "Firmware loader progress" ----
+    // ---- firmware loader progress ----
 
     #[test]
     fn shows_a_loader_while_the_adapter_starts_its_failure_and_its_steps_in_developer_mode() {
@@ -672,7 +670,7 @@ mod tests {
         assert_eq!(loader_line(None, true), None);
     }
 
-    // ---- adapter.test.tsx "LE Audio switch" ----
+    // ---- the LE Audio switch ----
 
     #[test]
     fn le_audio_switch_in_developer_mode_when_an_adapter_supports_it() {
@@ -686,7 +684,7 @@ mod tests {
         assert!(le_audio_toggle_shown(&a, true));
     }
 
-    // ---- adapter.test.tsx "AFH" ----
+    // ---- AFH ----
 
     #[test]
     fn afh_auto_and_off_read_only_manual_typed() {

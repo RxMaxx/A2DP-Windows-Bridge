@@ -1,12 +1,11 @@
 //! The peer receiver test's logic, as v1's dialog (wx_receiver_dialog.cpp
 //! at b819893): the six OK / NG steps of a measurement and the comparison of
 //! what this PC sent with what the receiver (tools/linux_sink) counted. The
-//! screen (screens/ReceiverTest.tsx) feeds it the core's ReceiverState, the
+//! screen (the window's screens/receiver_test.rs) feeds it the core's ReceiverState, the
 //! stream status and the last link sample; everything here is plain data so
 //! the tests can drive it without a core.
 //!
-//! Ported from app/src/ui/src/lib/receiver.ts. Times are milliseconds on
-//! the screen's own clock.
+//! Times are milliseconds on the screen's own clock.
 
 use std::ops::{Index, IndexMut};
 
@@ -541,8 +540,8 @@ impl Index<RowId> for Rows {
 /// Counts start with each stream and at Reset: what Reset took
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Baseline {
-    /// ReceiverState.stream_starts at Reset (None: no Reset, the TypeScript's
-    /// -1); another stream starts from zero
+    /// ReceiverState.stream_starts at Reset (None: no Reset); another stream
+    /// starts from zero
     pub sent_starts: Option<u32>,
     /// `sent` at Reset
     pub sent: Option<LinkTotals>,
@@ -792,7 +791,7 @@ mod tests {
         s
     }
 
-    /// `state({stream, streaming, mtu, buffer, ...rest})` of the TypeScript test
+    /// A test's state: the stream, streaming, mtu, buffer and the rest
     #[derive(Default)]
     struct St {
         stream: Option<ReceivedStream>,

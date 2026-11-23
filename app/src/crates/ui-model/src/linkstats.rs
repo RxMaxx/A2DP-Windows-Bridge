@@ -3,8 +3,6 @@
 //! stream started or since the Reset button, drop shares, capture drops in
 //! milliseconds. The core keeps cumulative counters only; the baselines are
 //! the view's.
-//!
-//! Ported from app/src/ui/src/lib/linkstats.ts
 
 use ipc::{LinkCounters, LinkSample, LinkTotals};
 

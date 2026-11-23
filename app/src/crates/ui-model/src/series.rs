@@ -1,8 +1,6 @@
 //! Time series for the Diagnostics charts: the link samples on a time axis
 //! (gaps where samples are missing), the nearest sample to a hovered time,
 //! and per-second rates from the cumulative counters.
-//!
-//! Ported from app/src/ui/src/lib/series.ts
 
 use ipc::{LinkSample, LinkTotals};
 
