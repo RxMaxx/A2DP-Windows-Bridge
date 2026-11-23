@@ -34,6 +34,7 @@ mod ctkd;
 pub mod events;
 mod ffi;
 mod le;
+mod le_bonds;
 mod stack;
 mod timer_resolution;
 mod transport;
@@ -42,6 +43,7 @@ pub mod voice;
 pub use att::AttWriteRequest;
 pub use ctkd::{CtkdOutcome, ImportedLeBond, LeBondAdded, LeKeys, ctkd_enabled, set_ctkd};
 pub use le::{BROADCAST_SLOTS, BigParams, CigParams, CisParams, ConnectionType, LeDbEntry, LeEncryption};
+pub use le_bonds::{EvictedLeBond, ccc_device_index, ccc_slots, ccc_tag, service_changed_tag};
 pub use stack::{AclState, AvdtpState, HciState, Stack};
 pub use timer_resolution::HighTimerResolution;
 pub use transport::{
@@ -293,6 +295,7 @@ where
     att::reset();
     le::reset();
     ctkd::reset();
+    le_bonds::reset();
 
     // SAFETY: first BTstack calls of this run, on this thread; nothing else
     // uses BTstack (RUNNING).

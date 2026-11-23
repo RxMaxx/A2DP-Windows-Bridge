@@ -344,6 +344,8 @@ unsafe extern "C" {
     pub fn sm_le_device_index(con: u16) -> c_int;
 
     // ---- BTstack: LE device DB ----
+    pub fn bluecaster_ccc_tag(slot: u32) -> u32;
+    pub fn bluecaster_ccc_slots() -> u32;
     pub fn le_device_db_max_count() -> c_int;
     pub fn le_device_db_add(addr_type: c_int, addr: *mut u8, irk: *mut u8) -> c_int;
     #[allow(clippy::too_many_arguments)]

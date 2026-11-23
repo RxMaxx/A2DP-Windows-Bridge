@@ -32,6 +32,7 @@
 #include "hci.h"
 #include "hci_cmd.h"
 #include "hci_dump.h"
+#include "hci_event.h"
 #include "hci_transport.h"
 #include "l2cap.h"
 #include "classic/a2dp_source.h"
@@ -96,6 +97,12 @@ void bluecaster_ctkd_from_le(int why, int addr_type, const unsigned char *addr, 
                              int key_type) {
     bluecaster_rs_ctkd_from_le(why, addr_type, addr, key, key_type);
 }
+/* Called by the patched le_device_db_tlv.c (patched_le_device_db) */
+void bluecaster_rs_le_bond_evicted(int index, int addr_type, const uint8_t *addr);
+int bluecaster_le_bond_in_use(int index);
+void bluecaster_le_bond_evicted(int index, int addr_type, const unsigned char *addr);
+/* Called by the patched att_server.c (patched_att_server) */
+uint32_t bluecaster_ccc_tag(uint32_t slot);
 
 static void cig_slot_release(uint8_t cig_id);
 
@@ -1391,6 +1398,44 @@ void bluecaster_tlv_delete(uint32_t tag) {
     btstack_tlv_get_instance(&tlv, &context);
     if (tlv != NULL) tlv->delete_tag(context, tag);
 }
+
+/* ---- LE bonds (le_device_db_tlv) and the CCC values of their clients ---- */
+
+/* The bond belongs to an LE link that is up */
+int bluecaster_le_bond_in_use(int index) {
+    btstack_linked_list_iterator_t it;
+    hci_connections_get_iterator(&it);
+    while (btstack_linked_list_iterator_has_next(&it)) {
+        hci_con_handle_t con = ((hci_connection_t *)btstack_linked_list_iterator_next(&it))->con_handle;
+        /* (a classic link's index is not set before key derivation) */
+        if (gap_get_connection_type(con) == GAP_CONNECTION_LE && sm_le_device_index(con) == index) return 1;
+    }
+    return 0;
+}
+
+/* le_device_db_add has no free entry and dropped the oldest bond: what was
+ * kept beside it goes too, and the rest of BTstack and the application learn
+ * of it as of any deleted bond (gap_delete_bonding) */
+void bluecaster_le_bond_evicted(int index, int addr_type, const unsigned char *addr) {
+    uint8_t buffer[20];
+    bd_addr_t a;
+    memcpy(a, addr, 6);
+    bluecaster_rs_le_bond_evicted(index, addr_type, a);
+    uint16_t size = hci_event_create_from_template_and_arguments(
+        buffer, sizeof(buffer), &gap_subevent_bonding_deleted, addr_type, a, index, HCI_CON_HANDLE_INVALID);
+    hci_emit_btstack_event(buffer, size, 1);
+}
+
+/* The TLV tag of a CCC value att_server keeps: 'BTC' + slot as in BTstack,
+ * slots from 256 on 'AW1' + slot .. 'AW9' + slot (the next letter, 'BTD', are
+ * the bonds) */
+uint32_t bluecaster_ccc_tag(uint32_t slot) {
+    uint32_t page = slot >> 8;
+    if (page == 0) return ((uint32_t)'B' << 24) | ((uint32_t)'T' << 16) | ((uint32_t)'C' << 8) | slot;
+    return ((uint32_t)'A' << 24) | ((uint32_t)'W' << 16) | (((uint32_t)'0' + page) << 8) | (slot & 0xFF);
+}
+
+uint32_t bluecaster_ccc_slots(void) { return NVN_NUM_GATT_SERVER_CCC; }
 
 /* ---- GATT client (events of queries and listeners: SOURCE_GATT_CLIENT) ---- */
 
