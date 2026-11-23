@@ -433,8 +433,9 @@ impl Setup {
                     .into_any_element(),
             )
         } else if plan.todo {
-            let bullet =
-                |content: AnyElement| div().flex().gap(theme::S2).child("•").child(div().flex_1().child(content));
+            let bullet = |content: AnyElement| {
+                div().flex().gap(theme::S2).child("•").child(div().flex_1().min_w_0().child(content))
+            };
             let start = a.clone();
             Some(
                 div()

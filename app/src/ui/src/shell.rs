@@ -5,8 +5,8 @@ use gpui_kit::component::Sizable as _;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyView, App, Context, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Render,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    AnyView, App, Context, Entity, FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _,
+    Render, Role, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 use ui_model::i18n::t;
 
@@ -183,6 +183,17 @@ impl MainWindow {
                     let label: SharedString = t(label).into();
                     div()
                         .id(name.as_str())
+                        // A link of the navigation: named, reached with Tab,
+                        // followed with Enter or Space
+                        .role(Role::Link)
+                        .aria_label(label.clone())
+                        .tab_index(0)
+                        .focus_visible(|s| s.bg(p.surface_2).text_color(p.text))
+                        .on_key_down(cx.listener(move |_, event: &KeyDownEvent, _, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                app::navigate(name, cx);
+                            }
+                        }))
                         .relative()
                         .flex()
                         .items_center()

@@ -109,13 +109,18 @@ pub fn show(cx: &mut App) {
 /// Closes the flyout (Escape, a lost focus, the main window opening)
 pub fn hide(cx: &mut App) {
     let f = flyout(cx);
-    f.hwnd = 0;
+    let hwnd = std::mem::take(&mut f.hwnd);
     if let Some(watched) = &f.watched {
         watched.store(0, Ordering::Relaxed);
     }
-    if let Some(window) = f.window.take() {
+    let Some(window) = f.window.take() else { return };
+    // Off the screen at once; the window itself goes after this update:
+    // Escape and the lost focus call this from inside the window's own
+    // update, where the window cannot be reached to remove it
+    native::hide(hwnd);
+    cx.defer(move |cx| {
         let _ = window.update(cx, |_, window, _| window.remove_window());
-    }
+    });
 }
 
 /// Makes the window, not shown yet -> false when it could not be made
