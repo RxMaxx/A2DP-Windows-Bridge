@@ -732,16 +732,16 @@ MAX_END_GAP_S = 0.3
 END_UNDERRUN_S = 0.3
 
 
-def tone_check_stream(path, tones):
+def tone_check_stream(path, tones, max_end_gap=MAX_END_GAP_S):
     """(ok, description) for the test tone over the whole WAV of a stream,
-    except gaps of up to MAX_START_GAP_S at the start and MAX_END_GAP_S at
+    except gaps of up to MAX_START_GAP_S at the start and `max_end_gap` at
     the end"""
     rate, channels = read_wav(path)
     n = int(rate * TONE_BLOCK_S)
     if len(channels) != 2 or len(channels[0]) < rate:
         return False, f'expected >= 1 s of stereo audio, got {len(channels)} ch, {len(channels[0]) / rate:.2f} s'
     blocks = len(channels[0]) // n
-    good, bad, notes = [], [], None
+    good, bad, notes, first_notes = [], [], None, None
     for b in range(blocks):
         ok, block_notes = True, []
         for xs, expected in zip(channels, tones):
@@ -752,19 +752,20 @@ def tone_check_stream(path, tones):
             good.append(b)
             if notes is None and b >= blocks // 2:
                 notes = ', '.join(block_notes)   # a typical block, for the summary
+            first_notes = first_notes or ', '.join(block_notes)
         else:
             bad.append((b, ', '.join(block_notes)))
     if not good:
         return False, f'no {TONE_BLOCK_S * 1000:.0f} ms block with the tone in {blocks * TONE_BLOCK_S:.1f} s'
     start_gap, end_gap = good[0] * TONE_BLOCK_S, (blocks - 1 - good[-1]) * TONE_BLOCK_S
     bad = [x for x in bad if good[0] < x[0] < good[-1]]
-    desc = (f'{notes or "?"}; {blocks * TONE_BLOCK_S:.1f} s checked, gaps {start_gap:.1f} s at the start, '
+    desc = (f'{notes or first_notes}; {blocks * TONE_BLOCK_S:.1f} s checked, gaps {start_gap:.1f} s at the start, '
             f'{end_gap:.1f} s at the end')
     problems = []
     if start_gap > MAX_START_GAP_S + 1e-9:
         problems.append(f'tone only from {start_gap:.1f} s (at most {MAX_START_GAP_S} s expected)')
-    if end_gap > MAX_END_GAP_S + 1e-9:
-        problems.append(f'no tone in the last {end_gap:.1f} s (at most {MAX_END_GAP_S} s expected)')
+    if end_gap > max_end_gap + 1e-9:
+        problems.append(f'no tone in the last {end_gap:.1f} s (at most {max_end_gap} s expected)')
     if bad:
         b, block_notes = bad[0]
         problems.append(f'{len(bad)} block(s) without the tone after it started, first at '
@@ -1149,7 +1150,9 @@ def run_le_case(args, case, port):
             if case.tones:
                 # Every stream (the one set up again after a link loss too)
                 for index, path in enumerate(received['wavs']):
-                    ok, notes = tone_check_stream(path, case.tones)
+                    last = index == len(received['wavs']) - 1
+                    ok, notes = tone_check_stream(path, case.tones,
+                                                  MAX_END_GAP_S if last else MAX_END_GAP_S + case.play_on_s)
                     label = f'stream {index + 1}: ' if len(received['wavs']) > 1 else ''
                     detail += f' | {label}{notes}'
                     if not ok:

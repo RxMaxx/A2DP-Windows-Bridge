@@ -1250,6 +1250,11 @@ const LE_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Set-ups after a lost stream, in all (v1)
 const LE_RESTORE_ATTEMPTS: u32 = 3;
 const LE_STATS_EVERY: Duration = Duration::from_secs(5);
+/// A member that left a stream the others play on is looked for this long
+/// after it went, then every [`LE_REJOIN_EVERY`] (as the app's session)
+const LE_REJOIN_FIRST: Duration = Duration::from_secs(3);
+const LE_REJOIN_EVERY: Duration = Duration::from_secs(4);
+const LE_REJOIN_SCAN: Duration = Duration::from_millis(1500);
 
 /// The entries of Service::scan_devices, one line each
 fn print_scanned(found: &[bluecaster_core::ScannedDevice]) {
@@ -1836,6 +1841,7 @@ fn le_run(a: &Args, service: &Service, running: &Arc<AtomicBool>) -> i32 {
     let start = Instant::now();
     let mut last_print = start;
     let mut restarts = 0;
+    let (mut shown_dropped, mut rejoin_at) = (0, None);
     while rc == 0 && is_running() {
         std::thread::sleep(Duration::from_millis(100));
         if let Some(d) = a.duration
@@ -1851,9 +1857,40 @@ fn le_run(a: &Args, service: &Service, running: &Arc<AtomicBool>) -> i32 {
         if let Some(v) = sim_volume.as_mut() {
             v.tick(&bluecaster_core::volume_sync::LeHeadphones(&host));
         }
-        if host.le_stream_lost() {
+        // A member left while the others play on: looked for, then the
+        // stream is set up again with it
+        let dropped = host.le_stream_dropped();
+        if dropped.len() != shown_dropped {
+            shown_dropped = dropped.len();
+            let playing = started.status.devices.iter().filter(|d| !dropped.contains(d)).count();
+            if shown_dropped > 0 && playing > 0 {
+                outln!("\n*** LE Audio: {shown_dropped} device(s) left the stream, {playing} play on ***");
+                if let Some(p) = audio.as_ref() {
+                    p.set_mono(playing <= 1);
+                }
+                rejoin_at = Some(Instant::now() + LE_REJOIN_FIRST);
+            }
+        }
+        let lost = host.le_stream_lost();
+        let mut member_back = false;
+        if !lost && rejoin_at.is_some_and(|t| Instant::now() >= t) {
+            let known = host.le_devices();
+            let gone: Vec<_> = known.iter().filter(|d| dropped.contains(&d.id)).collect();
+            let addrs: Vec<[u8; 6]> = gone.iter().map(|d| d.addr.addr).collect();
+            // Still connected (only its CIS or ASE ended), or advertising again
+            member_back = gone.iter().any(|d| d.connected)
+                || host.le_find_any_quietly(&addrs, LE_REJOIN_SCAN).is_some_and(|(_, seen)| {
+                    outln!("*** LE Audio: {} is back - setting the stream up with it ***", seen.addr);
+                    true
+                });
+            rejoin_at = (!member_back).then(|| Instant::now() + LE_REJOIN_EVERY);
+        }
+        if lost || member_back {
             // A device or CIS went away: tear down and set it up again
-            outln!("\n*** LE Audio stream lost - setting it up again ***");
+            if lost {
+                outln!("\n*** LE Audio stream lost - setting it up again ***");
+            }
+            (shown_dropped, rejoin_at) = (0, None);
             if let Some(p) = audio.take() {
                 p.stop();
             }
@@ -1876,11 +1913,12 @@ fn le_run(a: &Args, service: &Service, running: &Arc<AtomicBool>) -> i32 {
                     }
                 }
             }
-            let Some(mut started) = again else {
+            let Some(s) = again else {
                 eoutln!("LE Audio: could not restore the stream");
                 rc = 1;
                 break;
             };
+            started = s;
             outln!("*** LE Audio stream restored: {} ***", started.status.summary);
             audio = start_audio(&started);
             mic_streams += 1;

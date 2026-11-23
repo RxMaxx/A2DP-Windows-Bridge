@@ -935,6 +935,7 @@ fn saved_devices(
             le_audio: d.le_audio,
             le_audio_set: false,
             hid_le: None,
+            set_addresses: Vec::new(),
         })
         .collect();
     // A Bluetooth LE keyboard or mouse is never an audio device (issue #413)
@@ -970,6 +971,11 @@ fn saved_devices(
         if bluecaster_core::is_huawei(&d.name) {
             d.codecs_on_request = vec!["ldac".to_string()];
         }
+    }
+    let sets = le_sets::KnownSets::of(le_sets::load(config_dir));
+    for d in list.iter_mut().filter(|d| d.le_audio) {
+        let group = sets.group_of(&d.address).unwrap_or_default();
+        d.set_addresses = group.iter().filter(|a| !a.eq_ignore_ascii_case(&d.address)).cloned().collect();
     }
     list
 }
@@ -1026,6 +1032,7 @@ fn scanned_device(d: &ScannedDevice) -> Device {
         le_audio: d.le_audio,
         le_audio_set: d.le_audio_set,
         hid_le: d.hid_le,
+        set_addresses: Vec::new(),
     }
 }
 
@@ -2739,7 +2746,7 @@ impl CoreState {
         let dir = self.config_dir();
         let _tx = self.service.settings_tx();
         let mut settings = self.service.settings();
-        let (merged, list, volumes) = merge_le_set_entries(&dir, &self.service.known_le_sets(), &mut settings);
+        let (_, list, volumes) = merge_le_set_entries(&dir, &self.service.known_le_sets(), &mut settings);
         if let Some(list) = list {
             let (_, s) = self.snapshot();
             let active = s.active_profile.filter(|a| list.iter().any(|p| &p.name == a));
@@ -2751,9 +2758,8 @@ impl CoreState {
             let _ = settings.save(&dir);
             self.service.set_settings(settings);
         }
-        if merged > 0 {
-            self.refresh_devices();
-        }
+        // The addresses of the set too
+        self.refresh_devices();
     }
 
     fn save_profiles(&self, list: &[CoreProfile], active: Option<String>) -> Result<(), ErrorInfo> {
@@ -5141,6 +5147,7 @@ mod tests {
             le_audio,
             le_audio_set: false,
             hid_le: None,
+            set_addresses: Vec::new(),
         };
         let core = CoreProfile {
             name: "EarFun Air Pro 4+ | aptX Adaptive".into(),
@@ -6460,6 +6467,21 @@ mod tests {
     }
 
     #[test]
+    fn an_earbud_lists_the_other_addresses_of_its_set() {
+        let dir = std::env::temp_dir().join(format!("bluecaster-state-set-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        devices::save(&dir, "C0:00:00:00:00:01", "Buds").unwrap();
+        devices::save_le(&dir, "C0:00:00:00:00:01", "Buds").unwrap();
+        le_sets::remember(&dir, &["C0:00:00:00:00:01".into(), "C0:00:00:00:00:02".into()]).unwrap();
+        let list = saved_devices(&dir, &[], &BTreeMap::new());
+        // Its classic side has the one address
+        assert!(!list[0].le_audio && list[0].set_addresses.is_empty());
+        assert!(list[1].le_audio);
+        assert_eq!(list[1].set_addresses, ["C0:00:00:00:00:02"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn devices_carry_their_codecs() {
         let dir = std::env::temp_dir().join(format!("bluecaster-state-dev-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -6477,6 +6499,7 @@ mod tests {
             le_audio: false,
             le_audio_set: false,
             hid_le: None,
+            set_addresses: Vec::new(),
         }];
         let mut codecs = BTreeMap::new();
         let sbc = bluecaster_core::SbcDeviceCaps {

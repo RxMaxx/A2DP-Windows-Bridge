@@ -33,6 +33,7 @@ const dev = (address: string, codecs: string[]): Device => ({
   le_audio: false,
   le_audio_set: false,
   hid_le: null,
+  set_addresses: [],
 });
 
 const audio = (id: string, is_default: boolean, mix_rate: number | null, mix_bits: number | null): AudioDevice => ({

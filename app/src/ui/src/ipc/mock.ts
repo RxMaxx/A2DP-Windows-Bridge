@@ -324,6 +324,7 @@ export function sampleDevice(
     le_audio: false,
     le_audio_set: false,
     hid_le: null,
+    set_addresses: [],
     ...over,
   };
 }
@@ -429,6 +430,7 @@ const LE_BUDS = sampleDevice({
   name: "Galaxy Buds2 Pro",
   le_audio: true,
   le_audio_set: true,
+  set_addresses: ["F4:4E:FD:00:11:23"],
 });
 
 /** The RTL8761B firmware of Realtek's Windows driver (core realtek_btnic) */

@@ -313,6 +313,10 @@ pub struct Device {
     /// are only in Snapshot.hid_candidates, never in the device list.
     #[serde(default)]
     pub hid_le: Option<u8>,
+    /// LE Audio: the addresses of the other members of its coordinated set
+    /// (the other earbud), once a connection learned it
+    #[serde(default)]
+    pub set_addresses: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]

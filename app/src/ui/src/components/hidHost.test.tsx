@@ -216,6 +216,7 @@ describe("candidates", () => {
     le_audio,
     le_audio_set: false,
     hid_le,
+    set_addresses: [],
   });
 
   it("offers scanned classic devices that are not audio and not added", () => {

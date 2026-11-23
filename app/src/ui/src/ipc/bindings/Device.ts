@@ -57,4 +57,9 @@ le_audio_set: boolean,
  * keyboard or mouse with its address type for hid.add. Such entries
  * are only in Snapshot.hid_candidates, never in the device list.
  */
-hid_le: number | null, };
+hid_le: number | null, 
+/**
+ * LE Audio: the addresses of the other members of its coordinated set
+ * (the other earbud), once a connection learned it
+ */
+set_addresses: Array<string>, };
