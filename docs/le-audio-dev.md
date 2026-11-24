@@ -576,8 +576,8 @@ X% (reported Y%)"). Emulator option `--bas L[,L2]`, `--bas-change S:L`.
 BlueCaster can also broadcast instead of streaming to a device: any LE Audio
 receiver nearby (earbuds, a speaker, a phone acting as an assistant) can
 pick it up. It is started from the Developer screen's Auracast tab (name,
-password, high / standard quality, stereo / mono, test tone or system
-audio; `stream.start_broadcast`, refused with `developer.off` unless
+password, high / standard quality, stereo / mono, the source and the
+volume; `stream.start_broadcast`, refused with `developer.off` unless
 developer mode is on) or with `--cli --auracast <name> [--auracast-code
 <code>] [--auracast-mono | --auracast-split] [--le-preset 24_2_2]`, which
 goes through the
@@ -768,10 +768,30 @@ channel next to 48 kHz ones goes through a 63-tap windowed-sinc decimator,
 and the 48 kHz channels through the same 31-sample (0.65 ms) delay, so front
 and rear stay in step.
 
-The source switches while broadcasting (`auracast.set_source`, tone or
-system audio): `Service::change_source` hands it to the broadcast loop,
-which stops the capture and starts the new one into the same queue; the
-BIGs stay (silence goes out for the moment in between).
+The source switches while broadcasting (`auracast.set_source`):
+`Service::change_source` hands it to the broadcast loop, which stops the
+capture and starts the new one into the same queue; the BIGs stay (silence
+goes out for the moment in between). The sources (`state::broadcast_source`)
+are the test tone, the system audio, the loopback of an output device
+(`output` with its endpoint id, `SourceRequest::OutputDevice` without the
+default output switch) and a recording device (`input`,
+`SourceRequest::InputDevice`, `audio_capture::Source::CaptureDevice`:
+WASAPI capture of a capture endpoint, not loopback; `audio.input_devices`
+lists them). A recording device's capture does not mute the output.
+
+The receivers of a broadcast have no volume of ours, so the broadcast has a
+level of its own (`core::broadcast_volume`, 0..127, kept between
+broadcasts): the encode thread multiplies the audio by its gain
+(`pipeline::gain`, the level's share squared, ramped over 5 ms) before
+resampling. It is the stream's volume while the broadcast runs, so the
+volume slider, `stream.set_volume` and `stream.volume_step` move it. With
+"follow Windows" (`auracast.set_follow_volume`, `stream.start_broadcast`'s
+`follow_volume`; `auracast.follow_volume` reads it) the level and the Windows volume of the device the audio
+comes from act as one (`broadcast_volume::Follow`, ticked by the broadcast
+loop): the broadcast takes the Windows volume first, the volume keys then
+move the broadcast and the slider moves Windows'; a muted device silences
+it (with mute_output on, Windows' mute key does). Not for the test tone or
+a recording device, whose recording level is in the audio already.
 
 ## LE Audio off
 

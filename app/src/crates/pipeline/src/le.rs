@@ -558,6 +558,8 @@ pub struct LeEncoder {
     eq: Option<crate::eq::EqProcessor>,
     eq_buf: Vec<f32>,
     eq_was_on: bool,
+    /// The broadcast's volume, last before resampling; None: none
+    gain: Option<crate::gain::GainRamp>,
 }
 
 impl LeEncoder {
@@ -650,6 +652,7 @@ impl LeEncoder {
             eq: None,
             eq_buf: Vec::new(),
             eq_was_on: false,
+            gain: None,
         })
     }
 
@@ -694,6 +697,14 @@ impl LeEncoder {
         self
     }
 
+    /// The volume of `handle` applied to the audio (the broadcast's),
+    /// followed while the stream runs
+    pub fn with_gain(mut self, handle: crate::gain::GainHandle) -> LeEncoder {
+        tracing::info!("LE Audio: broadcast volume, gain {:.3} now", handle.get());
+        self.gain = Some(crate::gain::GainRamp::new(handle, self.input.sample_rate));
+        self
+    }
+
     pub fn layout(&self) -> &SduLayout {
         &self.frame.layout
     }
@@ -725,7 +736,10 @@ impl LeEncoder {
         if let Some(m) = self.mixer.as_mut() {
             m.refresh();
         }
-        let Self { mix, mixer, resampler, frame, eq, eq_buf, .. } = self;
+        if let Some(g) = self.gain.as_mut() {
+            g.refresh();
+        }
+        let Self { mix, mixer, resampler, frame, eq, eq_buf, gain, .. } = self;
         let lanes = mix.lanes();
         match eq.as_mut() {
             Some(eq) if eq_on => {
@@ -751,6 +765,9 @@ impl LeEncoder {
                         if let Some(m) = mixer.as_mut() {
                             m.post(&mut all);
                         }
+                        if let Some(g) = gain.as_mut() {
+                            g.apply(&mut all);
+                        }
                         resampler.process_lanes(&all, &mut |s| frame.add(s, sink));
                     }
                     f0 += n;
@@ -761,7 +778,7 @@ impl LeEncoder {
                     for (c, v) in ch[..used].iter_mut().enumerate() {
                         *v = input_sample(raw, f * in_ch + c, t);
                     }
-                    let s = match mixer.as_mut() {
+                    let mut s = match mixer.as_mut() {
                         Some(m) => {
                             let mut s = m.apply(&ch[..used]);
                             m.post(&mut s);
@@ -769,6 +786,9 @@ impl LeEncoder {
                         }
                         None => mix.apply(&ch[..used]),
                     };
+                    if let Some(g) = gain.as_mut() {
+                        g.apply(&mut s);
+                    }
                     resampler.process_lanes(&s, &mut |s| frame.add(s, sink));
                 }
             }
@@ -783,6 +803,9 @@ impl LeEncoder {
         self.resampler.reset();
         if let Some(m) = self.mixer.as_mut() {
             m.reset();
+        }
+        if let Some(g) = self.gain.as_mut() {
+            g.reset();
         }
     }
 }
@@ -800,6 +823,8 @@ pub struct LePipelineConfig {
     pub buffer: BufferPreset,
     /// The playback EQ, applied before encoding while it is on; None: none
     pub media_eq: Option<crate::eq::EqHandle>,
+    /// The broadcast's volume (Auracast); None: the audio as it comes
+    pub gain: Option<crate::gain::GainHandle>,
 }
 
 /// A running LE encode thread
@@ -818,13 +843,16 @@ impl LePipeline {
         sink: impl SduSink,
         stats: Arc<LinkStats>,
     ) -> Result<(LePipeline, CaptureInput), String> {
-        let LePipelineConfig { plan, input, channel_mask, mix, buffer, media_eq } = config;
+        let LePipelineConfig { plan, input, channel_mask, mix, buffer, media_eq, gain } = config;
         let mut encoder = LeEncoder::new(&plan, input)?.with_channel_mask(channel_mask);
         if let Some(h) = mix {
             encoder = encoder.with_mixer(h);
         }
         if let Some(h) = media_eq {
             encoder = encoder.with_eq(h);
+        }
+        if let Some(h) = gain {
+            encoder = encoder.with_gain(h);
         }
         let layout = encoder.layout().clone();
         let all_mono = encoder.frame.all_mono.clone();
@@ -1411,6 +1439,7 @@ mod tests {
             mix: None,
             buffer: BufferPreset::Standard,
             media_eq: None,
+            gain: None,
         };
         let (pipeline, mut capture) = LePipeline::start(config, queue.clone(), stats.clone()).unwrap();
         assert_eq!(pipeline.layout().sdu_lens, vec![150]);
@@ -1435,6 +1464,7 @@ mod tests {
             mix: None,
             buffer: BufferPreset::Standard,
             media_eq: None,
+            gain: None,
         };
         assert!(LePipeline::start(config, queue, stats).is_err());
     }

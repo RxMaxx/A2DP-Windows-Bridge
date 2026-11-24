@@ -720,6 +720,38 @@ const HIFI_CABLE: AudioDevice = {
   capture_rate: 48000,
 };
 
+/** audio.input_devices: Windows' recording devices */
+const INPUT_DEVICES: AudioDevice[] = [
+  {
+    id: "{0.0.1.00000000}.{mic}",
+    name: "Microphone (Realtek(R) Audio)",
+    short_name: "Microphone",
+    adapter_name: "Realtek(R) Audio",
+    is_default: true,
+    is_virtual: false,
+    is_display: false,
+    mix_rate: 48000,
+    mix_channels: 2,
+    mix_bits: 24,
+    capture_name: null,
+    capture_rate: null,
+  },
+  {
+    id: "{0.0.1.00000000}.{cable-out}",
+    name: "CABLE Output (VB-Audio Virtual Cable)",
+    short_name: "CABLE Output",
+    adapter_name: "VB-Audio Virtual Cable",
+    is_default: false,
+    is_virtual: true,
+    is_display: false,
+    mix_rate: 48000,
+    mix_channels: 2,
+    mix_bits: 24,
+    capture_name: null,
+    capture_rate: null,
+  },
+];
+
 const AUDIO_DEVICES: AudioDevice[] = [
   {
     id: "{0.0.0.00000000}.{cable16}",
@@ -1137,6 +1169,8 @@ function sourceOf(mode: string, id: string, name: string): SourceInfo {
       return { kind: "virtual", name: name || id, waiting: false };
     case "output":
       return { kind: "output", name: name || id, waiting: false };
+    case "input":
+      return { kind: "input", name: name || id, waiting: false };
     case "app":
       return { kind: "app", name: id, waiting: false };
     default:
@@ -1152,6 +1186,9 @@ export const MOCK_NEW_SERVICE = "9.0.0";
 
 export class MockCore implements Transport {
   private mixer = MIXER_APPS;
+  /** The broadcast's level (stream.start_broadcast's volume, kept between broadcasts) */
+  private broadcastLevel = 127;
+  private followVolume = false;
   private auracastMix: AuracastMix = {
     auto: true,
     center_db: -3,
@@ -1409,6 +1446,7 @@ export class MockCore implements Transport {
         this.stopStream();
         return null;
       case "stream.set_volume":
+        if (this.snap.stream.message.key === "status.broadcasting") this.broadcastLevel = Math.max(0, Math.min(127, Number(p.volume)));
         if (this.snap.stream.state === "streaming") {
           this.snap.stream.volume = Math.max(
             0,
@@ -1762,6 +1800,8 @@ export class MockCore implements Transport {
         const def = this.defaultOutput;
         return def === null ? list : list.map((d) => ({ ...d, is_default: d.id === def }));
       }
+      case "audio.input_devices":
+        return INPUT_DEVICES;
       case "audio.apps":
         return AUDIO_APPS;
       case "audio.install_vb_cable":
@@ -1964,12 +2004,24 @@ export class MockCore implements Transport {
         }
         return null;
       case "auracast.set_source": {
+        const kind = String(p.source);
+        const id = String(p.source_id ?? "");
+        if ((kind === "output" || kind === "input") && id === "")
+          throw errorInfo("stream.bad_source", "ipc.error.bad_request", ["auracast.set_source", `source "${kind}" needs the device's source_id`]);
         const st = this.snap.stream;
         if (st.state !== "streaming" || !st.info) return false;
-        st.info = { ...st.info, source: sourceOf(String(p.source), "", "") };
+        st.info = { ...st.info, source: sourceOf(kind, id, String(p.source_name ?? "")) };
         this.emit({ kind: "stream", value: st });
         return true;
       }
+      // Kept for the next broadcast; true: the one running follows
+      case "auracast.set_follow_volume": {
+        this.followVolume = p.follow === true;
+        const kind = this.snap.stream.info?.source?.kind;
+        return this.followVolume && this.snap.stream.message.key === "status.broadcasting" && kind !== "tone" && kind !== "input";
+      }
+      case "auracast.follow_volume":
+        return this.followVolume;
       // The mixer: kept here, its matrix as set (no automatic one)
       case "auracast.mix":
         return this.mixState();
@@ -2699,6 +2751,8 @@ export class MockCore implements Transport {
       ]);
     }
     const mode = String(p.source || "loopback");
+    if (typeof p.volume === "number") this.broadcastLevel = Math.max(0, Math.min(127, p.volume));
+    if (typeof p.follow_volume === "boolean") this.followVolume = p.follow_volume;
     const name = String(p.name ?? "").trim();
     const code = typeof p.code === "string" ? p.code : null;
     const len = (s: string) => new TextEncoder().encode(s).length;
@@ -2835,7 +2889,7 @@ export class MockCore implements Transport {
           message: { key: "status.broadcasting", args: [] },
           profile: null,
           info: i,
-          volume: null,
+          volume: this.broadcastLevel,
           battery: null,
           battery_refused: false,
           voice_codecs: [],

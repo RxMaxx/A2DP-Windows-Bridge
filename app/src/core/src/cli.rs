@@ -1780,6 +1780,7 @@ fn le_run(a: &Args, service: &Service, running: &Arc<AtomicBool>) -> i32 {
         started,
         host.stats().clone(),
         None,
+        None,
     ) {
         Ok(path) => {
             let rate = path.rate();

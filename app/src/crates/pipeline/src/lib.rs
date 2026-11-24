@@ -13,6 +13,7 @@
 
 pub mod convert;
 pub mod eq;
+pub mod gain;
 pub mod le;
 pub mod le_rx;
 pub mod mix;

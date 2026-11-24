@@ -1,20 +1,25 @@
-// Auracast (Developer screen): broadcasts the test tone or the system audio
-// to every receiver nearby that joins (stream.start_broadcast; the core
-// refuses it while developer mode is off). The broadcast is a stream like
+// Auracast (Developer screen): broadcasts the test tone, the system audio,
+// an output device's sound or a recording device to every receiver nearby
+// that joins (stream.start_broadcast; the core refuses it while developer
+// mode is off), at a volume of its own (the stream's, which can follow the
+// Windows volume). The broadcast is a stream like
 // any other: Stop and the status follow core.state.snap.stream, the choices
 // outlive the view (one set per core connection).
 
 import { createEffect, createRoot, createSignal, Show } from "solid-js";
-import { useApp } from "../app/context";
+import { onAudioDevicesChanged, useApp } from "../app/context";
 import { saveSettings } from "../app/settings";
-import { Button, Field, Section, Segmented, Select } from "../components/controls";
+import { Button, Field, type Option, Section, Segmented, Select, Toggle } from "../components/controls";
+import { VolumeControl } from "../components/stream";
 import { t, tm } from "../i18n";
 import type { Core } from "../ipc/store";
 import { AuracastMixer } from "./AuracastMixer";
-import type { AdapterInfo } from "../ipc/types";
+import type { AdapterInfo, AudioDevice, SourceInfo } from "../ipc/types";
 import { adapterName } from "./Adapter";
 
-type Source = "tone" | "loopback";
+/** What is broadcast: the test tone, the system audio, the loopback of an
+ *  output device ("output:<id>") or a recording device ("input:<id>") */
+export type Source = "tone" | "loopback" | `output:${string}` | `input:${string}`;
 type Quality = "hq" | "sq";
 type Channels = "stereo" | "mono" | "split" | "matrix";
 /** How a pair of matrix outputs is sent (le_audio::broadcast::PairMode) */
@@ -35,6 +40,101 @@ export function layoutOf(c: { channels: Channels; front: PairMode; rear: PairMod
   return c.channels;
 }
 
+/** A device source's kind and endpoint id; null: the tone or system audio */
+function deviceOf(source: Source): { kind: "output" | "input"; id: string } | null {
+  const at = source.indexOf(":");
+  if (at < 0) return null;
+  return { kind: source.slice(0, at) as "output" | "input", id: source.slice(at + 1) };
+}
+
+interface SourceParams {
+  source: string;
+  source_id: string | null;
+  source_name: string | null;
+}
+
+/** The source as stream.start_broadcast and auracast.set_source take it
+ *  (`names`: the names of devices listed before, for one that is gone) */
+export function sourceParams(
+  source: Source,
+  outputs: readonly AudioDevice[],
+  inputs: readonly AudioDevice[],
+  names?: ReadonlyMap<string, string>,
+): SourceParams {
+  const device = deviceOf(source);
+  if (!device) return { source, source_id: null, source_name: null };
+  const list = device.kind === "output" ? outputs : inputs;
+  const name = list.find((d) => d.id === device.id)?.name ?? names?.get(device.id) ?? null;
+  return { source: device.kind, source_id: device.id, source_name: name };
+}
+
+/** Whether the broadcast's stream info names the source sent as `params`
+ *  (a device by the name sent, or by its id when none was) */
+export function playsSource(info: SourceInfo | null | undefined, params: SourceParams): boolean {
+  if (!info) return false;
+  const kind = info.kind === "virtual" ? "output" : info.kind;
+  if (kind !== params.source) return false;
+  return params.source_id === null || info.name === (params.source_name ?? params.source_id);
+}
+
+/** The choice of what the broadcast plays (its stream info), a device by
+ *  its name (the first of two with the same name); null: none of them */
+export function sourceOfInfo(
+  info: SourceInfo | null | undefined,
+  outputs: readonly AudioDevice[],
+  inputs: readonly AudioDevice[],
+): Source | null {
+  const named = (list: readonly AudioDevice[]) => list.find((d) => d.name === info?.name)?.id;
+  switch (info?.kind) {
+    case "tone":
+    case "loopback":
+      return info.kind;
+    case "output":
+    case "virtual": {
+      const id = named(outputs);
+      return id === undefined ? null : `output:${id}`;
+    }
+    case "input": {
+      const id = named(inputs);
+      return id === undefined ? null : `input:${id}`;
+    }
+    default:
+      return null;
+  }
+}
+
+/** The sources to choose from: the tone, the system audio, Windows' output
+ *  and recording devices, and a chosen device that is not there now (by
+ *  its name in `names`, the devices listed before) */
+export function sourceOptions(
+  chosen: Source,
+  outputs: readonly AudioDevice[],
+  inputs: readonly AudioDevice[],
+  names?: ReadonlyMap<string, string>,
+): Option<Source>[] {
+  const device =
+    (kind: "output" | "input", group: string) =>
+    (d: AudioDevice): Option<Source> => ({ value: `${kind}:${d.id}`, label: d.name, group });
+  const options: Option<Source>[] = [
+    { value: "tone", label: t("receiver.source_tone") },
+    { value: "loopback", label: t("receiver.source_system") },
+    ...outputs.map(device("output", t("ui.dev.auracast_outputs"))),
+    ...inputs.map(device("input", t("ui.dev.auracast_inputs"))),
+  ];
+  if (!options.some((o) => o.value === chosen)) {
+    const d = deviceOf(chosen);
+    const input = d?.kind === "input";
+    const group = input ? t("ui.dev.auracast_inputs") : t("ui.dev.auracast_outputs");
+    const name = (d && names?.get(d.id)) || t(input ? "capture.input" : "capture.output");
+    options.push({ value: chosen, label: t("ui.dev.auracast_device_gone", name), group });
+  }
+  return options;
+}
+
+/** A source whose Windows volume the broadcast can follow (not the tone,
+ *  nor a recording device: its recording level is in the audio already) */
+export const followable = (s: Source) => s !== "tone" && deviceOf(s)?.kind !== "input";
+
 /** The core's limits (le_audio::broadcast): UTF-8 bytes */
 export const NAME_BYTES = [4, 32] as const;
 export const CODE_BYTES = [4, 16] as const;
@@ -50,6 +150,8 @@ interface Choices {
   frontQuality: Quality;
   rearQuality: Quality;
   source: Source;
+  /** The broadcast's volume follows the Windows volume */
+  follow: boolean;
 }
 
 const bytes = (s: string) => new TextEncoder().encode(s).length;
@@ -98,6 +200,7 @@ function createSession(core: Core) {
       frontQuality: "hq",
       rearQuality: "hq",
       source: "tone",
+      follow: false,
     });
     /** A broadcast asked for here, until the stream it started ends or another takes over */
     const [mine, setMine] = createSignal(false);
@@ -109,6 +212,8 @@ function createSession(core: Core) {
      *  session before it ending: the core answers stream.start_broadcast,
      *  then stops what ran before (Idle), then sets the broadcast up */
     const [onAir, setOnAir] = createSignal(false);
+    /** The names of the devices listed so far, for a chosen one that is gone */
+    const names = new Map<string, string>();
     createEffect(() => {
       const st = core.state.snap?.stream;
       if (!st || !mine() || asking()) return;
@@ -122,7 +227,7 @@ function createSession(core: Core) {
         setMine(false);
       }
     });
-    return { choices, setChoices, mine, setMine, failed, setFailed, asking, setAsking, setOnAir };
+    return { choices, setChoices, mine, setMine, failed, setFailed, asking, setAsking, setOnAir, names };
   });
 }
 
@@ -140,6 +245,31 @@ export function Auracast() {
   const choices = s.choices;
   const set = (patch: Partial<Choices>) => s.setChoices({ ...choices(), ...patch });
   const stream = () => core.state.snap!.stream;
+  // Windows' devices to broadcast from, read again when they change
+  const [outputs, setOutputs] = createSignal<AudioDevice[]>([]);
+  const [inputs, setInputs] = createSignal<AudioDevice[]>([]);
+  const listed = (list: AudioDevice[]) => {
+    for (const d of list) s.names.set(d.id, d.name);
+    return list;
+  };
+  const readDevices = () => {
+    core.request("audio.devices").then(
+      (list) => setOutputs(listed(list)),
+      () => {},
+    );
+    core.request("audio.input_devices").then(
+      (list) => setInputs(listed(list)),
+      () => {},
+    );
+  };
+  readDevices();
+  onAudioDevicesChanged(readDevices);
+  const paramsOf = (source: Source) => sourceParams(source, outputs(), inputs(), s.names);
+  // The core keeps "follow" between broadcasts and windows: the switch shows it
+  core.request("auracast.follow_volume").then(
+    (follow) => set({ follow }),
+    () => {},
+  );
 
   /** The running stream is the broadcast */
   const live = () => {
@@ -178,7 +308,8 @@ export function Auracast() {
         rear_quality: c.channels === "matrix" ? c.rearQuality : null,
         mono: c.channels === "mono",
         layout: layoutOf(c),
-        source: c.source,
+        ...paramsOf(c.source),
+        follow_volume: c.follow,
       }),
     );
     if (!ok) s.setMine(false);
@@ -191,9 +322,11 @@ export function Auracast() {
     const before = choices().source;
     set({ source });
     if (!live()) return;
+    const sent = paramsOf(source);
+    const sentBefore = paramsOf(before);
     let taken = false;
     await app.run(async () => {
-      taken = await core.request("auracast.set_source", { source });
+      taken = await core.request("auracast.set_source", sent);
     });
     if (!taken) {
       // Not taken (a start or stop under way): the broadcast keeps its source
@@ -203,10 +336,18 @@ export function Auracast() {
     // A source that cannot be captured: the broadcast goes on with the one
     // before, which its stream info then still names
     setTimeout(() => {
-      const playing = stream().info?.source?.kind;
-      if (live() && choices().source === source && playing !== source && (playing === "tone" || playing === "loopback"))
-        set({ source: playing });
+      if (!live() || choices().source !== source) return;
+      const info = stream().info?.source;
+      // By what was sent, not by name alone: two devices can share a name
+      if (playsSource(info, sent)) return;
+      const playing = playsSource(info, sentBefore) ? before : sourceOfInfo(info, outputs(), inputs());
+      if (playing !== null && playing !== source) set({ source: playing });
     }, SOURCE_SETTLE_MS);
+  };
+  /** Follow the Windows volume: kept for the next broadcast, taken by the running one */
+  const changeFollow = (follow: boolean) => {
+    set({ follow });
+    void app.run(() => core.request("auracast.set_follow_volume", { follow }));
   };
   /** While its broadcasts come up the source cannot change yet */
   const sourceLocked = () => s.asking() || (live() && stream().state !== "streaming");
@@ -315,15 +456,30 @@ export function Auracast() {
           ]}
           onChange={(channels) => set({ channels })}
         />
-        <Choice<Source>
-          label={t("receiver.source")}
-          value={choices().source}
-          disabled={sourceLocked()}
-          options={[
-            ["tone", t("receiver.source_tone")],
-            ["loopback", t("receiver.source_system")],
-          ]}
-          onChange={changeSource}
+        <Field label={t("receiver.source")}>
+          {(id, describedBy) => (
+            <Select<Source>
+              id={id}
+              describedBy={describedBy}
+              value={choices().source}
+              options={sourceOptions(choices().source, outputs(), inputs(), s.names)}
+              disabled={sourceLocked()}
+              onChange={changeSource}
+            />
+          )}
+        </Field>
+        <div class="row">
+          <span class="row-text">
+            <span class="row-label">{t("ui.dev.auracast_volume")}</span>
+          </span>
+          <VolumeControl off={!live()} />
+        </div>
+        <Toggle
+          label={t("ui.dev.auracast_follow")}
+          hint={t("ui.dev.auracast_follow_hint")}
+          checked={choices().follow && followable(choices().source)}
+          disabled={!followable(choices().source)}
+          onChange={changeFollow}
         />
         <Show when={status()}>
           {(st) => (

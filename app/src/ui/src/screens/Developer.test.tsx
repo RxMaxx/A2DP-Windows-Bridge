@@ -568,6 +568,9 @@ describe("Auracast tab", () => {
       mono: true,
       layout: null,
       source: "tone",
+      source_id: null,
+      source_name: null,
+      follow_volume: false,
     });
     expect(screen.getByText(/1 ch over 1 BIS, 24_2_2/)).toBeInTheDocument();
     expect(name).toBeDisabled();
@@ -578,6 +581,115 @@ describe("Auracast tab", () => {
     ).toBeEnabled();
     expect(calls.some((c) => c.method === "stream.stop")).toBe(true);
     expect(screen.queryByText(t("status.broadcasting"))).toBeNull();
+  });
+
+  it("broadcasts a device, at a volume of its own", async () => {
+    const { core, calls } = await open();
+    await core.request("settings.set", {
+      settings: { ...core.state.snap!.settings, developer_mode: true },
+    });
+    fireEvent.click(
+      await screen.findByRole("tab", { name: t("ui.dev.auracast") }),
+    );
+    const source = (await screen.findByLabelText(
+      t("receiver.source"),
+    )) as HTMLSelectElement;
+    // Windows' output and recording devices, each under its heading
+    await waitFor(() =>
+      expect(
+        screen.getByRole("option", { name: "Microphone (Realtek(R) Audio)" }),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByRole("group", { name: t("ui.dev.auracast_outputs") }),
+    ).toContainElement(
+      screen.getByRole("option", { name: "Speakers (Realtek(R) Audio)" }),
+    );
+    expect(
+      screen.getByRole("group", { name: t("ui.dev.auracast_inputs") }),
+    ).toContainElement(
+      screen.getByRole("option", { name: "Microphone (Realtek(R) Audio)" }),
+    );
+    const follow = screen.getByRole("switch", {
+      name: t("ui.dev.auracast_follow"),
+    });
+    // The test tone has no Windows volume to follow
+    expect(follow).toBeDisabled();
+
+    fireEvent.change(source, {
+      target: { value: "output:{0.0.0.00000000}.{speakers}" },
+    });
+    await waitFor(() => expect(follow).toBeEnabled());
+    fireEvent.click(follow);
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.method === "auracast.set_follow_volume")?.params,
+      ).toEqual({ follow: true }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: t("receiver.start") }));
+    await screen.findByText(t("status.broadcasting"));
+    expect(
+      calls.find((c) => c.method === "stream.start_broadcast")!.params,
+    ).toMatchObject({
+      source: "output",
+      source_id: "{0.0.0.00000000}.{speakers}",
+      source_name: "Speakers (Realtek(R) Audio)",
+      follow_volume: true,
+    });
+
+    // The volume is the stream's while the broadcast runs
+    const slider = screen.getByRole("slider", { name: t("volume.label") });
+    await waitFor(() => expect(slider).toBeEnabled());
+    expect(slider).toHaveValue("100");
+    fireEvent.input(slider, { target: { value: "50" } });
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.method === "stream.set_volume")?.params,
+      ).toEqual({ volume: 64 }),
+    );
+
+    // A recording device in place: nothing to follow there
+    fireEvent.change(source, {
+      target: { value: "input:{0.0.1.00000000}.{mic}" },
+    });
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.method === "auracast.set_source")?.params,
+      ).toEqual({
+        source: "input",
+        source_id: "{0.0.1.00000000}.{mic}",
+        source_name: "Microphone (Realtek(R) Audio)",
+      }),
+    );
+    expect(follow).toBeDisabled();
+    expect(follow).not.toBeChecked();
+  });
+
+  it("shows the follow switch as the core keeps it", async () => {
+    const { core } = await open();
+    await core.request("settings.set", {
+      settings: { ...core.state.snap!.settings, developer_mode: true },
+    });
+    // Set by a window before this one
+    await core.request("auracast.set_follow_volume", { follow: true });
+    fireEvent.click(
+      await screen.findByRole("tab", { name: t("ui.dev.auracast") }),
+    );
+    const source = (await screen.findByLabelText(
+      t("receiver.source"),
+    )) as HTMLSelectElement;
+    await waitFor(() =>
+      expect(
+        screen.getByRole("option", { name: "Speakers (Realtek(R) Audio)" }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.change(source, {
+      target: { value: "output:{0.0.0.00000000}.{speakers}" },
+    });
+    const follow = screen.getByRole("switch", {
+      name: t("ui.dev.auracast_follow"),
+    });
+    await waitFor(() => expect(follow).toBeChecked());
   });
 
   it("keeps a broadcast whose adapter stopped working while it starts again", async () => {
