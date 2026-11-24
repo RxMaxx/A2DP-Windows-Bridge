@@ -608,7 +608,8 @@ impl Adapter {
             });
 
         ui::card(cx)
-            .when(active, |d| d.border_color(p.accent_fill).border_l_4())
+            // The adapter BlueCaster has open
+            .when(active, |d| d.border_color(p.accent_fill))
             .child(head)
             .child(div().flex().flex_wrap().gap(theme::S3).child(driver_box).child(firmware_box))
     }

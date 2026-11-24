@@ -165,7 +165,8 @@ fn tab_keeps_the_keyboard_inside_the_dialog(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn a_dialog_is_as_wide_as_the_page(cx: &mut TestAppContext) {
-    let (mut h, w, _) = open(cx, true);
+    // A dialog with content of its own (no confirming button)
+    let (mut h, w, _) = open(cx, false);
     let width =
         |h: &mut Harness, cx: &mut TestAppContext| h.on(cx, w, |window, _| window.find("surface").bounds().size.width);
     // No page (the setup): the window less the margins
@@ -178,6 +179,19 @@ fn a_dialog_is_as_wide_as_the_page(cx: &mut TestAppContext) {
     h.on(cx, w, |window, cx| set_page_width(window, Some(px(3000.)), cx));
     h.on(cx, w, |window, _| window.refresh());
     assert_eq!(width(&mut h, cx), px(1000. - 48.));
+}
+
+#[gpui_kit::test]
+fn a_question_is_narrow(cx: &mut TestAppContext) {
+    let (mut h, w, _) = open(cx, true);
+    let width =
+        |h: &mut Harness, cx: &mut TestAppContext| h.on(cx, w, |window, _| window.find("surface").bounds().size.width);
+    // Cancel and a confirming button: no wider than Windows' own questions
+    assert_eq!(width(&mut h, cx), px(560.));
+    // In a narrow page: the page less its padding
+    h.on(cx, w, |window, cx| set_page_width(window, Some(px(400.)), cx));
+    h.on(cx, w, |window, _| window.refresh());
+    assert_eq!(width(&mut h, cx), px(400. - 48.));
 }
 
 #[gpui_kit::test]

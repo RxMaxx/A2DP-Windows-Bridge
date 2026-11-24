@@ -145,7 +145,12 @@ pub fn set_page_width(window: &Window, width: Option<Pixels>, cx: &mut App) {
     };
 }
 
-/// Every dialog is as wide as the page's cards, centred in the window: the
+/// The widest a question gets (Cancel and a confirming button under a few
+/// lines): Windows' own are no wider
+const QUESTION_WIDTH: Pixels = px(560.);
+
+/// A dialog with content of its own (no confirming button) is as wide as the
+/// page's cards, centred in the window: the
 /// page's width less its padding, at most [`MAX_WIDTH`]; without a page, the
 /// window's width less the same margin
 pub fn width(window: &Window, cx: &App) -> Pixels {
@@ -197,6 +202,7 @@ pub fn show(
                     .flex()
                     .items_center()
                     .gap(theme::S2)
+                    .text_size(theme::FS_TITLE)
                     .when(q.warn, |d| d.child(div().flex().text_color(p.warn_text).child(icon(IconName::Warning))))
                     .child(super::text(q.title.clone())),
             )
@@ -230,8 +236,12 @@ pub fn show(
                 true
             }
         };
+        // A question sits in the middle of the window, as Windows' do
+        let question = q.confirm.is_some();
+        let wide = width(window, cx);
         let dialog = dialog
-            .width(width(window, cx))
+            .width(if question { wide.min(QUESTION_WIDTH) } else { wide })
+            .when(question, |d| d.centered())
             .title(head)
             .close_button(false)
             // Escape, the backdrop: as Cancel

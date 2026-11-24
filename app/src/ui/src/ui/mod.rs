@@ -165,7 +165,9 @@ fn select_named<T: Clone + PartialEq + 'static>(
         Some(name) => button.accessibility_label(name),
         None => button,
     };
-    button.dropdown_menu(move |mut menu, _, _| {
+    button.dropdown_menu(move |menu, _, _| {
+        // Not a narrow strip under a wide button
+        let mut menu = menu.min_w(px(160.));
         let mut group: Option<SharedString> = None;
         for c in &choices {
             if c.group != group {

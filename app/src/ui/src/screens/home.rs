@@ -258,9 +258,11 @@ impl Render for Home {
                                 .w_full()
                                 .min_h(px(64.))
                                 .p(theme::S4)
-                                .bg(p.surface)
+                                // An empty place, not a card: dashed and unfilled
+                                .icon(icon(IconName::Add))
                                 .border_1()
-                                .border_color(p.border)
+                                .border_dashed()
+                                .border_color(p.border_strong)
                                 .rounded(theme::RADIUS_CARD)
                                 .text_color(p.text_2)
                                 .on_click(|_, _, cx| app::navigate(RouteName::Devices, cx)),

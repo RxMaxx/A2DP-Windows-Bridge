@@ -26,9 +26,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use gpui_kit::component::Disableable as _;
 use gpui_kit::component::input::{InputEvent, InputState, NumberInput, NumberInputEvent, StepAction};
 use gpui_kit::component::menu::PopupMenu;
-use gpui_kit::component::{Disableable as _, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AccessibleAction, Anchor, App, AppContext as _, AsyncApp, Bounds, ClickEvent, Context, CursorStyle, DismissEvent,
@@ -357,7 +357,8 @@ impl MediaEqEditor {
                 .flex()
                 .items_center()
                 .gap(theme::S1)
-                .child(NumberInput::new(&input).small().disabled(!enabled).accessibility_label(label).w(px(if wide {
+                // As tall as the selects beside it, so the labels above line up
+                .child(NumberInput::new(&input).disabled(!enabled).accessibility_label(label).w(px(if wide {
                     132.
                 } else {
                     112.

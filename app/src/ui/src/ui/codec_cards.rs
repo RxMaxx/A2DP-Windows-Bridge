@@ -238,20 +238,22 @@ pub fn codec_card(
         .child(face);
     // The button is beside the card, not in it: the card's name stays the
     // codec's, and pressing it starts no drag
-    let more = super::icon_button(
-        SharedString::from(format!("{id}-more")),
-        IconName::MoreHorizontal,
-        t!("ui.profile.codec_settings", name.to_string()),
-    )
-    .small()
-    .disabled(state.disabled && !state.read_only)
-    .on_click(move |_, window, cx| {
-        if state.read_only {
-            (actions.on_read_only)(true, window, cx);
-        } else {
-            (actions.on_settings)(window, cx);
-        }
-    });
+    // A gear in a button of its own, as Windows shows an item's settings:
+    // three dots read as a menu, and without an outline as no button at all
+    let label = t!("ui.profile.codec_settings", name.to_string());
+    let more = gpui_kit::component::button::Button::new(SharedString::from(format!("{id}-more")))
+        .icon(icon(IconName::Settings))
+        .accessibility_label(label.clone())
+        .tooltip(label)
+        .small()
+        .disabled(state.disabled && !state.read_only)
+        .on_click(move |_, window, cx| {
+            if state.read_only {
+                (actions.on_read_only)(true, window, cx);
+            } else {
+                (actions.on_settings)(window, cx);
+            }
+        });
     div()
         .id(id)
         .relative()
