@@ -545,6 +545,8 @@
   "ui.service.versions": "應用程式 %s，服務 %s",
   "ui.service.stopped_title": "BlueCaster 服務已停止",
   "ui.service.stopped_body": "啟動服務後，即可繼續使用 BlueCaster。",
+  "ui.service.untrusted_title": "無法驗證 BlueCaster 服務",
+  "ui.service.untrusted_body": "可能有其他程式代替該服務回應。請重新啟動電腦。",
   "ui.service.state_app_older": "版本比應用程式新",
   "ui.service.newer_title": "請更新 BlueCaster",
   "ui.service.newer_body": "這部電腦上的 BlueCaster 服務比應用程式新。請安裝最新版本的 BlueCaster。",

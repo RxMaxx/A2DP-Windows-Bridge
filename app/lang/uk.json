@@ -545,6 +545,8 @@
   "ui.service.versions": "Програма %s, служба %s",
   "ui.service.stopped_title": "Службу BlueCaster зупинено",
   "ui.service.stopped_body": "Запустіть службу, щоб знову користуватися BlueCaster.",
+  "ui.service.untrusted_title": "Не вдалося перевірити службу BlueCaster",
+  "ui.service.untrusted_body": "Можливо, замість служби відповідає інша програма. Перезавантажте ПК.",
   "ui.service.state_app_older": "Новіша за програму",
   "ui.service.newer_title": "Оновіть BlueCaster",
   "ui.service.newer_body": "Служба BlueCaster на цьому ПК новіша за програму. Установіть останню версію BlueCaster.",

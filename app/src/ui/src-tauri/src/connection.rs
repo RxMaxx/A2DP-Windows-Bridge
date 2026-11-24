@@ -74,6 +74,11 @@ pub enum Status {
     },
     /// The service add-on is added but stopped
     ServiceStopped,
+    /// The service's pipe is not the service's (ipc::service_state::
+    /// check_service_pipe says why): nothing it sends is used
+    ServiceUntrusted {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -386,7 +391,7 @@ async fn connect(app: &AppHandle, ipc: &Ipc, name: &str) -> NamedPipeClient {
                     // our own beside the service.
                     Service::None | Service::Busy => tokio::time::sleep(Duration::from_millis(200)).await,
                     Service::Untrusted(reason) => {
-                        ipc.set_status(app, Status::Rejected { reason });
+                        ipc.set_status(app, Status::ServiceUntrusted { reason });
                         tokio::time::sleep(Duration::from_secs(10)).await;
                     }
                 }
@@ -421,7 +426,7 @@ async fn connect(app: &AppHandle, ipc: &Ipc, name: &str) -> NamedPipeClient {
             Service::Untrusted(reason) => {
                 // Someone else serves the service's name: not trusted, and
                 // no core of our own started beside the service
-                ipc.set_status(app, Status::Rejected { reason });
+                ipc.set_status(app, Status::ServiceUntrusted { reason });
                 tokio::time::sleep(Duration::from_secs(10)).await;
                 continue;
             }

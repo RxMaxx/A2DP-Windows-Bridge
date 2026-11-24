@@ -545,6 +545,8 @@
   "ui.service.versions": "App %s, Dienst %s",
   "ui.service.stopped_title": "Der BlueCaster-Dienst ist beendet",
   "ui.service.stopped_body": "Starten Sie den Dienst, um BlueCaster wieder zu verwenden.",
+  "ui.service.untrusted_title": "Der BlueCaster-Dienst konnte nicht überprüft werden",
+  "ui.service.untrusted_body": "Möglicherweise antwortet ein anderes Programm anstelle des Dienstes. Starten Sie den PC neu.",
   "ui.service.state_app_older": "Neuer als die App",
   "ui.service.newer_title": "BlueCaster aktualisieren",
   "ui.service.newer_body": "Der BlueCaster-Dienst auf diesem PC ist neuer als die App. Installieren Sie die neueste Version von BlueCaster.",

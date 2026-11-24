@@ -545,6 +545,8 @@
   "ui.service.versions": "アプリ %s、サービス %s",
   "ui.service.stopped_title": "BlueCaster サービスは停止しています",
   "ui.service.stopped_body": "サービスを開始すると、BlueCaster を再び使えるようになります。",
+  "ui.service.untrusted_title": "BlueCaster サービスを確認できませんでした",
+  "ui.service.untrusted_body": "別のプログラムが代わりに応答している可能性があります。PC を再起動してください。",
   "ui.service.state_app_older": "アプリより新しいバージョン",
   "ui.service.newer_title": "BlueCaster を更新してください",
   "ui.service.newer_body": "この PC の BlueCaster サービスは、アプリより新しいバージョンです。BlueCaster の最新版をインストールしてください。",

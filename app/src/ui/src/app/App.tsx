@@ -100,6 +100,11 @@ function ConnectionScreen(props: { compact?: boolean }) {
         <Match when={conn().state === "service_stopped"}>
           <ServiceConnectionNotice stopped />
         </Match>
+        <Match when={conn().state === "service_untrusted"}>
+          <h1>{t("ui.service.untrusted_title")}</h1>
+          <p>{t("ui.service.untrusted_body")}</p>
+          <p class="muted mono">{(conn() as { reason: string }).reason}</p>
+        </Match>
         <Match when={true}>
           <span class="spinner big" aria-hidden="true" />
           <h1>{t("ui.conn.connecting")}</h1>

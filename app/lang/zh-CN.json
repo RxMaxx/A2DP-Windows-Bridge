@@ -545,6 +545,8 @@
   "ui.service.versions": "应用 %s，服务 %s",
   "ui.service.stopped_title": "BlueCaster 服务已停止",
   "ui.service.stopped_body": "启动服务后，即可继续使用 BlueCaster。",
+  "ui.service.untrusted_title": "无法验证 BlueCaster 服务",
+  "ui.service.untrusted_body": "可能有其他程序在代替该服务响应。请重新启动电脑。",
   "ui.service.state_app_older": "版本比应用新",
   "ui.service.newer_title": "请更新 BlueCaster",
   "ui.service.newer_body": "此电脑上的 BlueCaster 服务比应用新。请安装最新版本的 BlueCaster。",
