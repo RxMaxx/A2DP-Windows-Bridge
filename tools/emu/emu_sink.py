@@ -243,6 +243,18 @@ class EmuController(Controller):
             self.inquiry_task = None
         return hci.HCI_StatusReturnParameters(hci.HCI_ErrorCode.SUCCESS)
 
+    # Called for the first Create Connection, which is refused with ACL
+    # Connection Already Exists: the peer pages this controller at that
+    # moment (--crossed-page)
+    crossed_page = None
+
+    def on_hci_create_connection_command(self, command):
+        if self.crossed_page is None:
+            return super().on_hci_create_connection_command(command)
+        page, self.crossed_page = self.crossed_page, None
+        self._send_hci_command_status(hci.HCI_ErrorCode.CONNECTION_ALREADY_EXISTS_ERROR, command.op_code)
+        page()
+
     def on_hci_disconnect_command(self, command):
         if not self.disconnect_delay:
             return super().on_hci_disconnect_command(command)
@@ -943,6 +955,14 @@ async def main(args):
     on_connection.count = 0
 
     device.on('connection', on_connection)
+
+    if args.crossed_page:
+        async def page_the_pc():
+            # The Connection Request follows the refused page by some 10 ms
+            await asyncio.sleep(0.01)
+            await device.connect(BLUECASTER_ADDRESS, transport=BT_BR_EDR_TRANSPORT)
+            print('paged the PC', flush=True)
+        bluecaster_controller.crossed_page = lambda: asyncio.ensure_future(page_the_pc())
     print(f'READY 127.0.0.1:{args.port} sink={SINK_ADDRESS}', flush=True)
     await asyncio.get_running_loop().create_future()
 
@@ -959,6 +979,8 @@ if __name__ == '__main__':
                         help='with --opens-a2dp, also configure and open the last stream')
     parser.add_argument('--disconnect-delay', type=float, default=0, metavar='S',
                         help="seconds until an HCI Disconnect from BlueCaster takes effect")
+    parser.add_argument('--crossed-page', action='store_true',
+                        help="page the PC at its first page, which its controller then refuses (0x0B)")
     parser.add_argument('--silent-remote-version', action='store_true',
                         help='never answer Read Remote Version Information (no Command Status either)')
     parser.add_argument('--name', default='BlueCaster Test Sink',
