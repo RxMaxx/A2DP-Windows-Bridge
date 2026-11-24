@@ -208,6 +208,8 @@ impl Render for InputSource {
             .flex()
             .flex_col()
             .gap(theme::S2)
+            .mx(-theme::S4)
+            .px(theme::S4)
             .pt(theme::S3)
             .border_t_1()
             .border_color(p.border)
@@ -234,14 +236,6 @@ impl Render for InputSource {
                     cx,
                 ))
             })
-            // A line that opens a dialog reaches past the text on both sides (`.nav-row`)
-            .child(div().mx(-theme::S2).child(mic_processing_row(
-                "mic-processing",
-                &processing,
-                off,
-                source,
-                on_change,
-                cx,
-            )))
+            .child(mic_processing_row("mic-processing", &processing, off, source, on_change, cx))
     }
 }

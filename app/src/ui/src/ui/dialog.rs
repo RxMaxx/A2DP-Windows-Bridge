@@ -196,6 +196,7 @@ pub fn show(
             .flex()
             .flex_col()
             .gap(theme::S1)
+            .flex_1()
             .min_w_0()
             .child(
                 div()
@@ -204,7 +205,7 @@ pub fn show(
                     .gap(theme::S2)
                     .text_size(theme::FS_TITLE)
                     .when(q.warn, |d| d.child(div().flex().text_color(p.warn_text).child(icon(IconName::Warning))))
-                    .child(super::text(q.title.clone())),
+                    .child(div().flex_1().min_w_0().child(super::text(q.title.clone()))),
             )
             .when_some(q.subtitle.clone(), |d, s| {
                 d.child(

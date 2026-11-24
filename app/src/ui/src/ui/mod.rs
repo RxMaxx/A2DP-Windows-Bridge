@@ -355,6 +355,12 @@ pub fn row() -> Div {
     div().flex().items_center().justify_between().gap(theme::S4).min_h(px(40.))
 }
 
+/// A setting's line in a card: a [`row`] with a hairline above it from edge
+/// to edge of the card, as the lines of Windows' Settings
+fn setting_row(cx: &App) -> Div {
+    row().mx(-theme::S4).px(theme::S4).pt(theme::S3).min_h(px(52.)).border_t_1().border_color(cx.palette().border)
+}
+
 /// A line's label and hint; `read`: the label is read out too (a switch
 /// carries its label itself, other controls may not)
 fn row_text(label: SharedString, hint_text: Option<SharedString>, read: bool, cx: &App) -> Div {
@@ -381,7 +387,7 @@ pub fn toggle(
     cx: &App,
 ) -> Div {
     let label = label.into();
-    row()
+    setting_row(cx)
         .child(row_text(label.clone(), hint_text, false, cx))
         .child(Switch::new(id).checked(checked).disabled(disabled).accessibility_label(label).on_change(on_change))
 }
@@ -411,7 +417,7 @@ pub fn field(
         .flex()
         .flex_col()
         .gap(theme::S1)
-        .child(row().child(row_text(label.into(), hint_text, true, cx)).child(control))
+        .child(setting_row(cx).child(row_text(label.into(), hint_text, true, cx)).child(control))
         .when_some(error, |d, e| d.child(field_error(e, cx)))
 }
 
@@ -468,11 +474,12 @@ pub fn nav_row(
 ) -> impl IntoElement {
     let p = *cx.palette();
     let (label, value): (SharedString, SharedString) = (label.into(), value.into());
-    row()
+    let line = row()
         .id(id)
         // A button for assistive technology, named "<label>: <value>"
         .role(gpui_kit::Role::Button)
         .aria_label(SharedString::from(format!("{label}: {value}")))
+        .flex_1()
         .px(theme::S2)
         .rounded(theme::RADIUS)
         .when(!disabled, |d| d.cursor_pointer().hover(|s| s.bg(p.surface_2)).on_click(on_click))
@@ -486,7 +493,8 @@ pub fn nav_row(
                 .text_color(if disabled { p.disabled_text } else { p.text_2 })
                 .child(value)
                 .child(icon(IconName::ChevronRight).small()),
-        )
+        );
+    div().flex().mx(-theme::S4).px(theme::S2).pt(theme::S2).border_t_1().border_color(p.border).child(line)
 }
 
 /// A card (`.card`): children one below the other

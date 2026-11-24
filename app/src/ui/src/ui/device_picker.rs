@@ -166,7 +166,7 @@ pub fn tag(text: impl Into<SharedString>, cx: &App) -> Div {
         .flex_none()
         .items_center()
         .px(theme::S2)
-        .min_h(px(20.))
+        .min_h(px(24.))
         .border_1()
         .border_color(p.border_strong)
         .rounded_full()
@@ -717,9 +717,10 @@ impl DevicePicker {
             let d = d.clone();
             Button::new("services")
                 .label(t("ui.pairing.services"))
-                .xsmall()
+                .small()
                 .outline()
                 .rounded(px(999.))
+                .text_size(theme::FS_SMALL)
                 .on_click(move |_, window, cx| super::pairing_dialog::open(&d, window, cx))
         };
         let tags = div()
