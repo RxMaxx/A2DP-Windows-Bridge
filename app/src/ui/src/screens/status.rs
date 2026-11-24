@@ -145,7 +145,7 @@ fn device_pill(entry: Option<&AudioEntry>, index: usize, collapsed: bool, cx: &A
         // The codec, then its details below it, as on Home and in the tray (issue #86)
         .when(info, |d| {
             d.children(stream::codec_badge(CodecBadge { pill: true, ..CodecBadge::default() }, cx))
-                .children(entry.and_then(|e| stream::mic_row(e, cx)))
+                .children(entry.and_then(|e| stream::mic_row_under_dot(e, cx)))
         });
     block.items_start().py(theme::S2).px(theme::S3).child(div().pt(px(1.)).child(open)).child(text).into_any_element()
 }

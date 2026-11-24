@@ -730,6 +730,17 @@ pub fn headset_chip(entry: &AudioEntry, cx: &App) -> Option<AnyElement> {
 /// The microphone's button and its line below the codec (Home's card, the
 /// flyout, the navigation's block; issue #86)
 pub fn mic_row(entry: &AudioEntry, cx: &App) -> Option<AnyElement> {
+    mic_row_with(entry, theme::S2, px(0.), cx)
+}
+
+/// The navigation's block: the button hangs out to the left, under the
+/// state's dot, so the line starts where the codec's box does
+pub fn mic_row_under_dot(entry: &AudioEntry, cx: &App) -> Option<AnyElement> {
+    // The dot's button (16) and the gap to the text (8), less the row's own gap
+    mic_row_with(entry, px(2.), px(-26.), cx)
+}
+
+fn mic_row_with(entry: &AudioEntry, gap: gpui_kit::Pixels, shift: gpui_kit::Pixels, cx: &App) -> Option<AnyElement> {
     let core = app::core(cx);
     if !mic_shown(core.read(cx).snap()?, entry.profile.as_ref()) {
         return None;
@@ -739,7 +750,8 @@ pub fn mic_row(entry: &AudioEntry, cx: &App) -> Option<AnyElement> {
         div()
             .flex()
             .items_center()
-            .gap(theme::S2)
+            .gap(gap)
+            .ml(shift)
             .min_w_0()
             .children(headset_chip(entry, cx))
             .children(mic_badge(id, entry.profile.as_ref(), cx))
