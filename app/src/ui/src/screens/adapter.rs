@@ -829,7 +829,7 @@ fn box_heading(label: String) -> Div {
         .gap(theme::S1)
         .text_size(theme::FS_BODY)
         .font_weight(FontWeight::SEMIBOLD)
-        .child(format!("{label}:"))
+        .child(ui_model::i18n::with_colon(&label))
 }
 
 /// Another vendor's adapter (issue #86): what to do about its firmware, and

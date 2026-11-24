@@ -273,7 +273,7 @@ pub fn status_text(status: AdapterStatus) -> String {
         AdapterStatus::Ready => "ui.adapter.status_ready",
         AdapterStatus::Error => "ui.adapter.status_error",
     };
-    format!("{}: {}", t("ui.adapter.stack"), t(key))
+    crate::i18n::labelled(&t("ui.adapter.stack"), &t(key))
 }
 
 /// A firmware loader's line ([`loader_line`])

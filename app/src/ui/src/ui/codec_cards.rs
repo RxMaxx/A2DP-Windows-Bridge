@@ -639,7 +639,8 @@ impl CodecSettings {
             .items_center()
             .gap(theme::S2)
             .child(num(bp.low_text.clone()).text_right())
-            .child(div().flex_1().child(
+            // Room for the handles, which reach past the slider's ends
+            .child(div().flex_1().px(theme::S2).child(
                 Slider::new(&self.slider).accessibility_label(t("connection.sbc_bitpool")).disabled(bp.max <= bp.min),
             ))
             .child(num(bp.high_shown.clone()));

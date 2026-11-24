@@ -795,12 +795,12 @@ impl Setup {
             .flex()
             .flex_col()
             .gap(theme::S4)
-            .child(theme_choice(s, cx))
+            .child(ui::first_row(theme_choice(s, cx)))
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap(theme::S1)
+                    .gap(theme::S3)
                     .child(h3("ui.settings.startup"))
                     .child(ui::toggle(
                         "setup-start-with-windows",
@@ -831,7 +831,7 @@ impl Setup {
                 div()
                     .flex()
                     .flex_col()
-                    .gap(theme::S1)
+                    .gap(theme::S3)
                     .child(h3("ui.settings.notifications"))
                     .child(ui::toggle(
                         "setup-notify-connected",

@@ -22,7 +22,7 @@ use crate::ui::dialog::{self, Question};
 use crate::ui::{self, BannerKind, ButtonKind, Choice, IconName, icon};
 
 /// The theme, here and on the setup's last step
-pub fn theme_choice(settings: &CoreSettings, cx: &App) -> impl IntoElement + use<> {
+pub fn theme_choice(settings: &CoreSettings, cx: &App) -> gpui_kit::Div {
     let choices = vec![
         Choice::new("system".to_owned(), t("settings.theme_system")),
         Choice::new("light".to_owned(), t("settings.theme_light")),

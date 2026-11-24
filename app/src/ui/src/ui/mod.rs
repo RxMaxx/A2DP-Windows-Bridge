@@ -529,7 +529,14 @@ pub fn section(title: impl Into<SharedString>, actions: Option<AnyElement>, cx: 
             .items_center()
             .justify_between()
             .gap(theme::S3)
-            .child(div().text_size(theme::FS_LARGE).font_weight(FontWeight::SEMIBOLD).child(title.into()))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(theme::FS_LARGE)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(title.into()),
+            )
             .when_some(actions, |d, a| d.child(a)),
     )
 }
