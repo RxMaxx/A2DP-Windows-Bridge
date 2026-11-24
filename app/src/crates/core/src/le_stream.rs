@@ -1387,8 +1387,9 @@ fn broadcast_once(
     // The matrix mixer feeds a matrix layout only; stereo, mono and split
     // keep the fixed downmix
     let mix = config.layout.is_matrix().then(crate::auracast_mix::handle);
-    // The broadcast's volume, set before the audio comes
-    let mut volume = crate::broadcast_volume::Session::new();
+    // The broadcast's volume, set before the audio comes (with the Windows
+    // volume and mute it follows)
+    let mut volume = crate::broadcast_volume::Session::new(source, req.mutes_output(source));
     let gain = Some(crate::broadcast_volume::gain());
     let mut audio = match LeAudioPath::start(source, &started, host.stats().clone(), mix.clone(), gain.clone()) {
         Ok(a) => a,

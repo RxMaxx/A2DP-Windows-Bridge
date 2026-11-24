@@ -623,7 +623,7 @@
   "ui.dev.auracast_device_gone": "%s (찾을 수 없음)",
   "ui.dev.auracast_volume": "볼륨",
   "ui.dev.auracast_follow": "Windows 볼륨 따르기",
-  "ui.dev.auracast_follow_hint": "브로드캐스트 볼륨과 소리를 가져오는 장치의 Windows 볼륨이 함께 바뀝니다. 테스트 톤과 녹음 장치에는 쓸 수 없습니다.",
+  "ui.dev.auracast_follow_hint": "브로드캐스트 볼륨과 소리를 가져오는 장치의 Windows 볼륨이 함께 바뀝니다.",
   "ui.dev.auracast_front": "전면 (FL FR)",
   "ui.dev.auracast_rear": "후면 (RL RR)",
   "ui.dev.auracast_pair_stereo": "스테레오",

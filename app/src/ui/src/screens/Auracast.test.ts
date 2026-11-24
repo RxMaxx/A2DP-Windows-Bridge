@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AudioDevice } from "../ipc/types";
-import { followable, layoutOf, pairBigs, sourceOfInfo, sourceOptions, sourceParams } from "./Auracast";
+import { followable, layoutOf, pairBigs, playsSource, sourceOfInfo, sourceOptions, sourceParams } from "./Auracast";
 
 describe("Auracast layout", () => {
   it("names the layout as the core takes it", () => {
@@ -46,8 +46,27 @@ describe("Auracast sources", () => {
       source_id: "{mic}",
       source_name: "Microphone",
     });
-    // Gone: the core opens it by its id
+    // Gone: the core opens it by its id, under the name it had if it was listed
     expect(sourceParams("input:{old}", outputs, inputs).source_name).toBeNull();
+    const names = new Map([["{old}", "Headset"]]);
+    expect(sourceParams("input:{old}", outputs, inputs, names).source_name).toBe("Headset");
+  });
+
+  it("tells what was sent from another device of the same name", () => {
+    const info = (kind: string, name = "") => ({ kind, name, waiting: false });
+    const twins = [dev("{mic1}", "Microphone"), dev("{mic2}", "Microphone")];
+    const second = sourceParams("input:{mic2}", outputs, twins);
+    // By name alone it would be the first one
+    expect(sourceOfInfo(info("input", "Microphone"), outputs, twins)).toBe("input:{mic1}");
+    expect(playsSource(info("input", "Microphone"), second)).toBe(true);
+    expect(playsSource(info("output", "Microphone"), second)).toBe(false);
+    expect(playsSource(info("input", "Headset"), second)).toBe(false);
+    expect(playsSource(info("tone"), sourceParams("tone", outputs, twins))).toBe(true);
+    expect(playsSource(info("loopback"), sourceParams("tone", outputs, twins))).toBe(false);
+    // An older client's virtual device is an output; no name sent: the id shows
+    expect(playsSource(info("virtual", "Speakers"), sourceParams("output:{spk}", outputs, inputs))).toBe(true);
+    expect(playsSource(info("input", "{old}"), sourceParams("input:{old}", outputs, inputs))).toBe(true);
+    expect(playsSource(null, second)).toBe(false);
   });
 
   it("finds the choice of what plays", () => {
@@ -63,8 +82,11 @@ describe("Auracast sources", () => {
     const options = sourceOptions("tone", outputs, inputs);
     expect(options.map((o) => o.value)).toEqual(["tone", "loopback", "output:{spk}", "input:{mic}"]);
     expect(options[2].group).not.toEqual(options[3].group);
-    const gone = sourceOptions("input:{old}", outputs, inputs);
+    const gone = sourceOptions("input:{old}", outputs, inputs, new Map([["{old}", "Headset"]]));
     expect(gone.at(-1)).toMatchObject({ value: "input:{old}", group: options[3].group });
+    // By the name it had, never by its id
+    expect(gone.at(-1)!.label).toContain("Headset");
+    expect(sourceOptions("input:{old}", outputs, inputs).at(-1)!.label).not.toContain("{old}");
   });
 
   it("follows the Windows volume of output devices only", () => {

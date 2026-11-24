@@ -623,7 +623,7 @@
   "ui.dev.auracast_device_gone": "%s（未找到）",
   "ui.dev.auracast_volume": "音量",
   "ui.dev.auracast_follow": "跟随 Windows 音量",
-  "ui.dev.auracast_follow_hint": "广播音量与声音来源设备的 Windows 音量一起变化。不适用于测试音和录音设备。",
+  "ui.dev.auracast_follow_hint": "广播音量与声音来源设备的 Windows 音量同步变化。",
   "ui.dev.auracast_front": "前置 (FL FR)",
   "ui.dev.auracast_rear": "后置 (RL RR)",
   "ui.dev.auracast_pair_stereo": "立体声",

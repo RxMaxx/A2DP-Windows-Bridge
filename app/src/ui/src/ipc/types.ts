@@ -221,6 +221,7 @@ interface Results {
   "auracast.mix_preset_delete": AuracastMixState;
   "auracast.set_source": boolean;
   "auracast.set_follow_volume": boolean;
+  "auracast.follow_volume": boolean;
 }
 
 export type ResultOf<M extends MethodName> = M extends keyof Results

@@ -623,7 +623,7 @@
   "ui.dev.auracast_device_gone": "%s（見つかりません）",
   "ui.dev.auracast_volume": "音量",
   "ui.dev.auracast_follow": "Windows の音量に合わせる",
-  "ui.dev.auracast_follow_hint": "配信の音量と、音声を取り込むデバイスの Windows の音量が連動します。テストトーンと録音デバイスでは使えません。",
+  "ui.dev.auracast_follow_hint": "配信の音量と、音声を取り込むデバイスの Windows の音量が連動します。",
   "ui.dev.auracast_front": "フロント (FL FR)",
   "ui.dev.auracast_rear": "リア (RL RR)",
   "ui.dev.auracast_pair_stereo": "ステレオ",

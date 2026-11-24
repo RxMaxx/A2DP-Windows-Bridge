@@ -1913,7 +1913,6 @@ fn default_mic_output(p: &mut CoreProfile, stream: &StreamStatus, list: &[CorePr
     }
 }
 
-/// VB-CABLE and the Hi-Fi Cable among Windows' outputs
 /// A Windows device as audio.devices and audio.input_devices give it, with
 /// its mix format
 fn audio_device(d: audio_capture::DeviceInfo) -> AudioDevice {
@@ -1934,6 +1933,7 @@ fn audio_device(d: audio_capture::DeviceInfo) -> AudioDevice {
     }
 }
 
+/// VB-CABLE and the Hi-Fi Cable among Windows' outputs
 fn cables(devices: &[audio_capture::DeviceInfo]) -> profiles::Cables {
     let cable = |d: &audio_capture::DeviceInfo| profiles::Cable { id: d.id.clone(), name: d.name.clone() };
     profiles::Cables { vb: default_cable(devices).map(cable), hifi: hifi_cable(devices).map(cable) }
@@ -4067,6 +4067,10 @@ impl CoreState {
                 self.developer_only()?;
                 bluecaster_core::broadcast_volume::set_follow(follow);
                 Ok(Value::Bool(follow && self.service.broadcast_follows()))
+            }
+            Method::AuracastFollowVolume => {
+                self.developer_only()?;
+                Ok(Value::Bool(bluecaster_core::broadcast_volume::follows()))
             }
             Method::AuracastMixGet { channels, rear } => {
                 self.developer_only()?;

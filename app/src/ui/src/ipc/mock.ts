@@ -2020,6 +2020,8 @@ export class MockCore implements Transport {
         const kind = this.snap.stream.info?.source?.kind;
         return this.followVolume && this.snap.stream.message.key === "status.broadcasting" && kind !== "tone" && kind !== "input";
       }
+      case "auracast.follow_volume":
+        return this.followVolume;
       // The mixer: kept here, its matrix as set (no automatic one)
       case "auracast.mix":
         return this.mixState();

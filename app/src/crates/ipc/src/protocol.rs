@@ -2201,6 +2201,11 @@ pub enum Method {
     /// follow (not the test tone or a recording device).
     #[serde(rename = "auracast.set_follow_volume")]
     AuracastSetFollowVolume { follow: bool },
+    /// -> bool: whether a broadcast's level follows the Windows volume
+    /// (auracast.set_follow_volume, stream.start_broadcast's
+    /// `follow_volume`), as kept for the next broadcast
+    #[serde(rename = "auracast.follow_volume")]
+    AuracastFollowVolume,
     /// For tools: the headset mode of the profile `name` (absent: the one
     /// streaming, else the active one), saved as the window's mode buttons
     /// save it: "off" mutes the microphone while the mode saved is Auto or

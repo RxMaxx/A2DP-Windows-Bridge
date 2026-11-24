@@ -786,7 +786,7 @@ broadcasts): the encode thread multiplies the audio by its gain
 resampling. It is the stream's volume while the broadcast runs, so the
 volume slider, `stream.set_volume` and `stream.volume_step` move it. With
 "follow Windows" (`auracast.set_follow_volume`, `stream.start_broadcast`'s
-`follow_volume`) the level and the Windows volume of the device the audio
+`follow_volume`; `auracast.follow_volume` reads it) the level and the Windows volume of the device the audio
 comes from act as one (`broadcast_volume::Follow`, ticked by the broadcast
 loop): the broadcast takes the Windows volume first, the volume keys then
 move the broadcast and the slider moves Windows'; a muted device silences

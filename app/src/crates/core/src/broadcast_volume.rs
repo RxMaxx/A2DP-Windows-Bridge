@@ -101,15 +101,29 @@ pub(crate) struct Session {
 }
 
 impl Session {
-    pub fn new() -> Session {
+    /// For a broadcast of `source` about to start: its first audio already
+    /// has the level, the Windows volume and the mute a [`tick`](Session::tick)
+    /// finds (`mutes_output` as there)
+    pub fn new(source: &SourceRequest, mutes_output: bool) -> Session {
         set_live(true);
-        apply(level(), false);
-        Session { follow: None, shown: None }
+        let mut session = Session { follow: None, shown: None };
+        session.step(source, mutes_output);
+        session
     }
 
     /// One step of the broadcast of `source` (`mutes_output`: the session
-    /// keeps the output muted). Some: the level to show, changed.
+    /// keeps the default output muted). Some: the level to show, changed.
     pub fn tick(&mut self, source: &SourceRequest, mutes_output: bool) -> Option<u8> {
+        let level = self.step(source, mutes_output);
+        (self.shown != Some(level)).then(|| {
+            self.shown = Some(level);
+            level
+        })
+    }
+
+    /// Follows the Windows volume while asked and gives the encode thread
+    /// its gain; the level now
+    fn step(&mut self, source: &SourceRequest, mutes_output: bool) -> u8 {
         let choice = if follows() { endpoint_for(source) } else { None };
         if self.follow.as_ref().map(|(c, _)| c) != choice.as_ref() {
             self.follow = choice.map(|c| (c.clone(), Follow::new(c)));
@@ -120,16 +134,14 @@ impl Session {
             if let Some(l) = found.level {
                 set_level(l);
             }
-            muted = found.muted;
+            // The session's own mute of the default output is no sign
+            muted = found.muted && !(mutes_output && f.on_default_device());
         }
-        // The session's own mute is no sign: Windows' mute key is, then
-        let silenced = if mutes_output { crate::mute_output::key_silenced() } else { muted };
+        // Windows' mute key is the sign while the session keeps it muted
+        let silenced = muted || (mutes_output && crate::mute_output::key_silenced());
         let level = level();
         apply(level, silenced);
-        (self.shown != Some(level)).then(|| {
-            self.shown = Some(level);
-            level
-        })
+        level
     }
 }
 
@@ -182,6 +194,8 @@ impl<P: EndpointProvider> Follow<P> {
         let Some(endpoint) = self.endpoint.as_ref() else { return Followed::default() };
         let muted = endpoint.muted().unwrap_or(false);
         let Some(windows) = endpoint.volume().map(scalar_to_level) else {
+            // Gone (unplugged): opened again when it is back
+            self.endpoint = None;
             return Followed { level: None, muted };
         };
         let changed = |last: Option<u8>, now: u8| last != Some(now);
@@ -205,6 +219,15 @@ impl<P: EndpointProvider> Follow<P> {
             self.last_level = Some(level);
         }
         Followed { level: None, muted }
+    }
+
+    /// The device followed is the default output device: the one a session
+    /// that mutes the output keeps muted
+    pub fn on_default_device(&self) -> bool {
+        match &self.choice {
+            EndpointChoice::Default => true,
+            EndpointChoice::Device(id) => self.provider.default_device().as_deref() == Some(id.as_str()),
+        }
     }
 
     /// Opens the device; with the default one, again when it changed
@@ -359,6 +382,31 @@ mod tests {
         let d = devices(&[("{spk}", 100)]);
         let mut f = Follow::with_provider(FakeProvider(d), EndpointChoice::Device("{gone}".into()));
         assert_eq!(f.tick(50), Followed::default());
+    }
+
+    #[test]
+    fn a_device_plugged_in_again_is_followed_again() {
+        let d = devices(&[("{dac}", 100)]);
+        let mut f = Follow::with_provider(FakeProvider(d.clone()), EndpointChoice::Device("{dac}".into()));
+        assert_eq!(f.tick(100).level, None);
+        // Unplugged: its volume cannot be read, nor the device opened
+        d.volume.borrow_mut().remove("{dac}");
+        assert_eq!(f.tick(100), Followed::default());
+        assert_eq!(f.tick(100), Followed::default());
+        // Back: the broadcast takes its volume, and the slider moves it again
+        d.volume.borrow_mut().insert("{dac}".into(), level_to_scalar(70));
+        assert_eq!(f.tick(100).level, Some(70));
+        assert_eq!(f.tick(50).level, None);
+        assert_eq!(windows(&d, "{dac}"), 50);
+    }
+
+    #[test]
+    fn only_a_chosen_device_that_is_the_default_one_is_the_sessions() {
+        let d = devices(&[("{spk}", 100), ("{hdmi}", 30)]);
+        let follow = |choice| Follow::with_provider(FakeProvider(d.clone()), choice);
+        assert!(follow(EndpointChoice::Default).on_default_device());
+        assert!(follow(EndpointChoice::Device("{spk}".into())).on_default_device());
+        assert!(!follow(EndpointChoice::Device("{hdmi}".into())).on_default_device());
     }
 
     #[test]

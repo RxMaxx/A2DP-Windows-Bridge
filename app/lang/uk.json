@@ -623,7 +623,7 @@
   "ui.dev.auracast_device_gone": "%s (не знайдено)",
   "ui.dev.auracast_volume": "Гучність",
   "ui.dev.auracast_follow": "Стежити за гучністю Windows",
-  "ui.dev.auracast_follow_hint": "Гучність трансляції та гучність Windows пристрою-джерела змінюються разом. Не для тестового сигналу й не для пристрою запису.",
+  "ui.dev.auracast_follow_hint": "Гучність трансляції та гучність пристрою-джерела у Windows змінюються разом.",
   "ui.dev.auracast_front": "Фронт (FL FR)",
   "ui.dev.auracast_rear": "Тил (RL RR)",
   "ui.dev.auracast_pair_stereo": "Стерео",

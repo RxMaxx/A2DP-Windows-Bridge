@@ -665,6 +665,33 @@ describe("Auracast tab", () => {
     expect(follow).not.toBeChecked();
   });
 
+  it("shows the follow switch as the core keeps it", async () => {
+    const { core } = await open();
+    await core.request("settings.set", {
+      settings: { ...core.state.snap!.settings, developer_mode: true },
+    });
+    // Set by a window before this one
+    await core.request("auracast.set_follow_volume", { follow: true });
+    fireEvent.click(
+      await screen.findByRole("tab", { name: t("ui.dev.auracast") }),
+    );
+    const source = (await screen.findByLabelText(
+      t("receiver.source"),
+    )) as HTMLSelectElement;
+    await waitFor(() =>
+      expect(
+        screen.getByRole("option", { name: "Speakers (Realtek(R) Audio)" }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.change(source, {
+      target: { value: "output:{0.0.0.00000000}.{speakers}" },
+    });
+    const follow = screen.getByRole("switch", {
+      name: t("ui.dev.auracast_follow"),
+    });
+    await waitFor(() => expect(follow).toBeChecked());
+  });
+
   it("keeps a broadcast whose adapter stopped working while it starts again", async () => {
     const { core } = await open();
     await core.request("settings.set", {
