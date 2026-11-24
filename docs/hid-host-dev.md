@@ -490,10 +490,13 @@ The signed-in user cannot open the service's folder, so in service mode:
   an administrator, so the prompt appears only after the user ticks both
   check boxes, types the code and waits ten seconds. The core still checks
   developer mode, both check boxes and the code.
-- **Is the pipe's server the service?** The UI and the elevated helper
-  ask the service control manager (read-only, `win_sys::service_query`)
-  for the service's program and process. The pipe server must be that process,
-  run that program and run in session 0.
+- **Is the pipe's server the service?** The UI, the agent and the elevated
+  helper ask the service control manager (read-only, `win_sys::service_query`)
+  for the service's program and process. The pipe server must be that
+  process and run in session 0, and SYSTEM or the Administrators must own
+  the pipe. A user who is not elevated cannot create a pipe with that owner.
+  The same user cannot read the service's program from its process either,
+  so the program is compared only where it can be read (an elevated client).
 
 ### The input helper (stage 4)
 
@@ -604,9 +607,10 @@ gives the program checks of stages 3 and 4 their value.
   too.
 - **What the trust checks compare.** For the real service, every check
   requires the service folder's core, never "the core beside me"
-  (`ipc::service_state::expected_core`). The window and the elevated
-  helper check that the pipe's server is the process the service control
-  manager runs, in session 0, from that program
+  (`ipc::service_state::expected_core`). The window, the agent and the
+  elevated helper check that the pipe's server is the process the service
+  control manager runs, in session 0, registered with that program, and
+  that SYSTEM or the Administrators own the pipe
   (`ipc::service_state::check_service_pipe`). The service starts an agent
   only when the service itself runs from the service folder
   (`core/src/agent.rs`, `agent_program`). An elevated caller counts as

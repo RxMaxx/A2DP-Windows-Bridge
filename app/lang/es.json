@@ -546,6 +546,8 @@
   "ui.service.versions": "Aplicación %s, servicio %s",
   "ui.service.stopped_title": "El servicio de BlueCaster está detenido",
   "ui.service.stopped_body": "Inicie el servicio para volver a usar BlueCaster.",
+  "ui.service.untrusted_title": "No se pudo verificar el servicio de BlueCaster",
+  "ui.service.untrusted_body": "Es posible que otro programa responda en lugar del servicio. Reinicie el equipo.",
   "ui.service.state_app_older": "Más reciente que la aplicación",
   "ui.service.newer_title": "Actualizar BlueCaster",
   "ui.service.newer_body": "El servicio de BlueCaster de este PC es más reciente que la aplicación. Instale la versión más reciente de BlueCaster.",

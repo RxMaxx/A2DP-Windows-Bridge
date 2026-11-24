@@ -546,6 +546,8 @@
   "ui.service.versions": "앱 %s, 서비스 %s",
   "ui.service.stopped_title": "BlueCaster 서비스가 중지되었습니다",
   "ui.service.stopped_body": "BlueCaster를 다시 사용하려면 서비스를 시작하세요.",
+  "ui.service.untrusted_title": "BlueCaster 서비스를 확인하지 못했습니다",
+  "ui.service.untrusted_body": "다른 프로그램이 대신 응답하고 있을 수 있습니다. PC를 다시 시작하세요.",
   "ui.service.state_app_older": "앱보다 최신 버전",
   "ui.service.newer_title": "BlueCaster 업데이트",
   "ui.service.newer_body": "이 PC의 BlueCaster 서비스가 앱보다 최신 버전입니다. 최신 버전의 BlueCaster를 설치하세요.",

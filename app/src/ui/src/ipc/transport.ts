@@ -14,7 +14,9 @@ export type ConnStatus =
   /** The service add-on is newer than this window: the app needs the update */
   | { state: "service_newer"; version: string; app: string }
   /** The service add-on is added but stopped */
-  | { state: "service_stopped" };
+  | { state: "service_stopped" }
+  /** The service's pipe is served by something else than the service */
+  | { state: "service_untrusted"; reason: string };
 
 export type WindowKind = "main" | "flyout";
 
