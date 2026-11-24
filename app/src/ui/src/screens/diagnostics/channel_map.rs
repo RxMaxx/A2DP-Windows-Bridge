@@ -126,7 +126,7 @@ fn band(in_use: Option<&[bool]>, avoided: &BTreeSet<usize>, aps: &[&WifiAccessPo
             .top(relative(((AXIS_Y - 13.0 - top) / (H - top)) as f32))
             .flex()
             .justify_center()
-            .text_size(theme::FS_12)
+            .text_size(theme::FS_SMALL)
             .text_color(if strong { p.text } else { p.text_3 })
             .when(strong, |d| d.font_weight(FontWeight::SEMIBOLD))
             .child(ch.to_string())
@@ -190,7 +190,7 @@ impl Render for ChannelMap {
                             .flex_wrap()
                             .gap_x(theme::S4)
                             .gap_y(theme::S2)
-                            .text_size(theme::FS_12)
+                            .text_size(theme::FS_SMALL)
                             .when(in_use.is_some(), |d| {
                                 d.child(
                                     div()
@@ -320,7 +320,7 @@ fn scan_table(rows: &[&WifiAccessPoint], cx: &App) -> Div {
     div()
         .flex()
         .flex_col()
-        .text_size(theme::FS_12)
+        .text_size(theme::FS_SMALL)
         .child(
             line()
                 .font_weight(FontWeight::SEMIBOLD)

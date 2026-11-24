@@ -171,7 +171,7 @@ impl ImportPairings {
                                         x.child(
                                             div()
                                                 .font_family(theme::FONT_MONO)
-                                                .text_size(theme::FS_12)
+                                                .text_size(theme::FS_SMALL)
                                                 .text_color(p.text_2)
                                                 .child(d.address.clone()),
                                         )

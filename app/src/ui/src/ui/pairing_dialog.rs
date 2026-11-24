@@ -117,7 +117,7 @@ fn table(head: [String; 2], widths: Widths, rows: Vec<Div>, cx: &App) -> Div {
         .flex()
         .flex_col()
         .mt(theme::S2)
-        .text_size(theme::FS_14)
+        .text_size(theme::FS_BODY)
         .child(
             div()
                 .flex()
@@ -125,7 +125,7 @@ fn table(head: [String; 2], widths: Widths, rows: Vec<Div>, cx: &App) -> Div {
                 .py(theme::S1)
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(p.text_2)
-                .text_size(theme::FS_12)
+                .text_size(theme::FS_SMALL)
                 .children(head.into_iter().enumerate().map(|(i, h)| column(widths, i).child(h))),
         )
         .children(rows.into_iter().map(|r| r.py(theme::S2).border_t_1().border_color(p.border)))
@@ -141,7 +141,7 @@ fn key_row(i: usize, row: KeyRow, cx: &App) -> Div {
             .flex_wrap()
             .items_center()
             .gap(theme::S2)
-            .child(div().font_family(theme::FONT_MONO).text_size(theme::FS_12).child(v.clone()))
+            .child(div().font_family(theme::FONT_MONO).text_size(theme::FS_SMALL).child(v.clone()))
             .when_some(row.tag, |d, tag| d.child(super::device_picker::tag(tag, cx)))
             .child(
                 icon_button(("copy-key", i), IconName::Copy, t("ui.pairing.copy_key"))
@@ -246,7 +246,7 @@ fn body(state: &Entity<PairingState>, cx: &App) -> AnyElement {
                                 .flex()
                                 .flex_col()
                                 .font_family(theme::FONT_MONO)
-                                .text_size(theme::FS_12)
+                                .text_size(theme::FS_SMALL)
                                 .text_color(p.text_2)
                                 .children(r.uuids.iter().map(|u| div().child(u.clone()))),
                         )

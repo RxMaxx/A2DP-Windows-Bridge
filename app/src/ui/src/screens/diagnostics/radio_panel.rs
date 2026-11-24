@@ -168,13 +168,13 @@ impl Render for RadioPanel {
                     .gap_y(theme::S1)
                     .child(
                         div()
-                            .text_size(theme::FS_16)
+                            .text_size(theme::FS_LARGE)
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(verdict_color)
                             .child(quality_label(quality.as_ref())),
                     )
                     .when(!causes.is_empty(), |d| {
-                        d.child(div().text_size(theme::FS_12).text_color(p.text_2).child(causes.clone()))
+                        d.child(div().text_size(theme::FS_SMALL).text_color(p.text_2).child(causes.clone()))
                     }),
             )
             .when(br_edr, |d| {

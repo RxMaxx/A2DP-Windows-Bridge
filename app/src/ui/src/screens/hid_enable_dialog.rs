@@ -241,7 +241,7 @@ impl Render for HidEnableDialog {
                     .child(
                         div()
                             .font_family(theme::FONT_MONO)
-                            .text_size(theme::FS_28)
+                            .text_size(theme::FS_PAGE)
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(self.code.clone().unwrap_or_else(|| "······".into())),
                     )
@@ -260,7 +260,7 @@ impl Render for HidEnableDialog {
                                 .flex()
                                 .items_center()
                                 .gap(theme::S1)
-                                .text_size(theme::FS_12)
+                                .text_size(theme::FS_SMALL)
                                 .text_color(p.bad_text)
                                 .child(icon(IconName::ErrorCircle).small())
                                 .child(e),

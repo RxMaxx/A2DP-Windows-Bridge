@@ -327,7 +327,7 @@ pub fn frame_drawn() -> impl IntoElement {
 
 /// Secondary text under a label or in a card (`.hint`)
 pub fn hint(s: impl Into<SharedString>, cx: &App) -> Div {
-    div().text_size(theme::FS_12).text_color(cx.palette().text_2).child(text(s))
+    div().text_size(theme::FS_SMALL).text_color(cx.palette().text_2).child(text(s))
 }
 
 /// Dimmed text (`.muted`)
@@ -434,7 +434,7 @@ fn field_error(message: SharedString, cx: &App) -> Stateful<Div> {
         .flex()
         .items_center()
         .gap(theme::S1)
-        .text_size(theme::FS_12)
+        .text_size(theme::FS_SMALL)
         .text_color(cx.palette().bad_text)
         .child(icon(IconName::ErrorCircle).small())
         .child(message)
@@ -506,7 +506,7 @@ pub fn section(title: impl Into<SharedString>, actions: Option<AnyElement>, cx: 
             .items_center()
             .justify_between()
             .gap(theme::S3)
-            .child(div().text_size(theme::FS_16).font_weight(FontWeight::SEMIBOLD).child(title.into()))
+            .child(div().text_size(theme::FS_LARGE).font_weight(FontWeight::SEMIBOLD).child(title.into()))
             .when_some(actions, |d, a| d.child(a)),
     )
 }
@@ -551,7 +551,7 @@ impl RenderOnce for Page {
                     .child(
                         div()
                             .font_family(theme::FONT_DISPLAY)
-                            .text_size(theme::FS_28)
+                            .text_size(theme::FS_PAGE)
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(text(self.title)),
                     )

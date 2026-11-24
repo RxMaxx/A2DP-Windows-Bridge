@@ -91,7 +91,7 @@ fn bar(label: String, value: u8, on: bool, cx: &App) -> Div {
         .flex()
         .items_center()
         .gap(theme::S2)
-        .text_size(theme::FS_12)
+        .text_size(theme::FS_SMALL)
         .text_color(p.text_2)
         .child(div().w(px(88.)).flex_none().truncate().child(label.clone()))
         .child(
@@ -137,7 +137,7 @@ fn support_tag(s: CodecSupport, cx: &App) -> Div {
         .border_1()
         .border_color(p.border_strong)
         .rounded_full()
-        .text_size(theme::FS_12)
+        .text_size(theme::FS_SMALL)
         .text_color(p.text_2)
         .whitespace_nowrap()
         .child(div().flex().text_color(color).child(icon(name).xsmall()))
@@ -629,7 +629,7 @@ impl CodecSettings {
     fn bitpool_field(&self, bp: &BitpoolView, cx: &mut Context<Self>) -> Div {
         let p = *cx.palette();
         let num =
-            |text: String| div().flex_none().min_w(px(64.)).text_color(p.text_2).text_size(theme::FS_12).child(text);
+            |text: String| div().flex_none().min_w(px(64.)).text_color(p.text_2).text_size(theme::FS_SMALL).child(text);
         let slider = div()
             .flex()
             .flex_1()

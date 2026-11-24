@@ -221,7 +221,7 @@ impl MicProcessingControls {
                     .gap(px(2.))
                     .child(div().text_color(dim(pal.text)).child(label.clone()))
                     .when_some(which.hint(), |d, h| {
-                        d.child(div().text_size(theme::FS_12).text_color(dim(pal.text_2)).child(h))
+                        d.child(div().text_size(theme::FS_SMALL).text_color(dim(pal.text_2)).child(h))
                     }),
             )
             .child(

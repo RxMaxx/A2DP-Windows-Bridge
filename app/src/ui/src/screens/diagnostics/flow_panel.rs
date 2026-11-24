@@ -154,7 +154,7 @@ impl Render for FlowPanel {
             div().child(t("dbgc.col_detail")),
             div(),
         ])
-        .text_size(theme::FS_12)
+        .text_size(theme::FS_SMALL)
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(p.text_2);
 
@@ -164,7 +164,7 @@ impl Render for FlowPanel {
             let seq = x.and_then(|x| x.seq);
             let color = status_color(&status, &p);
             let d = detail(x, cx);
-            let small = |d: Div| d.text_size(theme::FS_12).text_color(p.text_2);
+            let small = |d: Div| d.text_size(theme::FS_SMALL).text_color(p.text_2);
             let icon_cell = match status_icon(&status) {
                 Some(i) => div().text_color(color).child(icon(i)),
                 None => div().child(div().size(px(8.)).rounded_full().border_1().border_color(p.text_3)),
@@ -172,7 +172,7 @@ impl Render for FlowPanel {
             let detail_cell = div()
                 .id(("flow-detail", n))
                 .truncate()
-                .text_size(theme::FS_12)
+                .text_size(theme::FS_SMALL)
                 .text_color(p.text_2)
                 .child(d.clone())
                 .when(!d.is_empty(), |el| el.tooltip(move |w, cx| Tooltip::new(d.clone()).build(w, cx)));

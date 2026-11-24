@@ -204,7 +204,7 @@ pub fn show(
                 d.child(
                     div()
                         .font_weight(FontWeight::NORMAL)
-                        .text_size(theme::FS_12)
+                        .text_size(theme::FS_SMALL)
                         .text_color(p.text_2)
                         .child(super::text(s)),
                 )

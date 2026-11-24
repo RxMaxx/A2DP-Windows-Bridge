@@ -439,7 +439,7 @@ impl Render for Auracast {
                         .flex()
                         .items_center()
                         .gap(theme::S1)
-                        .text_size(theme::FS_12)
+                        .text_size(theme::FS_SMALL)
                         .text_color(p.warn_text)
                         .child(t!("ui.dev.auracast_bigs_hint", bigs, MAX_BIGS))
                         .into_any_element(),

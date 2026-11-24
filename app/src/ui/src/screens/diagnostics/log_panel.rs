@@ -491,7 +491,7 @@ impl Render for LogPanel {
             .border_color(p.border)
             .rounded(theme::RADIUS_CARD)
             .font_family(theme::FONT_MONO)
-            .text_size(theme::FS_12)
+            .text_size(theme::FS_SMALL)
             .overflow_hidden()
             .child(list);
 

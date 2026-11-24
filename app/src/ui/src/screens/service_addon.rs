@@ -232,7 +232,7 @@ impl Render for ServiceRow {
                     .gap(px(2.))
                     .child(t("ui.service.row"))
                     .child(ui::hint(t(service_state_text(k)), cx))
-                    .when_some(error, |d, e| d.child(div().text_size(theme::FS_12).text_color(p.bad_text).child(e))),
+                    .when_some(error, |d, e| d.child(div().text_size(theme::FS_SMALL).text_color(p.bad_text).child(e))),
             )
             .child(
                 ui::inline()
@@ -270,7 +270,7 @@ impl Render for ServiceRow {
 
 /// A connection screen's heading
 fn title(text: String) -> impl IntoElement {
-    div().text_size(theme::FS_20).font_weight(FontWeight::SEMIBOLD).child(text)
+    div().text_size(theme::FS_TITLE).font_weight(FontWeight::SEMIBOLD).child(text)
 }
 
 /// A connection screen's paragraph
@@ -379,7 +379,7 @@ impl RenderOnce for ServiceConnectionNotice {
             .gap(theme::S3)
             .child(head)
             .child(ui::inline().justify_center().child(update).child(remove))
-            .when_some(error, |d, e| d.child(div().text_size(theme::FS_12).text_color(p.bad_text).child(e)))
+            .when_some(error, |d, e| d.child(div().text_size(theme::FS_SMALL).text_color(p.bad_text).child(e)))
     }
 }
 

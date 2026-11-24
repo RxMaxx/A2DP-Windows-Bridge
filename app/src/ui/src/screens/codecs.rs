@@ -931,12 +931,9 @@ impl DeviceCodecs {
             )
             .child(div().flex_none().text_color(p.text_2).child(icon(IconName::Headphones).size(px(24.))))
             .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_w_0()
-                    .child(div().text_size(theme::FS_16).font_weight(FontWeight::SEMIBOLD).line_clamp(2).child(name)),
+                div().flex().flex_col().flex_1().min_w_0().child(
+                    div().text_size(theme::FS_LARGE).font_weight(FontWeight::SEMIBOLD).line_clamp(2).child(name),
+                ),
             )
             // No "Paired": that is the Audio Devices page's (issue #86); LE
             // Audio: that tag alone
@@ -1340,7 +1337,7 @@ impl DeviceCodecs {
             .when_some(mic_cards, |d, cards| {
                 d.child(
                     div()
-                        .text_size(theme::FS_14)
+                        .text_size(theme::FS_BODY)
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(p.text_2)
                         .child(t("ui.diag.mic_title")),

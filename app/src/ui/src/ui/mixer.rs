@@ -176,7 +176,7 @@ impl Render for MixerList {
                 .flex_col()
                 .min_w_0()
                 .pt(theme::S1)
-                .text_size(theme::FS_12)
+                .text_size(theme::FS_SMALL)
                 .child(div().truncate().child(name.clone()))
                 .child(
                     div()

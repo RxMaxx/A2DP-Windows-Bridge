@@ -346,7 +346,7 @@ impl AuracastMixer {
             .flex()
             .flex_col()
             .gap(px(2.))
-            .text_size(theme::FS_12)
+            .text_size(theme::FS_SMALL)
             .child(
                 div()
                     .flex()

@@ -676,15 +676,22 @@ impl ReceiverTest {
                 .child(div().w(px(24.)).flex_none().flex().justify_center().text_color(color).child(mark))
                 .child(div().w(px(192.)).flex_none().child(t(step_key(*id))))
                 .child(
-                    div().w(px(72.)).flex_none().text_size(theme::FS_12).text_color(color).child(step_status(s.state)),
+                    div()
+                        .w(px(72.))
+                        .flex_none()
+                        .text_size(theme::FS_SMALL)
+                        .text_color(color)
+                        .child(step_status(s.state)),
                 )
-                .child(div().w(px(80.)).flex_none().text_size(theme::FS_12).text_color(p.text_2).child(step_time(s.at)))
+                .child(
+                    div().w(px(80.)).flex_none().text_size(theme::FS_SMALL).text_color(p.text_2).child(step_time(s.at)),
+                )
                 .child(
                     div()
                         .flex_1()
                         .min_w_0()
                         .truncate()
-                        .text_size(theme::FS_12)
+                        .text_size(theme::FS_SMALL)
                         .text_color(p.text_2)
                         .child(s.detail.clone()),
                 )
@@ -789,7 +796,7 @@ impl ReceiverTest {
                 .rounded(theme::RADIUS_CARD)
                 .bg(p.surface)
                 .font_family(theme::FONT_MONO)
-                .text_size(theme::FS_12)
+                .text_size(theme::FS_SMALL)
                 .overflow_y_scroll()
                 .track_scroll(&self.log_scroll)
                 .when(empty, |d| d.child(div().px(theme::S3).text_color(p.text_2).child(t("ui.diag.no_log"))))

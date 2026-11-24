@@ -172,7 +172,7 @@ pub fn connect_button(id: impl Into<ElementId>, state: StreamState, on: bool, co
         .h(px(if compact { 52. } else { 64. }))
         .rounded(theme::RADIUS_CARD)
         .font_family(theme::FONT_DISPLAY)
-        .text_size(if compact { theme::FS_16 } else { theme::FS_20 })
+        .text_size(if compact { theme::FS_LARGE } else { theme::FS_TITLE })
         .font_weight(FontWeight::SEMIBOLD)
 }
 
@@ -495,7 +495,7 @@ pub fn codec_badge(opts: CodecBadge, cx: &App) -> Option<AnyElement> {
         .gap(theme::S1)
         .min_w_0()
         .max_w_full()
-        .when(!opts.pill, |d| d.text_size(theme::FS_14))
+        .when(!opts.pill, |d| d.text_size(theme::FS_BODY))
         .text_color(p.text)
         .when(opts.stretch, |d| d.w_full())
         .when(i.requested_codec.is_some(), |d| {
@@ -506,7 +506,9 @@ pub fn codec_badge(opts: CodecBadge, cx: &App) -> Option<AnyElement> {
             Some(picker) => d.child(div().flex_1().min_w_0().child(picker)),
             None => d.child(div().flex_none().font_weight(FontWeight::SEMIBOLD).truncate().child(model::codec_name(i))),
         })
-        .when(fresh, |d| d.child(div().min_w_0().truncate().text_size(theme::FS_12).text_color(p.text_2).child(note)));
+        .when(fresh, |d| {
+            d.child(div().min_w_0().truncate().text_size(theme::FS_SMALL).text_color(p.text_2).child(note))
+        });
 
     let mut badge = div()
         .flex()
@@ -514,7 +516,7 @@ pub fn codec_badge(opts: CodecBadge, cx: &App) -> Option<AnyElement> {
         .items_center()
         .gap_x(theme::S2)
         .max_w_full()
-        .text_size(theme::FS_12)
+        .text_size(theme::FS_SMALL)
         .text_color(p.text_2)
         .when(opts.stretch, |d| d.flex_1())
         .when(!opts.pill, |d| {
@@ -568,7 +570,7 @@ pub fn codec_badge(opts: CodecBadge, cx: &App) -> Option<AnyElement> {
             .items_start()
             .gap(theme::S1)
             .min_w_0()
-            .text_size(theme::FS_12)
+            .text_size(theme::FS_SMALL)
             .text_color(p.text_2)
             .child(div().flex_none().text_color(p.warn_text).child(icon(IconName::Warning).small()))
             // Wraps within the card
@@ -633,7 +635,7 @@ pub fn mic_badge(id: impl Into<ElementId>, profile: Option<&Profile>, cx: &App) 
             .border_color(p.border_strong)
             .rounded(theme::RADIUS)
             .bg(p.surface_2)
-            .text_size(theme::FS_12)
+            .text_size(theme::FS_SMALL)
             .text_color(if voice.is_some() { p.text } else { p.text_2 })
             .when(voice.is_none(), |d| d.opacity(0.55))
             .when(voice.is_some_and(|v| v.link == "hfp"), |d| d.tooltip(tip(t("ui.headset_mic_quality"))))
@@ -779,7 +781,7 @@ pub fn quality_indicator(cx: &App) -> AnyElement {
         .flex()
         .items_center()
         .gap(theme::S2)
-        .text_size(theme::FS_12)
+        .text_size(theme::FS_SMALL)
         .text_color(st_text)
         .tooltip(tip(format!("{}: {label}", t("quality.title"))))
         .child(div().flex().items_end().gap(px(2.)).h(px(14.)).children((1..=4u8).map(|n| {
@@ -850,7 +852,7 @@ impl Render for LinkSparkline {
             .child(
                 div().flex_1().min_w_0().h(px(20.)).child(charts::sparkline(&values, Some(0.), None, cx).size_full()),
             )
-            .child(div().flex_none().text_size(theme::FS_12).text_color(p.text_2).child(text))
+            .child(div().flex_none().text_size(theme::FS_SMALL).text_color(p.text_2).child(text))
     }
 }
 

@@ -412,7 +412,7 @@ impl Render for FlyoutRoot {
             .overflow_hidden()
             .bg(p.bg)
             .text_color(p.text)
-            .text_size(theme::FS_14)
+            .text_size(theme::FS_BODY)
             .font_family(theme::FONT)
             .track_focus(&self.focus)
             .on_key_down(|event: &KeyDownEvent, _, cx| {

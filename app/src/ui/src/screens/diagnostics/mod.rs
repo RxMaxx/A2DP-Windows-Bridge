@@ -258,7 +258,7 @@ impl Diagnostics {
                 let (hci, mask) = (s.with_hci, s.mask);
                 let p = cx.palette();
                 let hint = |key: &str| {
-                    div().ml(px(28.)).mb(theme::S2).text_size(theme::FS_12).text_color(p.text_2).child(t(key))
+                    div().ml(px(28.)).mb(theme::S2).text_size(theme::FS_SMALL).text_color(p.text_2).child(t(key))
                 };
                 div()
                     .flex()
@@ -367,7 +367,7 @@ impl Diagnostics {
                 div()
                     .flex_1()
                     .font_family(theme::FONT_DISPLAY)
-                    .text_size(theme::FS_28)
+                    .text_size(theme::FS_PAGE)
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(t("ui.nav.diagnostics")),
             )
@@ -469,7 +469,7 @@ impl Diagnostics {
     fn capture_line(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let p = *cx.palette();
         let snap = self.core.read(cx).snap()?;
-        let line = || div().flex().items_center().gap(theme::S2).text_size(theme::FS_12).text_color(p.text_2);
+        let line = || div().flex().items_center().gap(theme::S2).text_size(theme::FS_SMALL).text_color(p.text_2);
         let path = |text: String| div().min_w_0().truncate().font_family(theme::FONT_MONO).child(text);
         if let Some(c) = &snap.capture {
             return Some(

@@ -133,7 +133,7 @@ impl Flyout {
             device_switcher(cx)
         } else {
             div()
-                .text_size(theme::FS_16)
+                .text_size(theme::FS_LARGE)
                 .font_family(theme::FONT_DISPLAY)
                 .font_weight(FontWeight::SEMIBOLD)
                 .truncate()
@@ -145,7 +145,7 @@ impl Flyout {
             .items_center()
             .gap(theme::S3)
             .min_w_0()
-            .text_size(theme::FS_12)
+            .text_size(theme::FS_SMALL)
             .when(parts.battery, |d| {
                 d.child(battery_level("fly-battery", s.battery, false, cx)).child(div().text_color(p.text_2).child("|"))
             })
@@ -257,7 +257,7 @@ impl Flyout {
             .border_1()
             .border_color(p.bad_line)
             .rounded(theme::RADIUS)
-            .text_size(theme::FS_12)
+            .text_size(theme::FS_SMALL)
             .child(
                 div()
                     .flex()
@@ -362,7 +362,7 @@ impl Render for Flyout {
                         .items_center()
                         .gap(theme::S2)
                         .min_w_0()
-                        .text_size(theme::FS_12)
+                        .text_size(theme::FS_SMALL)
                         .child(capture_sign_to(false, |cx| open_main(Some("diagnostics"), cx), cx)),
                 )
             })

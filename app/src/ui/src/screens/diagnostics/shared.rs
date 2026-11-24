@@ -234,7 +234,7 @@ pub fn row(
                 .min_w(px(128.))
                 .flex_none()
                 .pt(px(2.))
-                .text_size(theme::FS_12)
+                .text_size(theme::FS_SMALL)
                 .text_color(p.text_2)
                 .child(label.into()),
         )
@@ -263,7 +263,7 @@ pub fn group(cx: &App) -> Div {
 
 /// A card's heading (`.lq-group h2`)
 pub fn heading(text: impl Into<SharedString>) -> Div {
-    div().text_size(theme::FS_14).font_weight(FontWeight::SEMIBOLD).child(text.into())
+    div().text_size(theme::FS_BODY).font_weight(FontWeight::SEMIBOLD).child(text.into())
 }
 
 /// The cards of a tab side by side, wrapping (`.lq-groups`: at least 22rem each)

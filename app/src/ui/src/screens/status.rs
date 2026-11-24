@@ -48,7 +48,7 @@ pub fn capture_sign_to<F: Fn(&mut App) + 'static>(collapsed: bool, on_open: F, c
                 .border_1()
                 .border_color(p.bad_line)
                 .text_color(p.bad_text)
-                .text_size(theme::FS_12)
+                .text_size(theme::FS_SMALL)
                 .accessibility_label(text.clone())
                 .tooltip(format!("{text}\n{}", c.path))
                 .child(dot(p.bad))
@@ -128,10 +128,10 @@ fn device_pill(entry: Option<&AudioEntry>, index: usize, collapsed: bool, cx: &A
         .flex_1()
         .gap(px(2.))
         .min_w_0()
-        .text_size(theme::FS_12)
+        .text_size(theme::FS_SMALL)
         // As Home's card: the device, battery and state, the codec
         .when_some(device, |d, name| {
-            d.child(div().text_size(theme::FS_14).font_weight(FontWeight::SEMIBOLD).line_clamp(2).child(name))
+            d.child(div().text_size(theme::FS_BODY).font_weight(FontWeight::SEMIBOLD).line_clamp(2).child(name))
         })
         .child(
             div()

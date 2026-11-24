@@ -74,7 +74,7 @@ fn all_devices(s: &Settings, cx: &gpui_kit::App) -> impl IntoElement + use<> {
     ui::card(cx)
         .child(
             div()
-                .text_size(theme::FS_12)
+                .text_size(theme::FS_SMALL)
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(p.text_2)
                 .child(t("ui.devices.all_title")),

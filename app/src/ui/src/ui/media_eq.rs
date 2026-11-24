@@ -381,7 +381,7 @@ struct FieldSpec {
 
 /// A labelled field under the graph (`.eq-field`)
 fn eq_field(label: String, cx: &App) -> Div {
-    div().flex().flex_col().gap(theme::S1).text_size(theme::FS_12).text_color(cx.palette().text_2).child(label)
+    div().flex().flex_col().gap(theme::S1).text_size(theme::FS_SMALL).text_color(cx.palette().text_2).child(label)
 }
 
 impl Render for MediaEqEditor {
@@ -550,7 +550,7 @@ impl Render for MediaEqEditor {
             .child(fields)
             .child(actions)
             .when_some(self.export_error.clone(), |d, e| {
-                d.child(div().text_size(theme::FS_12).text_color(p.bad_text).child(e))
+                d.child(div().text_size(theme::FS_SMALL).text_color(p.bad_text).child(e))
             })
     }
 }
@@ -1049,7 +1049,7 @@ impl Render for EqGraph {
                         .rounded(theme::RADIUS)
                         .bg(p.surface_2)
                         .text_color(p.text)
-                        .text_size(theme::FS_12)
+                        .text_size(theme::FS_SMALL)
                         .whitespace_nowrap()
                         .child(tip_text(&b)),
                 ),

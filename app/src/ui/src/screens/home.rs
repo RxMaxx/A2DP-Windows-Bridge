@@ -496,7 +496,7 @@ impl Render for DeviceCard {
         let button = connect_button(SharedString::from(format!("connect-{key}")), card.state, card.running, true)
             .h(px(44.))
             .rounded(theme::RADIUS)
-            .text_size(theme::FS_16)
+            .text_size(theme::FS_LARGE)
             .loading(self.busy)
             .disabled(self.busy)
             .on_click(cx.listener(|this, _, _, cx| this.press(cx)));

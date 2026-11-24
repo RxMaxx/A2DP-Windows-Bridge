@@ -884,7 +884,7 @@ impl Setup {
                 .border_t_2()
                 .border_color(line)
                 .text_color(color)
-                .text_size(theme::FS_12)
+                .text_size(theme::FS_SMALL)
                 .when(on, |d| d.font_weight(FontWeight::SEMIBOLD))
                 .child(
                     div()
@@ -1053,7 +1053,7 @@ impl Render for Setup {
                                     .child(
                                         div()
                                             .font_family(theme::FONT_DISPLAY)
-                                            .text_size(theme::FS_20)
+                                            .text_size(theme::FS_TITLE)
                                             .font_weight(FontWeight::SEMIBOLD)
                                             .child(t("ui.setup.wizard_title")),
                                     )

@@ -28,7 +28,7 @@ fn row(label: &str, value: impl IntoElement, cx: &App) -> Div {
                 .min_w(px(128.))
                 .flex_shrink_0()
                 .pt(px(2.))
-                .text_size(theme::FS_12)
+                .text_size(theme::FS_SMALL)
                 .text_color(cx.palette().text_2)
                 .child(label.to_owned()),
         )
@@ -51,7 +51,7 @@ fn chip(c: &CdChip, cx: &App) -> Stateful<Div> {
         .items_center()
         .rounded_full()
         .border_1()
-        .text_size(theme::FS_12)
+        .text_size(theme::FS_SMALL)
         .whitespace_nowrap()
         .child(c.text.clone());
     match c.state {
@@ -126,7 +126,7 @@ fn bitpool_bar_view(b: &BitpoolView, cx: &App) -> Div {
             div()
                 .flex()
                 .justify_between()
-                .text_size(theme::FS_12)
+                .text_size(theme::FS_SMALL)
                 .text_color(p.text_3)
                 .child("0")
                 .child(bar.max.to_string()),
@@ -137,7 +137,7 @@ fn bitpool_bar_view(b: &BitpoolView, cx: &App) -> Div {
                 .flex_wrap()
                 .gap_x(theme::S3)
                 .gap_y(theme::S1)
-                .text_size(theme::FS_12)
+                .text_size(theme::FS_SMALL)
                 .text_color(p.text_2)
                 .children(b.parts.iter().map(|(part, text)| {
                     div().flex().items_center().gap(theme::S1).child(swatch(*part, cx)).child(text.clone())
@@ -172,7 +172,7 @@ fn section(s: &CdSection, cx: &App) -> Div {
                 .pt(theme::S2)
                 .border_t_1()
                 .border_color(p.border)
-                .text_size(theme::FS_12)
+                .text_size(theme::FS_SMALL)
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(p.text_2)
                 .child(s.title.clone()),
@@ -190,7 +190,7 @@ pub fn codec_details_card(info: &StreamInfo, details: &CodecDetails, cx: &App) -
                 .flex()
                 .items_baseline()
                 .gap(theme::S2)
-                .text_size(theme::FS_16)
+                .text_size(theme::FS_LARGE)
                 .child(div().font_weight(FontWeight::SEMIBOLD).child(v.title.clone()))
                 .child(ui::muted(v.codec.clone(), cx)),
         )

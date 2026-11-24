@@ -72,7 +72,7 @@ pub fn paired_devices_note(devices: &[WindowsPairedDevice], cx: &App) -> Div {
                 .child(div().text_color(p.warn_text).child(t("ui.adapter.paired_text"))),
         )
         .child(
-            div().flex().flex_col().pl(theme::S5).text_size(theme::FS_12).text_color(p.text_2).children(
+            div().flex().flex_col().pl(theme::S5).text_size(theme::FS_SMALL).text_color(p.text_2).children(
                 ["ui.adapter.paired_receiver", "ui.adapter.paired_keep"]
                     .map(|key| div().flex().gap(theme::S2).child("•").child(div().flex_1().child(t(key)))),
             ),

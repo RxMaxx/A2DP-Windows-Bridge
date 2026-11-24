@@ -170,7 +170,7 @@ pub fn tag(text: impl Into<SharedString>, cx: &App) -> Div {
         .border_1()
         .border_color(p.border_strong)
         .rounded_full()
-        .text_size(theme::FS_12)
+        .text_size(theme::FS_SMALL)
         .text_color(p.text_2)
         .whitespace_nowrap()
         .child(text.into())
@@ -709,7 +709,7 @@ impl DevicePicker {
             .child(
                 div()
                     .font_family(theme::FONT_MONO)
-                    .text_size(theme::FS_12)
+                    .text_size(theme::FS_SMALL)
                     .text_color(p.text_2)
                     .child(addresses.join(", ")),
             );
@@ -961,7 +961,7 @@ impl DevicePicker {
         let add = super::card(cx)
             .child(
                 div()
-                    .text_size(theme::FS_12)
+                    .text_size(theme::FS_SMALL)
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(p.text_2)
                     .child(t("ui.devices.add_title")),
@@ -1043,7 +1043,7 @@ impl Render for DevicePicker {
                     .flex()
                     .items_center()
                     .gap(theme::S1)
-                    .text_size(theme::FS_12)
+                    .text_size(theme::FS_SMALL)
                     .text_color(p.bad_text)
                     .child(icon(IconName::Warning).small())
                     .child(error),

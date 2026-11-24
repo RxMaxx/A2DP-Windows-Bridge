@@ -154,7 +154,7 @@ impl Render for CableRow {
                 .border_1()
                 .border_color(color.1)
                 .rounded_full()
-                .text_size(theme::FS_12)
+                .text_size(theme::FS_SMALL)
                 .text_color(color.0)
                 .whitespace_nowrap()
                 .child(text)
@@ -203,7 +203,7 @@ impl Render for CableRow {
                         .flex()
                         .items_center()
                         .gap(theme::S1)
-                        .text_size(theme::FS_12)
+                        .text_size(theme::FS_SMALL)
                         .text_color(p.warn_text)
                         .child(icon(IconName::Warning))
                         .child(t("cables.restart")),

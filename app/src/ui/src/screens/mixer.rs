@@ -54,7 +54,7 @@ impl Render for Mixer {
                             .flex()
                             .flex_col()
                             .pl(theme::S2)
-                            .text_size(theme::FS_12)
+                            .text_size(theme::FS_SMALL)
                             .text_color(p.text_2)
                             .child(note("ui.mixer.note_windows"))
                             .child(note("ui.mixer.note_exit"))

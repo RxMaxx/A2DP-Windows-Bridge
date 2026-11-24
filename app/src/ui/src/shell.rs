@@ -243,7 +243,7 @@ impl Render for MainWindow {
             .flex()
             .bg(p.bg)
             .text_color(p.text)
-            .text_size(theme::FS_14)
+            .text_size(theme::FS_BODY)
             .font_family(theme::FONT);
         if !ready {
             self.screen = None;
@@ -293,7 +293,7 @@ impl Render for MainWindow {
 /// The screen until the core answered: connecting, missing, wrong version
 pub fn connection_screen(conn: &ConnStatus, compact: bool, cx: &App) -> impl IntoElement + use<> {
     let p = cx.palette();
-    let title = |key: &str| div().text_size(theme::FS_20).font_weight(FontWeight::SEMIBOLD).child(ui::text(t(key)));
+    let title = |key: &str| div().text_size(theme::FS_TITLE).font_weight(FontWeight::SEMIBOLD).child(ui::text(t(key)));
     // A status a screen reader reads as it changes, named by its title (the
     // service's notices are banners that name themselves)
     let base = |title_key: Option<&str>| {

@@ -428,7 +428,7 @@ impl RenderOnce for TimeChart {
         let leave = hover.clone();
 
         let title = div()
-            .text_size(theme::FS_12)
+            .text_size(theme::FS_SMALL)
             .text_color(p.text_2)
             .font_weight(FontWeight::SEMIBOLD)
             .flex_none()
@@ -439,7 +439,7 @@ impl RenderOnce for TimeChart {
                     // A long value wraps under itself instead of leaving the card
                     .min_w_0()
                     .text_right()
-                    .text_size(theme::FS_16)
+                    .text_size(theme::FS_LARGE)
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(value_color)
                     .child(self.text(self.series.first(), at)),
@@ -451,7 +451,7 @@ impl RenderOnce for TimeChart {
                 .flex_wrap()
                 .gap_x(theme::S4)
                 .gap_y(theme::S1)
-                .text_size(theme::FS_12)
+                .text_size(theme::FS_SMALL)
                 .text_color(p.text_2)
                 .children(self.series.iter().enumerate().map(|(i, s)| {
                     div()
@@ -462,7 +462,7 @@ impl RenderOnce for TimeChart {
                         .child(s.label.clone().unwrap_or_default())
                         .child(
                             div()
-                                .text_size(theme::FS_14)
+                                .text_size(theme::FS_BODY)
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(p.text)
                                 .child(self.text(Some(s), at)),
@@ -492,7 +492,7 @@ impl RenderOnce for TimeChart {
             .flex_col()
             .justify_between()
             .items_end()
-            .text_size(theme::FS_12)
+            .text_size(theme::FS_SMALL)
             .text_color(p.text_3)
             .child((self.format)(hi))
             .child((self.format)(lo));
@@ -500,7 +500,7 @@ impl RenderOnce for TimeChart {
             .flex()
             .justify_between()
             .mr(SCALE_W + theme::S2)
-            .text_size(theme::FS_12)
+            .text_size(theme::FS_SMALL)
             .text_color(p.text_3)
             .child(geo::axis_start_text(span))
             .child("0 s");

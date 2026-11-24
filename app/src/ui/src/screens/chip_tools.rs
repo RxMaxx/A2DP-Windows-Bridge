@@ -34,7 +34,7 @@ const EXAMPLE: &str = "# Read Local Version, then BD_ADDR\nhci 1001\nhci 1009\n"
 
 /// Lines of a script or its answer (`.chip-lines`)
 fn chip_lines(text: String) -> Div {
-    div().font_family(theme::FONT_MONO).text_size(theme::FS_12).child(text)
+    div().font_family(theme::FONT_MONO).text_size(theme::FS_SMALL).child(text)
 }
 
 pub struct ChipTools {

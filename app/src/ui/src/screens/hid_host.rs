@@ -191,7 +191,7 @@ pub fn hid_passkey_block(passkey: &HidPasskey, added: &[HidDevice], cx: &App) ->
         .child(
             div()
                 .font_family(theme::FONT_MONO)
-                .text_size(theme::FS_28)
+                .text_size(theme::FS_PAGE)
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(passkey.passkey.clone()),
         )
@@ -572,8 +572,9 @@ impl Render for HidDevices {
             let rows = candidates
                 .iter()
                 .map(|d| {
-                    let sub = (!d.name.is_empty())
-                        .then(|| ui::mono(d.address.clone()).text_size(theme::FS_12).text_color(cx.palette().text_2));
+                    let sub = (!d.name.is_empty()).then(|| {
+                        ui::mono(d.address.clone()).text_size(theme::FS_SMALL).text_color(cx.palette().text_2)
+                    });
                     let add = ui::button(
                         SharedString::from(format!("hid-add-{}", d.address)),
                         t("ui.devices.add"),
