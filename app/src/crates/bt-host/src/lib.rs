@@ -136,6 +136,9 @@ const THREAD_END_STEP: Duration = Duration::from_millis(20);
 const THREAD_END_STEPS: u32 = 500;
 /// connect_retrying: attempts in all
 pub const CONNECT_ATTEMPTS: u32 = 3;
+/// How long the link a device opens itself may take to come up after the
+/// controller refused our page for it
+const CROSSED_LINK_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How to reach the controller
 #[derive(Debug, Clone)]
@@ -316,6 +319,9 @@ pub enum ConnectFailure {
     Refused,
     /// Authentication / security refused, e.g. a stale link key
     AuthFailed,
+    /// The device was connecting to us at that moment: the controller
+    /// refused our own page (ACL Connection Already Exists)
+    Crossed,
     /// The adapter or BTstack stopped working: only a new stack helps
     Stalled,
     /// Cancelled by the user
@@ -1530,6 +1536,7 @@ impl BtHost {
         };
         let mut repaired = false;
         let mut collided = false;
+        let mut crossed = false;
         let mut attempt = 1;
         loop {
             let err = match self.connect(addr) {
@@ -1583,7 +1590,27 @@ impl BtHost {
                 self.drop_acl_link(Duration::from_secs(5));
                 continue;
             }
-            let transient = matches!(err, ConnectFailure::NoAnswer | ConnectFailure::LinkLost);
+            if err == ConnectFailure::Crossed && !crossed {
+                // Headphones that were just turned on page the PC they used
+                // last. The controller then refuses our page, and the link
+                // of theirs comes up a moment later: connect over that one.
+                crossed = true;
+                let up = self.shared.wait(CROSSED_LINK_TIMEOUT, true, |s| s.acl_link_to(&addr).is_some());
+                if up == Wait::Cancelled || cancelled() {
+                    return Err(ConnectFailure::Cancelled);
+                }
+                tracing::info!(
+                    "the device was connecting at the same moment: {}",
+                    if up == Wait::Done {
+                        "connecting over its link"
+                    } else {
+                        "its link did not come up, trying again"
+                    }
+                );
+                continue;
+            }
+            let transient =
+                matches!(err, ConnectFailure::NoAnswer | ConnectFailure::LinkLost | ConnectFailure::Crossed);
             if !transient || attempt >= CONNECT_ATTEMPTS {
                 return Err(err);
             }

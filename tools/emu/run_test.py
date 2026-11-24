@@ -1388,6 +1388,13 @@ LINK_CASES = {
         ('bluecaster.log', r'Starting again.*HCI disconnection.*state Streaming', True),
         ('bluecaster.log', r'Bluetooth stack stalled', False),
     ]),
+    # Headphones just turned on page the PC while it pages them: its
+    # controller refuses the page, and the connection goes over their link
+    'crossed-page': (['--crossed-page'], ['--duration', '3'], [
+        ('bluecaster.log', r'signaling connection failed \(0x0b\).*connecting over its link.*state Streaming', True),
+        ('bluecaster.log', r'state Error', False),
+        ('sink.log', r'paged the PC', True),
+    ]),
     # Headphones with Delay Reporting: their playout delay reaches the log
     'delay-report': (['--delay-report', '187.5'], ['--duration', '3'], [
         ('bluecaster.log', r'supports delay reporting.*device delay report: 187\.5 ms', True),
