@@ -189,6 +189,7 @@ interface Results {
   "adapter.check_script": ScriptCheck;
   "adapter.run_script": ScriptResult;
   "audio.devices": AudioDevice[];
+  "audio.input_devices": AudioDevice[];
   "audio.apps": AudioApp[];
   "audio.install_vb_cable": boolean;
   "audio.uninstall_cable": boolean;
@@ -219,6 +220,7 @@ interface Results {
   "auracast.mix_preset_save": AuracastMixState;
   "auracast.mix_preset_delete": AuracastMixState;
   "auracast.set_source": boolean;
+  "auracast.set_follow_volume": boolean;
 }
 
 export type ResultOf<M extends MethodName> = M extends keyof Results

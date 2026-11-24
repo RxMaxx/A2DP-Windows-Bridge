@@ -74,12 +74,13 @@ pub fn access(m: &Method) -> Access {
             Open
         }
         // Developer mode only, as stream.start_broadcast: the mix of a
-        // broadcast and its source (the test tone or system audio)
+        // broadcast, its source and whether its volume follows Windows
         Method::AuracastMixGet { .. }
         | Method::AuracastMixSet { .. }
         | Method::AuracastMixPresetSave { .. }
         | Method::AuracastMixPresetDelete { .. }
-        | Method::AuracastSetSource { .. } => Open,
+        | Method::AuracastSetSource { .. }
+        | Method::AuracastSetFollowVolume { .. } => Open,
         // Developer mode and what it sets, the chip and firmware settings
         Method::SettingsSet { .. } => Depends,
         Method::AdapterList
@@ -95,7 +96,11 @@ pub fn access(m: &Method) -> Access {
         // Raw commands to the chip
         | Method::AdapterProbe { .. }
         | Method::AdapterRunScript { .. } => Admin,
-        Method::AudioDevices | Method::AudioApps | Method::AudioMixer | Method::AudioMixerSet { .. } => Open,
+        Method::AudioDevices
+        | Method::AudioInputDevices
+        | Method::AudioApps
+        | Method::AudioMixer
+        | Method::AudioMixerSet { .. } => Open,
         // Installs or removes a driver
         Method::AudioInstallVbCable | Method::AudioUninstallCable { .. } => Admin,
         // Log lines hold counts and states only

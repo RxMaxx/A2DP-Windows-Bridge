@@ -7,6 +7,7 @@
 
 pub mod adapter;
 pub mod auracast_mix;
+pub mod broadcast_volume;
 pub mod compat;
 pub mod default_input;
 pub mod devices;

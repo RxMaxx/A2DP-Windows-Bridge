@@ -29,9 +29,9 @@ pub use apps::{
     APP_CAPTURE_MIN_BUILD, AudioApp, app_capture_supported, audio_apps, find_process, process_exited, windows_build,
 };
 pub use devices::{
-    DeviceInfo, EndpointVolume, MixFormat, default_capture_device, default_render_device, mic_capture_active,
-    mic_recorders, mix_format, mix_rate, paired_capture_device, render_devices, set_default_capture_device,
-    set_default_render_device,
+    DeviceInfo, EndpointVolume, MixFormat, capture_devices, default_capture_device, default_render_device,
+    mic_capture_active, mic_recorders, mix_format, mix_rate, paired_capture_device, render_devices,
+    set_default_capture_device, set_default_render_device,
 };
 pub use format::{DEFAULT_RATE, Format, SampleFormat};
 pub use mixer::{MixerApp, SYSTEM_SOUNDS, mixer_apps, set_mixer_app};
@@ -56,6 +56,9 @@ pub enum Source {
     /// build >= [`APP_CAPTURE_MIN_BUILD`]). Float stereo at the requested
     /// rate (48 kHz by default), converted by Windows.
     Application { process_id: u32 },
+    /// This capture endpoint (a microphone, line in or a cable's recording
+    /// side), recorded as it is: Windows' recording level is in the audio
+    CaptureDevice { id: String },
     /// 1 kHz left / 1.5 kHz right, amplitude 0.5, f32 stereo, 10 ms blocks,
     /// paced in real time (48 kHz unless a rate is given)
     TestTone,
@@ -269,6 +272,13 @@ impl Capture {
             }
             Source::Application { process_id } => {
                 let o = loopback::Opened::open(loopback::Target::Process(*process_id), options)?;
+                (o.format, o.channel_mask, Backend::Loopback(o))
+            }
+            Source::CaptureDevice { id } => {
+                if id.is_empty() {
+                    return Err(CaptureError::DeviceNotFound(String::new()));
+                }
+                let o = loopback::Opened::open(loopback::Target::Input(id.clone()), options)?;
                 (o.format, o.channel_mask, Backend::Loopback(o))
             }
             Source::TestTone => {
@@ -503,6 +513,19 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, CaptureError::DeviceNotFound(_)), "{err}");
+    }
+
+    #[test]
+    fn a_recording_device_needs_a_recording_id() {
+        let open = |id: &str| Capture::open(&Source::CaptureDevice { id: id.into() }, &CaptureOptions::default());
+        assert!(matches!(open("").unwrap_err(), CaptureError::DeviceNotFound(_)));
+        let err = open("{0.0.1.00000000}.{00000000-0000-0000-0000-000000000000}").unwrap_err();
+        assert!(matches!(err, CaptureError::DeviceNotFound(_)), "{err}");
+        // An output device is not recorded from
+        if let Some(output) = default_render_device() {
+            let err = open(&output).unwrap_err();
+            assert!(matches!(err, CaptureError::DeviceNotFound(_)), "{err}");
+        }
     }
 
     #[test]

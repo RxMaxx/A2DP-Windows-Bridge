@@ -146,6 +146,7 @@ fn timeout_for(method: &str, params: &Value) -> Duration {
         | "adapter.list"
         | "adapter.firmware_files"
         | "audio.devices"
+        | "audio.input_devices"
         | "audio.apps"
         | "diag.info"
         | "diag.capture_start"

@@ -1269,6 +1269,46 @@ pub struct BroadcastStream {
     pub source: String,
     pub source_id: Option<String>,
     pub source_name: Option<String>,
+    /// The broadcast's level 0..127; None: the last one
+    pub volume: Option<u8>,
+    /// The level follows the Windows volume; None: as before
+    pub follow_volume: Option<bool>,
+}
+
+/// The source of a broadcast (stream.start_broadcast, auracast.set_source):
+/// "tone", "loopback" (also empty), "output" / "virtual" (the loopback of
+/// the output device `id`) or "input" (the recording device `id`). None:
+/// "app", which the broadcast refuses itself (error.le_audio_capture).
+pub fn broadcast_source(
+    kind: &str,
+    id: Option<&str>,
+    name: Option<&str>,
+    method: &str,
+) -> Result<Option<SourceRequest>, ErrorInfo> {
+    let kind = kind.trim().to_ascii_lowercase();
+    let id = id.map(str::trim).unwrap_or_default().to_string();
+    let name = name.map(str::trim).filter(|n| !n.is_empty()).map_or_else(|| id.clone(), str::to_string);
+    let device = |what: &str| {
+        if id.is_empty() {
+            Err(bad_request("stream.bad_source", method, format!("source \"{kind}\" needs the {what}'s source_id")))
+        } else {
+            Ok(())
+        }
+    };
+    Ok(Some(match kind.as_str() {
+        "tone" => SourceRequest::TestTone,
+        "" | "loopback" => SourceRequest::SystemLoopback,
+        "output" | "virtual" => {
+            device("output device")?;
+            SourceRequest::OutputDevice { id, name, auto_switch: false }
+        }
+        "input" => {
+            device("recording device")?;
+            SourceRequest::InputDevice { id, name }
+        }
+        "app" => return Ok(None),
+        other => return Err(bad_request("stream.bad_source", method, format!("unknown source \"{other}\""))),
+    }))
 }
 
 /// What to broadcast for stream.start_broadcast: the source as for
@@ -1299,17 +1339,22 @@ pub fn broadcast_request(b: &BroadcastStream, legacy_max_media_payload: u16) -> 
     if b.mono == Some(true) && !one_channel {
         return Err(bad_request("stream.bad_channels", METHOD, "mono and split cannot be used together".into()));
     }
+    let source = broadcast_source(&b.source, b.source_id.as_deref(), b.source_name.as_deref(), METHOD)?;
     let c = CustomStream {
         device: "00:00:00:00:00:00".into(),
         device_name: Some(b.name.clone()),
         codec: "auto".into(),
         quality: "hq".into(),
-        source: b.source.clone(),
+        // "app" as the stream refuses it, the others set below
+        source: if source.is_some() { "loopback".into() } else { b.source.clone() },
         source_id: b.source_id.clone(),
         source_name: b.source_name.clone(),
         ..CustomStream::default()
     };
     let mut req = custom_request(&c, legacy_max_media_payload)?;
+    if let Some(source) = source {
+        req.source = source;
+    }
     req.le = Some(bt_host::LeRequest {
         preset: Some(preset.into()),
         broadcast: Some(bt_host::LeBroadcast {
@@ -1869,6 +1914,26 @@ fn default_mic_output(p: &mut CoreProfile, stream: &StreamStatus, list: &[CorePr
 }
 
 /// VB-CABLE and the Hi-Fi Cable among Windows' outputs
+/// A Windows device as audio.devices and audio.input_devices give it, with
+/// its mix format
+fn audio_device(d: audio_capture::DeviceInfo) -> AudioDevice {
+    let mix = session_host::devices::mix_format(Some(&d.id));
+    AudioDevice {
+        mix_rate: mix.map(|m| m.rate),
+        mix_channels: mix.map(|m| m.channels),
+        mix_bits: mix.map(|m| m.bits),
+        id: d.id,
+        name: d.name,
+        short_name: d.short_name,
+        adapter_name: d.adapter_name,
+        is_default: d.is_default,
+        is_virtual: d.is_virtual,
+        is_display: d.is_display,
+        capture_name: d.capture_name,
+        capture_rate: d.capture_rate,
+    }
+}
+
 fn cables(devices: &[audio_capture::DeviceInfo]) -> profiles::Cables {
     let cable = |d: &audio_capture::DeviceInfo| profiles::Cable { id: d.id.clone(), name: d.name.clone() };
     profiles::Cables { vb: default_cable(devices).map(cable), hifi: hifi_cable(devices).map(cable) }
@@ -3158,6 +3223,12 @@ impl CoreState {
         let settings = self.service.settings();
         let mut req = broadcast_request(b, settings.legacy_max_media_payload())?;
         req.mute_output = settings.mutes_output();
+        if let Some(level) = b.volume {
+            bluecaster_core::broadcast_volume::set_level(level);
+        }
+        if let Some(follow) = b.follow_volume {
+            bluecaster_core::broadcast_volume::set_follow(follow);
+        }
         tracing::info!("broadcast \"{}\": quality {}, source {}", b.name, b.quality, req.source);
         self.begin_stream(req, None);
         Ok(())
@@ -3398,6 +3469,11 @@ impl CoreState {
     /// Asks the headphones for this volume (0..127): AVRCP, or VCP for LE
     /// Audio. Nothing without a stream.
     fn request_volume(&self, volume: u8) {
+        // A broadcast's level: its receivers have no volume of ours
+        if bluecaster_core::broadcast_volume::live() {
+            bluecaster_core::broadcast_volume::set_level(volume);
+            return;
+        }
         if let Some(h) = self.service.host() {
             // LE Audio: through VCP, not AVRCP (issue #86)
             if self.service.le_stream().is_none() || !h.le_request_volume(volume.min(127)) {
@@ -3831,6 +3907,8 @@ impl CoreState {
                 source,
                 source_id,
                 source_name,
+                volume,
+                follow_volume,
             } => {
                 let b = BroadcastStream {
                     name,
@@ -3843,6 +3921,8 @@ impl CoreState {
                     source,
                     source_id,
                     source_name,
+                    volume,
+                    follow_volume,
                 };
                 self.start_broadcast(&b).map(|()| Value::Null)
             }
@@ -3970,20 +4050,23 @@ impl CoreState {
                 Ok(Value::Null)
             }
             Method::ProfileSave { profile, original_name } => self.save_profile(&profile, original_name),
-            Method::AuracastSetSource { source } => {
+            Method::AuracastSetSource { source, source_id, source_name } => {
                 self.developer_only()?;
-                let source = match source.trim().to_ascii_lowercase().as_str() {
-                    "tone" => bluecaster_core::stream::SourceRequest::TestTone,
-                    "" | "loopback" => bluecaster_core::stream::SourceRequest::SystemLoopback,
-                    other => {
-                        return Err(bad_request(
+                const METHOD: &str = "auracast.set_source";
+                let source = broadcast_source(&source, source_id.as_deref(), source_name.as_deref(), METHOD)?
+                    .ok_or_else(|| {
+                        bad_request(
                             "stream.bad_source",
-                            "auracast.set_source",
-                            format!("unknown source \"{other}\""),
-                        ));
-                    }
-                };
+                            METHOD,
+                            "application capture is not supported with LE Audio".into(),
+                        )
+                    })?;
                 Ok(Value::Bool(self.service.change_source(source)))
+            }
+            Method::AuracastSetFollowVolume { follow } => {
+                self.developer_only()?;
+                bluecaster_core::broadcast_volume::set_follow(follow);
+                Ok(Value::Bool(follow && self.service.broadcast_follows()))
             }
             Method::AuracastMixGet { channels, rear } => {
                 self.developer_only()?;
@@ -4408,27 +4491,18 @@ impl CoreState {
                     if let Ok(d) = &devices {
                         me.watch_cables(d);
                     }
-                    let list: Vec<AudioDevice> = devices
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|d| {
-                            let mix = session_host::devices::mix_format(Some(&d.id));
-                            AudioDevice {
-                                mix_rate: mix.map(|m| m.rate),
-                                mix_channels: mix.map(|m| m.channels),
-                                mix_bits: mix.map(|m| m.bits),
-                                id: d.id,
-                                name: d.name,
-                                short_name: d.short_name,
-                                adapter_name: d.adapter_name,
-                                is_default: d.is_default,
-                                is_virtual: d.is_virtual,
-                                is_display: d.is_display,
-                                capture_name: d.capture_name,
-                                capture_rate: d.capture_rate,
-                            }
-                        })
-                        .collect();
+                    let list: Vec<AudioDevice> = devices.unwrap_or_default().into_iter().map(audio_device).collect();
+                    Ok(json(&list))
+                }))
+                .await
+            }
+            Method::AudioInputDevices => {
+                blocking(Box::new(|_| {
+                    let devices = session_host::devices::capture_devices().unwrap_or_else(|e| {
+                        tracing::warn!("IPC: audio.input_devices: {e}");
+                        Vec::new()
+                    });
+                    let list: Vec<AudioDevice> = devices.into_iter().map(audio_device).collect();
                     Ok(json(&list))
                 }))
                 .await
@@ -4876,6 +4950,42 @@ mod tests {
                 if split == Some(true) { bt_host::BroadcastLayout::Split } else { bt_host::BroadcastLayout::Stereo };
             assert_eq!((le.mono, le.layout), (mono.unwrap_or(false), layout));
         }
+    }
+
+    #[test]
+    fn a_broadcast_takes_an_output_or_a_recording_device() {
+        let b = |source: &str, id: Option<&str>, name: Option<&str>| BroadcastStream {
+            name: "Speakers".into(),
+            quality: "hq".into(),
+            source: source.into(),
+            source_id: id.map(Into::into),
+            source_name: name.map(Into::into),
+            ..BroadcastStream::default()
+        };
+        let source = |s, id, name| broadcast_request(&b(s, id, name), 0).map(|r| r.source);
+        assert_eq!(source("tone", None, None).unwrap(), SourceRequest::TestTone);
+        assert_eq!(source("loopback", None, None).unwrap(), SourceRequest::SystemLoopback);
+        assert_eq!(source("", None, None).unwrap(), SourceRequest::SystemLoopback);
+        let output = SourceRequest::OutputDevice { id: "{spk}".into(), name: "Speakers".into(), auto_switch: false };
+        assert_eq!(source("output", Some("{spk}"), Some("Speakers")).unwrap(), output);
+        // An older client's virtual device: the same loopback, the default output left alone
+        assert_eq!(source("Virtual", Some("{spk}"), Some("Speakers")).unwrap(), output);
+        assert_eq!(
+            source("input", Some("{mic}"), Some("Microphone")).unwrap(),
+            SourceRequest::InputDevice { id: "{mic}".into(), name: "Microphone".into() }
+        );
+        // No name: its id stands in
+        assert_eq!(
+            source("input", Some("{mic}"), None).unwrap(),
+            SourceRequest::InputDevice { id: "{mic}".into(), name: "{mic}".into() }
+        );
+        // Application capture as before: the broadcast refuses it
+        assert_eq!(source("app", Some("x.exe"), None).unwrap(), SourceRequest::Application { exe: "x.exe".into() });
+        for (kind, id) in [("input", None), ("output", Some(" ")), ("mic", Some("{mic}"))] {
+            let e = source(kind, id, None).expect_err(kind);
+            assert_eq!(e.code, "stream.bad_source", "{kind}");
+        }
+        assert!(broadcast_source("app", None, None, "auracast.set_source").unwrap().is_none());
     }
 
     #[test]
