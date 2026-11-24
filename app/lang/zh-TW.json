@@ -1118,7 +1118,7 @@
   "error.driver_restore_other_radio": "驅動程式已還原，但 Windows 一次只使用一個藍牙介面卡，而目前使用的是 %s。若要在 Windows 中使用此介面卡，請在裝置管理員中停用那個介面卡，然後重新插拔此介面卡。",
   "ui.v1_running.title": "另一個 BlueCaster 正在執行",
   "ui.v1_running.text": "兩個 BlueCaster 無法共用藍牙介面卡。請從另一個 BlueCaster 的系統匣圖示將其結束。",
-  "help.third_party": "另包含 libldac (Apache-2.0)、libopenaptx (LGPL-2.1+, © 2017 Aurelien Jacobs, © 2018-2020 Pali Rohár)、Fraunhofer FDK AAC、Bluedroid SBC (Apache-2.0)、LHDC V5 編碼器 (Apache-2.0，衍生自 AOSP；FFT 來自 KISS FFT，BSD-3-Clause)、libopus (BSD-3-Clause)、liblc3 (Apache-2.0)、Tauri、SolidJS 以及其他 Rust 與 JavaScript 程式庫。授權條款全文位於程式所在位置的 \"licenses\" 資料夾中。",
+  "help.third_party": "另包含 libldac (Apache-2.0)、libopenaptx (LGPL-2.1+, © 2017 Aurelien Jacobs, © 2018-2020 Pali Rohár)、Fraunhofer FDK AAC、Bluedroid SBC (Apache-2.0)、LHDC V5 編碼器 (Apache-2.0，衍生自 AOSP；FFT 來自 KISS FFT，BSD-3-Clause)、libopus (BSD-3-Clause)、liblc3 (Apache-2.0)、GPUI 以及其他 Rust 程式庫。授權條款全文位於程式所在位置的 \"licenses\" 資料夾中。",
   "ui.settings.core_version": "核心 %s",
   "dbgc.col_step": "步驟",
   "dbgc.col_status": "狀態",

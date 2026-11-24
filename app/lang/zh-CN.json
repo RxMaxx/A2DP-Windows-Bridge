@@ -1118,7 +1118,7 @@
   "error.driver_restore_other_radio": "驱动程序已恢复，但 Windows 一次只能使用一个蓝牙适配器，而 %s 正在使用中。要在 Windows 中使用此适配器，请在设备管理器中禁用那个适配器，然后重新插拔此适配器。",
   "ui.v1_running.title": "另一个 BlueCaster 正在运行",
   "ui.v1_running.text": "两个 BlueCaster 不能同时使用蓝牙适配器。请通过另一个 BlueCaster 的托盘图标将其退出。",
-  "help.third_party": "还包含 libldac (Apache-2.0)、libopenaptx (LGPL-2.1+, © 2017 Aurelien Jacobs, © 2018-2020 Pali Rohár)、Fraunhofer FDK AAC、Bluedroid SBC (Apache-2.0)、LHDC V5 编码器（Apache-2.0，源自 AOSP；FFT 来自 KISS FFT, BSD-3-Clause）、libopus (BSD-3-Clause)、liblc3 (Apache-2.0)、Tauri、SolidJS 以及其他 Rust 和 JavaScript 库。许可证文本位于程序所在位置的 \"licenses\" 文件夹中。",
+  "help.third_party": "还包含 libldac (Apache-2.0)、libopenaptx (LGPL-2.1+, © 2017 Aurelien Jacobs, © 2018-2020 Pali Rohár)、Fraunhofer FDK AAC、Bluedroid SBC (Apache-2.0)、LHDC V5 编码器（Apache-2.0，源自 AOSP；FFT 来自 KISS FFT, BSD-3-Clause）、libopus (BSD-3-Clause)、liblc3 (Apache-2.0)、GPUI 以及其他 Rust 库。许可证文本位于程序所在位置的 \"licenses\" 文件夹中。",
   "ui.settings.core_version": "核心 %s",
   "dbgc.col_step": "步骤",
   "dbgc.col_status": "状态",

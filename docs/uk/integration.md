@@ -11,7 +11,7 @@ nav_order: 2.7
 Як сторонній інструмент обмінюється даними з ядром BlueCaster: показує стан потоку, запускає й зупиняє профілі, задає гучність або звертається до власних служб навушників через Bluetooth-з'єднання BlueCaster. Інструменти, які це вміють, перелічено на сторінці [Сумісні програми](works-with).
 
 {: .warning }
-> Протокол ще може змінюватися під час бета-версій 2.0.2. Джерелом істини є [`app/src/crates/ipc/src/protocol.rs`](https://github.com/SeiyaFunaokaJP/BlueCaster/blob/main/app/src/crates/ipc/src/protocol.rs) і згенеровані з нього типи TypeScript у [`app/src/ui/src/ipc/bindings`](https://github.com/SeiyaFunaokaJP/BlueCaster/tree/main/app/src/ui/src/ipc/bindings). Ця сторінка пояснює, як ними користуватися, але не перелічує всіх полів.
+> Протокол ще може змінюватися під час бета-версій 2.0.2. Джерелом істини є [`app/src/crates/ipc/src/protocol.rs`](https://github.com/SeiyaFunaokaJP/BlueCaster/blob/main/app/src/crates/ipc/src/protocol.rs) і згенеровані з нього типи TypeScript у [`app/src/crates/ipc/bindings`](https://github.com/SeiyaFunaokaJP/BlueCaster/tree/main/app/src/crates/ipc/bindings). Ця сторінка пояснює, як ними користуватися, але не перелічує всіх полів.
 
 ## Зміст
 {: .no_toc .text-delta }

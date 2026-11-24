@@ -11,7 +11,7 @@ nav_order: 2.7
 サードパーティのツールが BlueCaster のコアと通信する方法を説明します。ツールは、ストリームの状態の表示、プロファイルの開始と停止、音量の設定を行えるほか、BlueCaster の Bluetooth リンクを通してヘッドホン自身のサービスも利用できます。こうしたツールは[連携するツール](works-with)に載せています。
 
 {: .warning }
-> 2.0.2 のベータ期間中は、プロトコルが変わる可能性があります。仕様の正となるのは [`app/src/crates/ipc/src/protocol.rs`](https://github.com/SeiyaFunaokaJP/BlueCaster/blob/main/app/src/crates/ipc/src/protocol.rs) と、そこから生成した [`app/src/ui/src/ipc/bindings`](https://github.com/SeiyaFunaokaJP/BlueCaster/tree/main/app/src/ui/src/ipc/bindings) の TypeScript の型です。このページではその使い方を説明しており、すべてのフィールドは挙げていません。
+> 2.0.2 のベータ期間中は、プロトコルが変わる可能性があります。仕様の正となるのは [`app/src/crates/ipc/src/protocol.rs`](https://github.com/SeiyaFunaokaJP/BlueCaster/blob/main/app/src/crates/ipc/src/protocol.rs) と、そこから生成した [`app/src/crates/ipc/bindings`](https://github.com/SeiyaFunaokaJP/BlueCaster/tree/main/app/src/crates/ipc/bindings) の TypeScript の型です。このページではその使い方を説明しており、すべてのフィールドは挙げていません。
 
 ## 目次
 {: .no_toc .text-delta }

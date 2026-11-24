@@ -11,7 +11,7 @@ nav_order: 2.7
 Cómo se comunica una herramienta de terceros con el núcleo de BlueCaster: mostrar el estado de la transmisión, iniciar y detener perfiles, ajustar el volumen o acceder a los servicios propios de los auriculares a través del enlace Bluetooth de BlueCaster. Las herramientas que lo hacen aparecen en [Funciona con](works-with).
 
 {: .warning }
-> El protocolo aún puede cambiar durante las betas de 2.0.2. La fuente de referencia es [`app/src/crates/ipc/src/protocol.rs`](https://github.com/SeiyaFunaokaJP/BlueCaster/blob/main/app/src/crates/ipc/src/protocol.rs) y los tipos de TypeScript generados a partir de él en [`app/src/ui/src/ipc/bindings`](https://github.com/SeiyaFunaokaJP/BlueCaster/tree/main/app/src/ui/src/ipc/bindings). Esta página explica cómo usarlos; no enumera todos los campos.
+> El protocolo aún puede cambiar durante las betas de 2.0.2. La fuente de referencia es [`app/src/crates/ipc/src/protocol.rs`](https://github.com/SeiyaFunaokaJP/BlueCaster/blob/main/app/src/crates/ipc/src/protocol.rs) y los tipos de TypeScript generados a partir de él en [`app/src/crates/ipc/bindings`](https://github.com/SeiyaFunaokaJP/BlueCaster/tree/main/app/src/crates/ipc/bindings). Esta página explica cómo usarlos; no enumera todos los campos.
 
 ## Contenido
 {: .no_toc .text-delta }

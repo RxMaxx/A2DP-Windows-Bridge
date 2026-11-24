@@ -11,7 +11,7 @@ nav_order: 2.7
 本頁說明第三方工具如何與 BlueCaster 核心通訊：顯示串流狀態、啟動及停止設定檔、設定音量，或透過 BlueCaster 的藍牙連結存取耳機本身的服務。有這類功能的工具列在 [搭配使用的工具](works-with)。
 
 {: .warning }
-> 在 2.0.2 搶先版期間，通訊協定仍可能變更。以 [`app/src/crates/ipc/src/protocol.rs`](https://github.com/SeiyaFunaokaJP/BlueCaster/blob/main/app/src/crates/ipc/src/protocol.rs)，以及由它產生、位於 [`app/src/ui/src/ipc/bindings`](https://github.com/SeiyaFunaokaJP/BlueCaster/tree/main/app/src/ui/src/ipc/bindings) 的 TypeScript 型別為準。本頁說明如何使用，不會列出每個欄位。
+> 在 2.0.2 搶先版期間，通訊協定仍可能變更。以 [`app/src/crates/ipc/src/protocol.rs`](https://github.com/SeiyaFunaokaJP/BlueCaster/blob/main/app/src/crates/ipc/src/protocol.rs)，以及由它產生、位於 [`app/src/crates/ipc/bindings`](https://github.com/SeiyaFunaokaJP/BlueCaster/tree/main/app/src/crates/ipc/bindings) 的 TypeScript 型別為準。本頁說明如何使用，不會列出每個欄位。
 
 ## 目錄
 {: .no_toc .text-delta }

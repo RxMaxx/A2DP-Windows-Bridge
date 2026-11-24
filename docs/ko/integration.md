@@ -11,7 +11,7 @@ nav_order: 2.7
 타사 도구가 BlueCaster 코어와 통신하는 방법입니다. 스트림 상태를 표시하고, 프로필을 시작·중지하고, 볼륨을 설정하거나, BlueCaster의 Bluetooth 링크를 통해 헤드폰 자체의 서비스에 접근할 수 있습니다. 이런 기능을 쓰는 도구는 [함께 쓰는 도구](works-with)에 정리되어 있습니다.
 
 {: .warning }
-> 2.0.2 베타 기간에는 프로토콜이 아직 바뀔 수 있습니다. 정확한 정의는 [`app/src/crates/ipc/src/protocol.rs`](https://github.com/SeiyaFunaokaJP/BlueCaster/blob/main/app/src/crates/ipc/src/protocol.rs)와, 여기서 생성한 [`app/src/ui/src/ipc/bindings`](https://github.com/SeiyaFunaokaJP/BlueCaster/tree/main/app/src/ui/src/ipc/bindings)의 TypeScript 타입을 기준으로 합니다. 이 페이지는 사용법을 설명할 뿐, 모든 필드를 나열하지는 않습니다.
+> 2.0.2 베타 기간에는 프로토콜이 아직 바뀔 수 있습니다. 정확한 정의는 [`app/src/crates/ipc/src/protocol.rs`](https://github.com/SeiyaFunaokaJP/BlueCaster/blob/main/app/src/crates/ipc/src/protocol.rs)와, 여기서 생성한 [`app/src/crates/ipc/bindings`](https://github.com/SeiyaFunaokaJP/BlueCaster/tree/main/app/src/crates/ipc/bindings)의 TypeScript 타입을 기준으로 합니다. 이 페이지는 사용법을 설명할 뿐, 모든 필드를 나열하지는 않습니다.
 
 ## 목차
 {: .no_toc .text-delta }
