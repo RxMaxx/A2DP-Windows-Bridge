@@ -177,6 +177,7 @@ impl From<ui_host::Status> for ConnStatus {
             Status::ServiceNeedsUpdate { version, app } => ConnStatus::ServiceNeedsUpdate { version, app },
             Status::ServiceNewer { version, app } => ConnStatus::ServiceNewer { version, app },
             Status::ServiceStopped => ConnStatus::ServiceStopped,
+            Status::ServiceUntrusted { reason } => ConnStatus::ServiceUntrusted { reason },
         }
     }
 }

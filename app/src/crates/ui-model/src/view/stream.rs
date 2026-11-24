@@ -267,6 +267,7 @@ pub enum SourceIcon {
     MusicNote2,
     DesktopSpeaker,
     Speaker2,
+    Mic,
     WindowApps,
 }
 
@@ -287,6 +288,8 @@ pub fn source_text(src: &SourceInfo, profile: Option<&Profile>) -> SourceText {
         "tone" => plain(SourceIcon::MusicNote2, t("receiver.source_tone")),
         "virtual" => plain(SourceIcon::DesktopSpeaker, or(&src.name, "capture.virtual")),
         "output" => plain(SourceIcon::Speaker2, or(&src.name, "capture.output")),
+        // A recording device (an Auracast broadcast's source)
+        "input" => plain(SourceIcon::Mic, or(&src.name, "capture.input")),
         "app" => {
             let known = profile
                 .filter(|p| !p.app_exe.is_empty() && p.app_exe.to_lowercase() == src.name.to_lowercase())

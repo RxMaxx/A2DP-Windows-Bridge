@@ -2010,10 +2010,17 @@ pub enum Method {
     /// "separate", "subgroups" or "off"; older names quad, front_rear,
     /// pairs, rear_subgroups, subgroups), unknown: error stream.bad_layout;
     /// `split`: true is layout "split" (when no `layout` is given);
-    /// `source` / `source_id` / `source_name` as for stream.start_custom
-    /// ("app" fails with error.le_audio_capture). Error developer.off while
-    /// developer mode is off; a name or code out of range fails the stream
-    /// (error.auracast).
+    /// `source`: "tone", "loopback" (system audio), "output" (the loopback
+    /// of the output device `source_id`, "virtual" as well) or "input" (the
+    /// recording device `source_id`, audio.input_devices), with its name in
+    /// `source_name` ("app" fails with error.le_audio_capture, another or a
+    /// device without its id with stream.bad_source); `volume`: the
+    /// broadcast's level 0..127 (absent: the last one, at first 127), then
+    /// the stream's volume (stream.set_volume moves it); `follow_volume`:
+    /// the level and the Windows volume of the device the audio comes from
+    /// act as one (auracast.set_follow_volume; absent: as before, at first
+    /// off). Error developer.off while developer mode is off; a name or
+    /// code out of range fails the stream (error.auracast).
     #[serde(rename = "stream.start_broadcast")]
     StreamStartBroadcast {
         name: String,
@@ -2041,8 +2048,15 @@ pub enum Method {
         #[ts(optional = nullable)]
         #[serde(default)]
         source_name: Option<String>,
+        #[ts(optional = nullable)]
+        #[serde(default)]
+        volume: Option<u8>,
+        #[ts(optional = nullable)]
+        #[serde(default)]
+        follow_volume: Option<bool>,
     },
-    /// AVRCP absolute volume 0..127
+    /// AVRCP absolute volume 0..127; while broadcasting, the broadcast's
+    /// level
     #[serde(rename = "stream.set_volume")]
     StreamSetVolume { volume: u8 },
     /// Moves the headphone volume by `delta` (-127..127, within 0..127)
@@ -2168,10 +2182,30 @@ pub enum Method {
     /// -> AuracastMixState
     #[serde(rename = "auracast.mix_preset_delete")]
     AuracastMixPresetDelete { name: String },
-    /// -> bool: the running broadcast takes "tone" or "loopback" (system
-    /// audio) in place, its broadcasts staying up; false: none runs
+    /// -> bool: the running broadcast takes the source in place (`source`,
+    /// `source_id`, `source_name` as for stream.start_broadcast), its
+    /// broadcasts staying up; false: none runs. Error stream.bad_source.
     #[serde(rename = "auracast.set_source")]
-    AuracastSetSource { source: String },
+    AuracastSetSource {
+        source: String,
+        #[ts(optional = nullable)]
+        #[serde(default)]
+        source_id: Option<String>,
+        #[ts(optional = nullable)]
+        #[serde(default)]
+        source_name: Option<String>,
+    },
+    /// -> bool: the broadcast's level follows the Windows volume of the
+    /// device its audio comes from, and moves it (`follow`), or no longer
+    /// does; kept for the next broadcast. True: a broadcast runs and can
+    /// follow (not the test tone or a recording device).
+    #[serde(rename = "auracast.set_follow_volume")]
+    AuracastSetFollowVolume { follow: bool },
+    /// -> bool: whether a broadcast's level follows the Windows volume
+    /// (auracast.set_follow_volume, stream.start_broadcast's
+    /// `follow_volume`), as kept for the next broadcast
+    #[serde(rename = "auracast.follow_volume")]
+    AuracastFollowVolume,
     /// For tools: the headset mode of the profile `name` (absent: the one
     /// streaming, else the active one), saved as the window's mode buttons
     /// save it: "off" mutes the microphone while the mode saved is Auto or
@@ -2255,6 +2289,11 @@ pub enum Method {
     /// -> AudioDevice[]
     #[serde(rename = "audio.devices")]
     AudioDevices,
+    /// -> AudioDevice[]: Windows' recording devices (microphones, line
+    /// in, the recording sides of cables); `is_default`: the default
+    /// recording device, no `capture_name`
+    #[serde(rename = "audio.input_devices")]
+    AudioInputDevices,
     /// -> AudioApp[]
     #[serde(rename = "audio.apps")]
     AudioApps,

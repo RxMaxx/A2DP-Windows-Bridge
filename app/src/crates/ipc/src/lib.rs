@@ -76,7 +76,7 @@ pub fn old_pipe_name(user_sid: &str) -> String {
 /// Service mode: the core's one pipe for every user (no SID in the name;
 /// the DACL lets interactive users connect, win_sys::pipe_peer). Clients
 /// try it before [`pipe_name`] and check its server first
-/// ([`access::server_trusted`]).
+/// ([`service_state::check_service_pipe`]).
 pub fn service_pipe_name() -> String {
     format!(r"\\.\pipe\bluecaster-service{}", instance_suffix())
 }

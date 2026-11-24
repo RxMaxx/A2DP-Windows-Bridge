@@ -3,7 +3,9 @@
 //! broadcast counts as live, the length checks, the adapter list, and the
 //! mixer's fields.
 
-use ipc::{AdapterInfo, DriverKind, Method, StreamState, StreamStatus};
+use std::collections::HashMap;
+
+use ipc::{AdapterInfo, AudioDevice, DriverKind, Method, SourceInfo, StreamState, StreamStatus};
 
 use super::adapter::adapter_name;
 use crate::format::js_trim;
@@ -11,27 +13,161 @@ use crate::i18n::{js_number, t, tm};
 use crate::series::to_fixed;
 use crate::t;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What is broadcast: the test tone, the system audio, the loopback of an
+/// output device or a recording device (each by its endpoint id)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Source {
     Tone,
     Loopback,
+    Output(String),
+    Input(String),
+}
+
+/// A device source's kind
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceKind {
+    Output,
+    Input,
+}
+
+impl DeviceKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DeviceKind::Output => "output",
+            DeviceKind::Input => "input",
+        }
+    }
 }
 
 impl Source {
-    pub fn as_str(self) -> &'static str {
+    /// A device source's kind and endpoint id; None: the tone or system audio
+    pub fn device(&self) -> Option<(DeviceKind, &str)> {
         match self {
-            Source::Tone => "tone",
-            Source::Loopback => "loopback",
+            Source::Output(id) => Some((DeviceKind::Output, id)),
+            Source::Input(id) => Some((DeviceKind::Input, id)),
+            Source::Tone | Source::Loopback => None,
         }
     }
+}
 
-    pub fn parse(s: &str) -> Option<Source> {
-        match s {
-            "tone" => Some(Source::Tone),
-            "loopback" => Some(Source::Loopback),
-            _ => None,
+/// The names of the devices listed so far, by id, for a chosen one that is gone
+pub type DeviceNames = HashMap<String, String>;
+
+/// The source as stream.start_broadcast and auracast.set_source take it
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceParams {
+    pub source: String,
+    pub source_id: Option<String>,
+    pub source_name: Option<String>,
+}
+
+impl SourceParams {
+    pub fn set_source_request(&self) -> Method {
+        Method::AuracastSetSource {
+            source: self.source.clone(),
+            source_id: self.source_id.clone(),
+            source_name: self.source_name.clone(),
         }
     }
+}
+
+/// The source as stream.start_broadcast and auracast.set_source take it
+/// (`names`: the names of devices listed before, for one that is gone)
+pub fn source_params(
+    source: &Source,
+    outputs: &[AudioDevice],
+    inputs: &[AudioDevice],
+    names: &DeviceNames,
+) -> SourceParams {
+    let Some((kind, id)) = source.device() else {
+        let source = if *source == Source::Tone { "tone" } else { "loopback" };
+        return SourceParams { source: source.to_owned(), source_id: None, source_name: None };
+    };
+    let list = if kind == DeviceKind::Output { outputs } else { inputs };
+    let name = list.iter().find(|d| d.id == id).map(|d| d.name.clone()).or_else(|| names.get(id).cloned());
+    SourceParams { source: kind.as_str().to_owned(), source_id: Some(id.to_owned()), source_name: name }
+}
+
+/// Whether the broadcast's stream info names the source sent as `params`
+/// (a device by the name sent, or by its id when none was)
+pub fn plays_source(info: Option<&SourceInfo>, params: &SourceParams) -> bool {
+    let Some(info) = info else { return false };
+    let kind = if info.kind == "virtual" { "output" } else { info.kind.as_str() };
+    if kind != params.source {
+        return false;
+    }
+    match &params.source_id {
+        None => true,
+        Some(id) => info.name == *params.source_name.as_ref().unwrap_or(id),
+    }
+}
+
+/// The choice of what the broadcast plays (its stream info), a device by
+/// its name (the first of two with the same name); None: none of them
+pub fn source_of_info(info: Option<&SourceInfo>, outputs: &[AudioDevice], inputs: &[AudioDevice]) -> Option<Source> {
+    let info = info?;
+    let named = |list: &[AudioDevice]| list.iter().find(|d| d.name == info.name).map(|d| d.id.clone());
+    match info.kind.as_str() {
+        "tone" => Some(Source::Tone),
+        "loopback" => Some(Source::Loopback),
+        "output" | "virtual" => named(outputs).map(Source::Output),
+        "input" => named(inputs).map(Source::Input),
+        _ => None,
+    }
+}
+
+/// One entry of the source list; entries with the same group (next to each
+/// other) go under one heading
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceOption {
+    pub value: Source,
+    pub label: String,
+    pub group: Option<String>,
+}
+
+/// The sources to choose from: the tone, the system audio, Windows' output
+/// and recording devices, and a chosen device that is not there now (by
+/// its name in `names`, the devices listed before)
+pub fn source_options(
+    chosen: &Source,
+    outputs: &[AudioDevice],
+    inputs: &[AudioDevice],
+    names: &DeviceNames,
+) -> Vec<SourceOption> {
+    let plain = |value: Source, key: &str| SourceOption { value, label: t(key), group: None };
+    let device = |make: fn(String) -> Source, group: String| {
+        move |d: &AudioDevice| SourceOption {
+            value: make(d.id.clone()),
+            label: d.name.clone(),
+            group: Some(group.clone()),
+        }
+    };
+    let mut options =
+        vec![plain(Source::Tone, "receiver.source_tone"), plain(Source::Loopback, "receiver.source_system")];
+    options.extend(outputs.iter().map(device(Source::Output, t("ui.dev.auracast_outputs"))));
+    options.extend(inputs.iter().map(device(Source::Input, t("ui.dev.auracast_inputs"))));
+    if !options.iter().any(|o| o.value == *chosen) {
+        let d = chosen.device();
+        let input = matches!(d, Some((DeviceKind::Input, _)));
+        let group = t(if input { "ui.dev.auracast_inputs" } else { "ui.dev.auracast_outputs" });
+        let name = d
+            .and_then(|(_, id)| names.get(id))
+            .filter(|n| !n.is_empty())
+            .cloned()
+            .unwrap_or_else(|| t(if input { "capture.input" } else { "capture.output" }));
+        options.push(SourceOption {
+            value: chosen.clone(),
+            label: t!("ui.dev.auracast_device_gone", name),
+            group: Some(group),
+        });
+    }
+    options
+}
+
+/// A source whose Windows volume the broadcast can follow (not the tone,
+/// nor a recording device: its recording level is in the audio already)
+pub fn followable(s: &Source) -> bool {
+    !matches!(s, Source::Tone | Source::Input(_))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,6 +245,8 @@ pub struct Choices {
     pub front_quality: Quality,
     pub rear_quality: Quality,
     pub source: Source,
+    /// The broadcast's volume follows the Windows volume
+    pub follow: bool,
 }
 
 impl Default for Choices {
@@ -123,6 +261,7 @@ impl Default for Choices {
             front_quality: Quality::Hq,
             rear_quality: Quality::Hq,
             source: Source::Tone,
+            follow: false,
         }
     }
 }
@@ -169,9 +308,10 @@ impl Choices {
         !live && (self.name_error().is_some() || self.code_error().is_some() || (self.matrix() && self.bigs() == 0))
     }
 
-    /// stream.start_broadcast; a matrix's rates come from its front and
-    /// rear rows, not Quality
-    pub fn start_request(&self) -> Method {
+    /// stream.start_broadcast with the source as `source` names it (see
+    /// [`source_params`]); a matrix's rates come from its front and rear
+    /// rows, not Quality. The volume is left to the core (the last one).
+    pub fn start_request(&self, source: SourceParams) -> Method {
         let matrix = self.matrix();
         Method::StreamStartBroadcast {
             name: js_trim(&self.name).to_owned(),
@@ -181,9 +321,11 @@ impl Choices {
             mono: Some(self.channels == Channels::Mono),
             split: None,
             layout: layout_of(self.channels, self.front, self.rear),
-            source: self.source.as_str().to_owned(),
-            source_id: None,
-            source_name: None,
+            source: source.source,
+            source_id: source.source_id,
+            source_name: source.source_name,
+            volume: None,
+            follow_volume: Some(self.follow),
         }
     }
 }
@@ -254,12 +396,26 @@ impl Session {
     }
 }
 
-/// After a change of source to `asked` and SOURCE_SETTLE_MS: a source that
-/// cannot be captured leaves the broadcast on the one before, which its
-/// stream info then still names -> the source to show again
-pub fn settled_source(live: bool, chosen: Source, asked: Source, playing: Option<&str>) -> Option<Source> {
-    let playing = Source::parse(playing?)?;
-    (live && chosen == asked && playing != asked).then_some(playing)
+/// After a change of source from `before` to `asked` (each with what was
+/// sent for it) and SOURCE_SETTLE_MS: a source that cannot be captured
+/// leaves the broadcast on the one before, which its stream info then still
+/// names -> the source to show again. By what was sent, not by name alone:
+/// two devices can share a name.
+pub fn settled_source(
+    live: bool,
+    chosen: &Source,
+    (asked, sent): (&Source, &SourceParams),
+    (before, sent_before): (&Source, &SourceParams),
+    info: Option<&SourceInfo>,
+    outputs: &[AudioDevice],
+    inputs: &[AudioDevice],
+) -> Option<Source> {
+    if !live || chosen != asked || plays_source(info, sent) {
+        return None;
+    }
+    let playing =
+        if plays_source(info, sent_before) { Some(before.clone()) } else { source_of_info(info, outputs, inputs) };
+    playing.filter(|p| p != asked)
 }
 
 fn hex4(n: u16) -> String {
@@ -436,7 +592,8 @@ mod tests {
             rear_quality: Quality::Sq,
             ..Choices::default()
         };
-        let Method::StreamStartBroadcast { quality, rear_quality, layout, .. } = c.start_request() else {
+        let tone = source_params(&c.source, &[], &[], &DeviceNames::new());
+        let Method::StreamStartBroadcast { quality, rear_quality, layout, .. } = c.start_request(tone) else {
             panic!("not a broadcast")
         };
         assert_eq!((quality.as_str(), rear_quality.as_deref()), ("hq", Some("sq")));
@@ -458,7 +615,7 @@ mod tests {
         c.quality = Quality::Sq;
         c.channels = Channels::Mono;
         assert_eq!(
-            c.start_request(),
+            c.start_request(source_params(&c.source, &[], &[], &DeviceNames::new())),
             Method::StreamStartBroadcast {
                 name: "Living room".into(),
                 code: Some("secret".into()),
@@ -470,6 +627,8 @@ mod tests {
                 source: "tone".into(),
                 source_id: None,
                 source_name: None,
+                volume: None,
+                follow_volume: Some(false),
             }
         );
         // A matrix with both pairs off sends nothing
@@ -526,11 +685,162 @@ mod tests {
 
     #[test]
     fn a_source_that_cannot_be_captured_shows_the_one_that_plays() {
-        assert_eq!(settled_source(true, Source::Loopback, Source::Loopback, Some("tone")), Some(Source::Tone));
-        assert_eq!(settled_source(true, Source::Loopback, Source::Loopback, Some("loopback")), None);
-        assert_eq!(settled_source(false, Source::Loopback, Source::Loopback, Some("tone")), None);
-        assert_eq!(settled_source(true, Source::Tone, Source::Loopback, Some("tone")), None);
-        assert_eq!(settled_source(true, Source::Loopback, Source::Loopback, Some("app")), None);
+        let none = DeviceNames::new();
+        let params = |s: &Source| source_params(s, &[], &[], &none);
+        let (tone, loopback) = (Source::Tone, Source::Loopback);
+        let asked = (&loopback, &params(&loopback));
+        let before = (&tone, &params(&tone));
+        let settled = |live: bool, chosen: &Source, kind: &str| {
+            settled_source(live, chosen, asked, before, Some(&info(kind, "")), &[], &[])
+        };
+        assert_eq!(settled(true, &loopback, "tone"), Some(Source::Tone));
+        assert_eq!(settled(true, &loopback, "loopback"), None);
+        assert_eq!(settled(false, &loopback, "tone"), None);
+        assert_eq!(settled(true, &tone, "tone"), None);
+        assert_eq!(settled(true, &loopback, "app"), None);
+    }
+
+    #[test]
+    fn a_device_that_cannot_be_captured_goes_back_to_the_one_sent_before_not_its_twin() {
+        let none = DeviceNames::new();
+        let twins = [dev("{mic1}", "Microphone"), dev("{mic2}", "Microphone")];
+        let (first, second) = (Source::Input("{mic1}".into()), Source::Input("{mic2}".into()));
+        let sent_first = source_params(&first, &[], &twins, &none);
+        let sent_second = source_params(&second, &[], &twins, &none);
+        let mic = info("input", "Microphone");
+        // From the second microphone to the tone, which did not start: the
+        // second one plays on, though by name alone it would be the first
+        let tone = Source::Tone;
+        let sent_tone = source_params(&tone, &[], &twins, &none);
+        let back = settled_source(true, &tone, (&tone, &sent_tone), (&second, &sent_second), Some(&mic), &[], &twins);
+        assert_eq!(back, Some(second.clone()));
+        // The device asked for plays (the name sent)
+        let kept =
+            settled_source(true, &second, (&second, &sent_second), (&first, &sent_first), Some(&mic), &[], &twins);
+        assert_eq!(kept, None);
+    }
+
+    fn dev(id: &str, name: &str) -> AudioDevice {
+        AudioDevice {
+            id: id.into(),
+            name: name.into(),
+            short_name: None,
+            adapter_name: None,
+            is_default: false,
+            is_virtual: false,
+            is_display: false,
+            mix_rate: None,
+            mix_channels: None,
+            mix_bits: None,
+            capture_name: None,
+            capture_rate: None,
+        }
+    }
+
+    fn info(kind: &str, name: &str) -> SourceInfo {
+        SourceInfo { kind: kind.into(), name: name.into(), waiting: false }
+    }
+
+    fn params(source: &str, id: Option<&str>, name: Option<&str>) -> SourceParams {
+        SourceParams { source: source.into(), source_id: id.map(str::to_owned), source_name: name.map(str::to_owned) }
+    }
+
+    // Auracast sources (Auracast.test.ts)
+    #[test]
+    fn names_a_device_with_its_id_and_name() {
+        let (outputs, inputs, none) = ([dev("{spk}", "Speakers")], [dev("{mic}", "Microphone")], DeviceNames::new());
+        assert_eq!(source_params(&Source::Tone, &outputs, &inputs, &none), params("tone", None, None));
+        assert_eq!(
+            source_params(&Source::Output("{spk}".into()), &outputs, &inputs, &none),
+            params("output", Some("{spk}"), Some("Speakers"))
+        );
+        assert_eq!(
+            source_params(&Source::Input("{mic}".into()), &outputs, &inputs, &none),
+            params("input", Some("{mic}"), Some("Microphone"))
+        );
+        // Gone: the core opens it by its id, under the name it had if it was listed
+        let old = Source::Input("{old}".into());
+        assert_eq!(source_params(&old, &outputs, &inputs, &none).source_name, None);
+        let names = DeviceNames::from([("{old}".to_owned(), "Headset".to_owned())]);
+        assert_eq!(source_params(&old, &outputs, &inputs, &names).source_name.as_deref(), Some("Headset"));
+    }
+
+    #[test]
+    fn tells_what_was_sent_from_another_device_of_the_same_name() {
+        let (outputs, inputs, none) = ([dev("{spk}", "Speakers")], [dev("{mic}", "Microphone")], DeviceNames::new());
+        let twins = [dev("{mic1}", "Microphone"), dev("{mic2}", "Microphone")];
+        let second = source_params(&Source::Input("{mic2}".into()), &outputs, &twins, &none);
+        // By name alone it would be the first one
+        assert_eq!(
+            source_of_info(Some(&info("input", "Microphone")), &outputs, &twins),
+            Some(Source::Input("{mic1}".into()))
+        );
+        assert!(plays_source(Some(&info("input", "Microphone")), &second));
+        assert!(!plays_source(Some(&info("output", "Microphone")), &second));
+        assert!(!plays_source(Some(&info("input", "Headset")), &second));
+        let tone = source_params(&Source::Tone, &outputs, &twins, &none);
+        assert!(plays_source(Some(&info("tone", "")), &tone));
+        assert!(!plays_source(Some(&info("loopback", "")), &tone));
+        // An older client's virtual device is an output; no name sent: the id shows
+        let spk = source_params(&Source::Output("{spk}".into()), &outputs, &inputs, &none);
+        assert!(plays_source(Some(&info("virtual", "Speakers")), &spk));
+        let old = source_params(&Source::Input("{old}".into()), &outputs, &inputs, &none);
+        assert!(plays_source(Some(&info("input", "{old}")), &old));
+        assert!(!plays_source(None, &second));
+    }
+
+    #[test]
+    fn finds_the_choice_of_what_plays() {
+        let (outputs, inputs) = ([dev("{spk}", "Speakers")], [dev("{mic}", "Microphone")]);
+        let of = |kind: &str, name: &str| source_of_info(Some(&info(kind, name)), &outputs, &inputs);
+        assert_eq!(of("loopback", ""), Some(Source::Loopback));
+        assert_eq!(of("output", "Speakers"), Some(Source::Output("{spk}".into())));
+        assert_eq!(of("input", "Microphone"), Some(Source::Input("{mic}".into())));
+        assert_eq!(of("input", "Headset"), None);
+        assert_eq!(source_of_info(None, &outputs, &inputs), None);
+    }
+
+    #[test]
+    fn lists_the_devices_under_their_headings_and_one_chosen_that_is_gone() {
+        let (outputs, inputs, none) = ([dev("{spk}", "Speakers")], [dev("{mic}", "Microphone")], DeviceNames::new());
+        let options = source_options(&Source::Tone, &outputs, &inputs, &none);
+        let values: Vec<Source> = options.iter().map(|o| o.value.clone()).collect();
+        assert_eq!(
+            values,
+            [Source::Tone, Source::Loopback, Source::Output("{spk}".into()), Source::Input("{mic}".into())]
+        );
+        assert_ne!(options[2].group, options[3].group);
+        let old = Source::Input("{old}".into());
+        let names = DeviceNames::from([("{old}".to_owned(), "Headset".to_owned())]);
+        let gone = source_options(&old, &outputs, &inputs, &names);
+        let last = gone.last().expect("an entry for the device gone");
+        assert_eq!((&last.value, &last.group), (&old, &options[3].group));
+        // By the name it had, never by its id
+        assert!(last.label.contains("Headset"));
+        let unnamed = source_options(&old, &outputs, &inputs, &none);
+        assert!(!unnamed.last().expect("an entry").label.contains("{old}"));
+    }
+
+    #[test]
+    fn follows_the_windows_volume_of_output_devices_only() {
+        let sources = [Source::Tone, Source::Loopback, Source::Output("{spk}".into()), Source::Input("{mic}".into())];
+        assert_eq!(sources.map(|s| followable(&s)), [false, true, true, false]);
+    }
+
+    #[test]
+    fn starts_a_broadcast_with_the_device_and_follow() {
+        let c = Choices { source: Source::Output("{spk}".into()), follow: true, ..Choices::default() };
+        let sent = source_params(&c.source, &[dev("{spk}", "Speakers")], &[], &DeviceNames::new());
+        let Method::StreamStartBroadcast { source, source_id, source_name, volume, follow_volume, .. } =
+            c.start_request(sent)
+        else {
+            panic!("not a broadcast")
+        };
+        assert_eq!(
+            (source.as_str(), source_id.as_deref(), source_name.as_deref()),
+            ("output", Some("{spk}"), Some("Speakers"))
+        );
+        assert_eq!((volume, follow_volume), (None, Some(true)));
     }
 
     fn adapter(instance_id: &str, address: Option<&str>, driver: DriverKind) -> AdapterInfo {

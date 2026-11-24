@@ -93,6 +93,11 @@ pub enum Status {
     },
     /// The service add-on is added but stopped
     ServiceStopped,
+    /// The service's pipe is not the service's (ipc::service_state::
+    /// check_service_pipe says why): nothing it sends is used
+    ServiceUntrusted {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -172,6 +177,7 @@ fn timeout_for(method: &str, params: &Value) -> Duration {
         | "adapter.list"
         | "adapter.firmware_files"
         | "audio.devices"
+        | "audio.input_devices"
         | "audio.apps"
         | "diag.info"
         | "diag.capture_start"
@@ -468,7 +474,7 @@ async fn connect(host: &Host, name: &str) -> NamedPipeClient {
                     // our own beside the service.
                     Service::None | Service::Busy => tokio::time::sleep(Duration::from_millis(200)).await,
                     Service::Untrusted(reason) => {
-                        host.set_status(Status::Rejected { reason });
+                        host.set_status(Status::ServiceUntrusted { reason });
                         tokio::time::sleep(Duration::from_secs(10)).await;
                     }
                 }
@@ -503,7 +509,7 @@ async fn connect(host: &Host, name: &str) -> NamedPipeClient {
             Service::Untrusted(reason) => {
                 // Someone else serves the service's name: not trusted, and
                 // no core of our own started beside the service
-                host.set_status(Status::Rejected { reason });
+                host.set_status(Status::ServiceUntrusted { reason });
                 tokio::time::sleep(Duration::from_secs(10)).await;
                 continue;
             }

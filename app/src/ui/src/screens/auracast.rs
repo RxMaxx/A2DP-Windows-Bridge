@@ -1,8 +1,10 @@
-//! Auracast (Developer screen): broadcasts the test tone or the system audio
-//! to every receiver nearby that joins (stream.start_broadcast; the core
-//! refuses it while developer mode is off). The broadcast is a stream like
-//! any other: Stop and the status follow the core's stream, the choices
-//! outlive the view (one set per core connection).
+//! Auracast (Developer screen): broadcasts the test tone, the system audio,
+//! an output device's sound or a recording device to every receiver nearby
+//! that joins (stream.start_broadcast; the core refuses it while developer
+//! mode is off), at a volume of its own (the stream's, which can follow the
+//! Windows volume). The broadcast is a stream like any other: Stop and the
+//! status follow the core's stream, the choices outlive the view (one set
+//! per core connection).
 
 use std::time::Duration;
 
@@ -13,18 +15,19 @@ use gpui_kit::{
     AnyElement, App, AppContext as _, AsyncApp, Context, Entity, EntityId, Global, IntoElement, ParentElement as _,
     Render, SharedString, Styled as _, Subscription, Task, WeakEntity, Window, div, px,
 };
-use ipc::{Method, StreamStatus};
+use ipc::{AudioDevice, Method, StreamStatus};
 use ui_model::i18n::t;
 use ui_model::t;
 use ui_model::view::auracast::{
-    Channels, Choices, MAX_BIGS, PairMode, Quality, SOURCE_SETTLE_MS, Session, Source, auracast_adapter_choices,
-    settled_source, show_adapter,
+    Channels, Choices, DeviceNames, MAX_BIGS, PairMode, Quality, SOURCE_SETTLE_MS, Session, Source, SourceParams,
+    auracast_adapter_choices, followable, settled_source, show_adapter, source_options, source_params,
 };
 
 use crate::app;
 use crate::core::Core;
 use crate::screens::auracast_mixer::AuracastMixer;
 use crate::theme::{self, ActivePalette as _};
+use crate::ui::stream::VolumeControl;
 use crate::ui::{self, ButtonKind, Choice, IconName, icon};
 
 /// The choices and the broadcast asked for here, one set per core
@@ -32,6 +35,8 @@ use crate::ui::{self, ButtonKind, Choice, IconName, icon};
 pub struct AuracastSession {
     choices: Choices,
     s: Session,
+    /// The names of the devices listed so far, for a chosen one that is gone
+    names: DeviceNames,
     _follow: Subscription,
 }
 
@@ -59,7 +64,12 @@ fn session(core: &Entity<Core>, cx: &mut App) -> Entity<AuracastSession> {
                 cx.notify();
             }
         });
-        AuracastSession { choices: Choices::default(), s: Session::default(), _follow: follow }
+        AuracastSession {
+            choices: Choices::default(),
+            s: Session::default(),
+            names: DeviceNames::new(),
+            _follow: follow,
+        }
     });
     cx.set_global(Sessions { core: core.entity_id(), session: session.clone() });
     session
@@ -71,6 +81,12 @@ pub struct Auracast {
     name: Entity<InputState>,
     code: Entity<InputState>,
     mixer: Entity<AuracastMixer>,
+    /// The broadcast's volume (the stream's), off while none is live
+    volume: Entity<VolumeControl>,
+    /// Windows' devices to broadcast from, read again when they change
+    outputs: Vec<AudioDevice>,
+    inputs: Vec<AudioDevice>,
+    audio_key: String,
     settle: Option<Task<()>>,
     _subs: Vec<Subscription>,
 }
@@ -85,7 +101,16 @@ impl Auracast {
             InputState::new(window, cx).default_value(c.code.clone()).placeholder(t("ui.dev.auracast_code_none"))
         });
         let mixer = cx.new(|cx| AuracastMixer::new(window, cx));
+        let volume = cx.new(|cx| VolumeControl::new(true, window, cx));
+        let audio_key = ui::audio_devices_key(core.read(cx).snap());
         let subs = vec![
+            cx.observe(&core, |this: &mut Self, core, cx| {
+                let key = ui::audio_devices_key(core.read(cx).snap());
+                if key != this.audio_key {
+                    this.audio_key = key;
+                    this.read_devices(cx);
+                }
+            }),
             cx.observe_in(&core, window, |this, _, window, cx| this.sync_mixer(window, cx)),
             cx.observe_in(&session, window, |this, _, window, cx| this.sync_mixer(window, cx)),
             cx.observe(&mixer, |_, _, cx| cx.notify()),
@@ -102,13 +127,69 @@ impl Auracast {
                 }
             }),
         ];
-        let mut this = Auracast { core, session, name, code, mixer, settle: None, _subs: subs };
+        let mut this = Auracast {
+            core,
+            session,
+            name,
+            code,
+            mixer,
+            volume,
+            outputs: Vec::new(),
+            inputs: Vec::new(),
+            audio_key,
+            settle: None,
+            _subs: subs,
+        };
         this.sync_mixer(window, cx);
+        this.read_devices(cx);
+        this.read_follow(cx);
         this
     }
 
     fn stream(&self, cx: &App) -> StreamStatus {
         stream_of(&self.core, cx)
+    }
+
+    /// Windows' output and recording devices; their names are kept for a
+    /// chosen one that disappears
+    fn read_devices(&mut self, cx: &mut Context<Self>) {
+        let outputs = app::request::<Vec<AudioDevice>>(Method::AudioDevices, cx);
+        let inputs = app::request::<Vec<AudioDevice>>(Method::AudioInputDevices, cx);
+        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let outputs = outputs.await.ok();
+            let inputs = inputs.await.ok();
+            let _ = this.update(cx, |this, cx| {
+                this.session.update(cx, |s, _| {
+                    for d in outputs.iter().chain(inputs.iter()).flatten() {
+                        s.names.insert(d.id.clone(), d.name.clone());
+                    }
+                });
+                if let Some(list) = outputs {
+                    this.outputs = list;
+                }
+                if let Some(list) = inputs {
+                    this.inputs = list;
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The core keeps "follow" between broadcasts and windows: the switch shows it
+    fn read_follow(&mut self, cx: &mut Context<Self>) {
+        let task = app::request::<bool>(Method::AuracastFollowVolume, cx);
+        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            if let Ok(follow) = task.await {
+                let _ = this.update(cx, |this, cx| this.set(cx, |c| c.follow = follow));
+            }
+        })
+        .detach();
+    }
+
+    /// The source as the core takes it
+    fn params_of(&self, source: &Source, cx: &App) -> SourceParams {
+        source_params(source, &self.outputs, &self.inputs, &self.session.read(cx).names)
     }
 
     fn set(&mut self, cx: &mut Context<Self>, patch: impl FnOnce(&mut Choices)) {
@@ -123,8 +204,10 @@ impl Auracast {
     fn sync_mixer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let st = self.stream(cx);
         let s = self.session.read(cx);
-        let props = s.choices.matrix().then(|| (s.choices.rear != PairMode::Off, s.s.live(&st) && !s.s.asking));
+        let live = s.s.live(&st);
+        let props = s.choices.matrix().then(|| (s.choices.rear != PairMode::Off, live && !s.s.asking));
         self.mixer.update(cx, |m, cx| m.set_props(props, window, cx));
+        self.volume.update(cx, |v, cx| v.set_off(!live, cx));
         cx.notify();
     }
 
@@ -143,13 +226,14 @@ impl Auracast {
             .detach();
             return;
         }
+        let sent = self.params_of(&session.read(cx).choices.source, cx);
         let request = session.update(cx, |s, cx| {
             s.s.asking = true;
             s.s.failed = None;
             s.s.on_air = false;
             s.s.mine = true;
             cx.notify();
-            s.choices.start_request()
+            s.choices.start_request(sent)
         });
         let task = app::run(app::request::<serde_json::Value>(request, cx), cx);
         let core = self.core.clone();
@@ -170,13 +254,16 @@ impl Auracast {
 
     /// The source: the running broadcast switches to it in place
     fn change_source(&mut self, source: Source, cx: &mut Context<Self>) {
-        let before = self.session.read(cx).choices.source;
-        self.set(cx, |c| c.source = source);
+        let before = self.session.read(cx).choices.source.clone();
+        let chosen = source.clone();
+        self.set(cx, |c| c.source = chosen);
         let st = self.stream(cx);
         if !self.session.read(cx).s.live(&st) {
             return;
         }
-        let task = app::run(app::request::<bool>(Method::AuracastSetSource { source: source.as_str().into() }, cx), cx);
+        let sent = self.params_of(&source, cx);
+        let sent_before = self.params_of(&before, cx);
+        let task = app::run(app::request::<bool>(sent.set_source_request(), cx), cx);
         self.settle = Some(cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let taken = task.await.unwrap_or(false);
             if !taken {
@@ -194,12 +281,27 @@ impl Auracast {
             let _ = this.update(cx, |this, cx| {
                 let st = this.stream(cx);
                 let s = this.session.read(cx);
-                let playing = st.info.as_ref().and_then(|i| i.source.as_ref()).map(|s| s.kind.clone());
-                if let Some(back) = settled_source(s.s.live(&st), s.choices.source, source, playing.as_deref()) {
+                let info = st.info.as_ref().and_then(|i| i.source.as_ref());
+                let back = settled_source(
+                    s.s.live(&st),
+                    &s.choices.source,
+                    (&source, &sent),
+                    (&before, &sent_before),
+                    info,
+                    &this.outputs,
+                    &this.inputs,
+                );
+                if let Some(back) = back {
                     this.set(cx, |c| c.source = back);
                 }
             });
         }));
+    }
+
+    /// Follow the Windows volume: kept for the next broadcast, taken by the running one
+    fn change_follow(&mut self, follow: bool, cx: &mut Context<Self>) {
+        self.set(cx, |c| c.follow = follow);
+        app::send(Method::AuracastSetFollowVolume { follow }, cx);
     }
 }
 
@@ -331,6 +433,21 @@ impl Render for Auracast {
 
         let set_q = set.clone();
         let set_ch = set.clone();
+        let sources = {
+            let names = &self.session.read(cx).names;
+            source_options(&c.source, &self.outputs, &self.inputs, names)
+                .into_iter()
+                .map(|o| {
+                    let choice = Choice::new(o.value, o.label);
+                    match o.group {
+                        Some(g) => choice.group(g),
+                        None => choice,
+                    }
+                })
+                .collect()
+        };
+        let this = cx.entity().downgrade();
+        let this_follow = this.clone();
         let form = ui::section(t("ui.dev.auracast"), Some(start.into_any_element()), cx)
             .children(adapter)
             .child(ui::field(
@@ -374,19 +491,32 @@ impl Render for Auracast {
                     set_ch(Box::new(move |c| c.channels = v), cx);
                 },
             ))
-            .child(choice(
-                "auracast-source",
+            .child(ui::field(
                 t("receiver.source"),
-                &c.source,
-                s.source_locked(&st),
-                vec![(Source::Tone, t("receiver.source_tone")), (Source::Loopback, t("receiver.source_system"))],
-                {
-                    let this = cx.entity().downgrade();
-                    move |v: &Source, _, cx| {
-                        let v = *v;
-                        let _ = this.update(cx, |this, cx| this.change_source(v, cx));
-                    }
+                None,
+                None,
+                ui::select("auracast-source", &c.source, sources, s.source_locked(&st), move |v: &Source, _, cx| {
+                    let v = v.clone();
+                    let _ = this.update(cx, |this, cx| this.change_source(v, cx));
+                }),
+                cx,
+            ))
+            .child(
+                ui::row()
+                    .child(div().child(t("ui.dev.auracast_volume")))
+                    .child(div().w(px(260.)).child(self.volume.clone())),
+            )
+            .child(ui::toggle(
+                "auracast-follow",
+                t("ui.dev.auracast_follow"),
+                Some(t("ui.dev.auracast_follow_hint").into()),
+                c.follow && followable(&c.source),
+                !followable(&c.source),
+                move |v: &bool, _, cx| {
+                    let v = *v;
+                    let _ = this_follow.update(cx, |this, cx| this.change_follow(v, cx));
                 },
+                cx,
             ))
             .children(status);
 
@@ -458,3 +588,6 @@ impl Render for Auracast {
             .into_any_element()
     }
 }
+
+#[cfg(test)]
+mod interaction_tests;

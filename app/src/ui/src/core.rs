@@ -44,6 +44,10 @@ pub enum ConnStatus {
     },
     /// The service add-on is added but stopped
     ServiceStopped,
+    /// The service's pipe is served by something else than the service
+    ServiceUntrusted {
+        reason: String,
+    },
 }
 
 /// What the store needs from the host: the real connection (host.rs) or a

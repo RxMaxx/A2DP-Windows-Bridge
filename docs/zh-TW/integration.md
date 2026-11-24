@@ -168,7 +168,7 @@ sequenceDiagram
 
 若只需變更一項設定，請使用[快速控制](#quick-controls)，而不是 `profile.save` 或 `settings.set`。
 
-以下方法由 BlueCaster 視窗使用，工具應謹慎使用：`profile.save` / `profile.delete`、`settings.set`（會取代 **所有** 設定：請傳送最新的 `settings` 並附上您的變更，絕不要只傳送部分物件）、`device.forget` / `device.rename`、`adapter.*`（`adapter.assign_winusb` 與 `adapter.restore_driver` 會顯示 UAC 提示；`adapter.probe` 與 `adapter.run_script` 是開發人員模式的晶片工具，會停止藍牙堆疊）、`app.quit`。其他方法只供視窗本身的畫面使用，可能隨時變更，恕不另行通知：`stream.start_custom`、其他 `device.*` 方法（`device.import_windows_pairings` 會顯示 UAC 提示）、`audio.apps`、`audio.mixer` / `audio.mixer_set`、上述兩者以外的 `diag.*`、`receiver.*` 與 `app.*`。包含參數與結果的完整清單，請參閱 `protocol.rs` 中的 `Method` enum。
+以下方法由 BlueCaster 視窗使用，工具應謹慎使用：`profile.save` / `profile.delete`、`settings.set`（會取代 **所有** 設定：請傳送最新的 `settings` 並附上您的變更，絕不要只傳送部分物件）、`device.forget` / `device.rename`、`adapter.*`（`adapter.assign_winusb` 與 `adapter.restore_driver` 會顯示 UAC 提示；`adapter.probe` 與 `adapter.run_script` 是開發人員模式的晶片工具，會停止藍牙堆疊）、`app.quit`。其他方法只供視窗本身的畫面使用，可能隨時變更，恕不另行通知：`stream.start_custom`、其他 `device.*` 方法（`device.import_windows_pairings` 會顯示 UAC 提示）、`audio.apps`、`audio.input_devices`、`audio.mixer` / `audio.mixer_set`、上述兩者以外的 `diag.*`、`receiver.*` 與 `app.*`。包含參數與結果的完整清單，請參閱 `protocol.rs` 中的 `Method` enum。
 
 ## RFCOMM 轉送 {#rfcomm-passthrough}
 

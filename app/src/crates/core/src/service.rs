@@ -1848,6 +1848,19 @@ impl Service {
         }
     }
 
+    /// A broadcast runs whose source has a Windows volume to follow (not
+    /// the test tone or a recording device)
+    pub fn broadcast_follows(&self) -> bool {
+        crate::broadcast_volume::live()
+            && self
+                .last_request
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .filter(|r| r.le.as_ref().is_some_and(|l| l.broadcast.is_some()))
+                .is_some_and(|r| crate::broadcast_volume::endpoint_for(&r.source).is_some())
+    }
+
     /// Changes the source of the running A2DP stream or Auracast broadcast:
     /// the link (the BIGs) stays up. False when none is streaming (it
     /// connects or reconnects, a start or stop is under way, an LE Audio

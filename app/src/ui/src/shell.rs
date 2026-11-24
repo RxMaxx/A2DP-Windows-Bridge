@@ -330,6 +330,10 @@ pub fn connection_screen(conn: &ConnStatus, compact: bool, cx: &App) -> impl Int
             base(None).child(screens::service_addon::newer_notice(version, app, cx))
         }
         ConnStatus::ServiceStopped => base(None).child(screens::service_addon::connection_notice(true, None, cx)),
+        ConnStatus::ServiceUntrusted { reason } => base(Some("ui.service.untrusted_title"))
+            .child(title("ui.service.untrusted_title"))
+            .child(div().child(ui::text(t("ui.service.untrusted_body"))))
+            .child(ui::mono(reason.clone()).text_color(p.text_2)),
         ConnStatus::Connecting | ConnStatus::Connected { .. } => {
             base(Some("ui.conn.connecting")).child(Spinner::new().large()).child(title("ui.conn.connecting"))
         }
