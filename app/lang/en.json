@@ -623,7 +623,7 @@
   "ui.dev.auracast_device_gone": "%s (not found)",
   "ui.dev.auracast_volume": "Volume",
   "ui.dev.auracast_follow": "Follow Windows volume",
-  "ui.dev.auracast_follow_hint": "The broadcast volume and the Windows volume of the device the sound comes from move together. Not for the test tone or a recording device.",
+  "ui.dev.auracast_follow_hint": "The broadcast volume and the source device's Windows volume move together. Not for the test tone or a recording device.",
   "ui.dev.auracast_front": "Front (FL FR)",
   "ui.dev.auracast_rear": "Rear (RL RR)",
   "ui.dev.auracast_pair_stereo": "Stereo",

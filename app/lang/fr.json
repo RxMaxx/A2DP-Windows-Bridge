@@ -623,7 +623,7 @@
   "ui.dev.auracast_device_gone": "%s (introuvable)",
   "ui.dev.auracast_volume": "Volume",
   "ui.dev.auracast_follow": "Suivre le volume de Windows",
-  "ui.dev.auracast_follow_hint": "Le volume de la diffusion et le volume Windows du périphérique d'où vient le son changent ensemble. Pas pour le signal de test ni pour un périphérique d'enregistrement.",
+  "ui.dev.auracast_follow_hint": "Le volume de la diffusion et le volume Windows du périphérique source changent ensemble. Pas pour le signal de test ni un périphérique d'enregistrement.",
   "ui.dev.auracast_front": "Avant (FL FR)",
   "ui.dev.auracast_rear": "Arrière (RL RR)",
   "ui.dev.auracast_pair_stereo": "Stéréo",

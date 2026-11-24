@@ -623,7 +623,7 @@
   "ui.dev.auracast_device_gone": "%s (не найдено)",
   "ui.dev.auracast_volume": "Громкость",
   "ui.dev.auracast_follow": "Следовать громкости Windows",
-  "ui.dev.auracast_follow_hint": "Громкость трансляции и громкость Windows того устройства, откуда идёт звук, меняются вместе. Не для тестового сигнала и не для устройства записи.",
+  "ui.dev.auracast_follow_hint": "Громкость трансляции и громкость Windows устройства-источника меняются вместе. Не для тестового сигнала и не для устройства записи.",
   "ui.dev.auracast_front": "Фронт (FL FR)",
   "ui.dev.auracast_rear": "Тыл (RL RR)",
   "ui.dev.auracast_pair_stereo": "Стерео",

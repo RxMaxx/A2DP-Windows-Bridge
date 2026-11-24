@@ -623,7 +623,7 @@
   "ui.dev.auracast_device_gone": "%s (nicht gefunden)",
   "ui.dev.auracast_volume": "Lautstärke",
   "ui.dev.auracast_follow": "Windows-Lautstärke folgen",
-  "ui.dev.auracast_follow_hint": "Die Lautstärke der Übertragung und die Windows-Lautstärke des Geräts, von dem der Ton kommt, ändern sich gemeinsam. Nicht für den Testton oder ein Aufnahmegerät.",
+  "ui.dev.auracast_follow_hint": "Übertragungslautstärke und Windows-Lautstärke des Quellgeräts ändern sich gemeinsam. Nicht für den Testton oder ein Aufnahmegerät.",
   "ui.dev.auracast_front": "Front (FL FR)",
   "ui.dev.auracast_rear": "Hinten (RL RR)",
   "ui.dev.auracast_pair_stereo": "Stereo",
