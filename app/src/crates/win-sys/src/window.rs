@@ -4,7 +4,8 @@
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
-    DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
+    DWMWA_CAPTION_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
@@ -57,6 +58,20 @@ pub fn set_dark_title_bar(hwnd: isize, dark: bool) -> bool {
             (&value as *const i32).cast(),
             size_of::<i32>() as u32,
         )
+    };
+    result.is_ok()
+}
+
+/// Colours the window's title bar (red, green, blue), so that it is one
+/// surface with the window below it, as Windows 11's own apps are. False on
+/// Windows 10, which keeps its own title bar colour.
+pub fn set_caption_color(hwnd: isize, (r, g, b): (u8, u8, u8)) -> bool {
+    // A COLORREF: 0x00BBGGRR
+    let value: u32 = u32::from(r) | (u32::from(g) << 8) | (u32::from(b) << 16);
+    // SAFETY: the attribute takes a COLORREF (4 bytes), read from `value`
+    // during the call; a handle that is no window makes the call fail
+    let result = unsafe {
+        DwmSetWindowAttribute(handle(hwnd), DWMWA_CAPTION_COLOR, (&value as *const u32).cast(), size_of::<u32>() as u32)
     };
     result.is_ok()
 }

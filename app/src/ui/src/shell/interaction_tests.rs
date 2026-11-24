@@ -70,7 +70,6 @@ fn tab_walks_the_navigation_then_every_setting_in_order(cx: &mut TestAppContext)
     // Every control of the screen is reached, in the screen's order; "Start
     // minimized" is off while "Start with Windows" is, and skipped
     let order = [
-        "nav-toggle",
         "language",
         "start-with-windows",
         "minimize-to-tray",
@@ -91,9 +90,10 @@ fn tab_walks_the_navigation_then_every_setting_in_order(cx: &mut TestAppContext)
     }
     let places: Vec<usize> = places.into_iter().flatten().collect();
     assert!(places.windows(2).all(|p| p[0] < p[1]), "out of order: {order:?} at {places:?} in {seen:?}");
-    // The navigation's links come between its button and the screen: they
-    // take the keyboard too (not registered for tests: "?")
-    let links = seen[places[0] + 1..places[1]].iter().filter(|s| *s == "?").count();
+    // The navigation's links come before the screen (a wide window has no
+    // navigation button): they take the keyboard too (not registered for
+    // tests: "?")
+    let links = seen[..places[0]].iter().filter(|s| *s == "?").count();
     assert!(links >= 7, "{links} navigation links reached: {seen:?}");
 }
 
@@ -137,7 +137,8 @@ fn tab_round(h: &mut Harness, cx: &mut TestAppContext, w: AnyWindowHandle, max: 
     for _ in 0..max {
         h.on(cx, w, |window, cx| window.press("tab", cx));
         let now = path(h, cx);
-        if seen.first() == Some(&now) && now != "?" {
+        // Round: the first control registered for tests has the keyboard again
+        if now != "?" && seen.iter().find(|s| *s != "?") == Some(&now) {
             return seen;
         }
         seen.push(now);
@@ -194,9 +195,8 @@ fn tab_reaches_every_control_of_diagnostics(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn enter_and_space_follow_a_navigation_link(cx: &mut TestAppContext) {
     let (mut h, w) = open(cx, RouteName::Settings);
-    // The toggle, then Home's link
+    // Home's link, then Codecs'
     h.on(cx, w, |window, cx| {
-        window.press("tab", cx);
         window.press("tab", cx);
         window.press("tab", cx);
     });

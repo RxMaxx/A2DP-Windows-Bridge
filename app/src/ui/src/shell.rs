@@ -31,7 +31,7 @@ const NAV: [(RouteName, IconName, &str); 9] = [
 ];
 
 /// Below this width the navigation shows icons only, unless opened
-const NARROW: f32 = 860.;
+const NARROW: f32 = 960.;
 const NAV_WIDTH: f32 = 240.;
 const NAV_COLLAPSED: f32 = 52.;
 
@@ -151,8 +151,10 @@ impl MainWindow {
 
     fn render_nav(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = *cx.palette();
+        // As Windows' own navigation: open in a wide window, with no button;
+        // in a narrow one icons only, and the button opens and closes it
         let narrow = window.viewport_size().width < px(NARROW);
-        let collapsed = self.collapsed.unwrap_or(narrow);
+        let collapsed = narrow && self.collapsed.unwrap_or(true);
         let current = self.state.read(cx).route.name;
         let toggle = t("ui.nav.toggle");
         div()
@@ -169,14 +171,16 @@ impl MainWindow {
             .border_r_1()
             .border_color(p.border)
             .overflow_y_scroll()
-            .child(div().flex().pb(theme::S2).child(
-                ui::icon_button("nav-toggle", IconName::Navigation, toggle).on_click(cx.listener(
-                    move |this, _, _, cx| {
-                        this.collapsed = Some(!collapsed);
-                        cx.notify();
-                    },
-                )),
-            ))
+            .when(narrow, |d| {
+                d.child(div().flex().pb(theme::S2).child(
+                    ui::icon_button("nav-toggle", IconName::Navigation, toggle).on_click(cx.listener(
+                        move |this, _, _, cx| {
+                            this.collapsed = Some(!collapsed);
+                            cx.notify();
+                        },
+                    )),
+                ))
+            })
             .child(div().flex().flex_col().flex_1().gap(px(2.)).children(
                 NAV.iter().filter(|(name, _, _)| self.nav_shown(*name, cx)).map(|(name, icon_name, label)| {
                     let (name, on) = (*name, *name == current);
@@ -260,8 +264,11 @@ impl Render for MainWindow {
             window.defer(cx, move |window, cx| windows::setup_window(setup_active, window, cx));
         }
         // Dialogs are as wide as the page (beside the navigation)
-        let nav =
-            if self.collapsed.unwrap_or(window.viewport_size().width < px(NARROW)) { NAV_COLLAPSED } else { NAV_WIDTH };
+        let nav = if window.viewport_size().width < px(NARROW) && self.collapsed.unwrap_or(true) {
+            NAV_COLLAPSED
+        } else {
+            NAV_WIDTH
+        };
         let page = (!setup_active).then(|| window.viewport_size().width - px(nav));
         ui::dialog::set_page_width(window, page, cx);
         let body = if setup_active {

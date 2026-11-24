@@ -30,7 +30,7 @@ const SETUP_HEIGHT: f32 = 640.;
 const MAIN_WIDTH: f32 = 960.;
 const MAIN_HEIGHT: f32 = 640.;
 /// The main window's minimum: Home keeps two columns of devices (issue #86)
-const MAIN_MIN_WIDTH: f32 = 960.;
+const MAIN_MIN_WIDTH: f32 = 780.;
 const MAIN_MIN_HEIGHT: f32 = 520.;
 
 /// The icon resource build.rs embeds app.ico as
@@ -82,12 +82,18 @@ pub fn none_shown(cx: &mut App) -> bool {
 }
 
 /// The title bars follow the app's theme, not Windows' own
+fn theme_title_bar(hwnd: isize, cx: &App) {
+    let p = cx.palette();
+    win_sys::window::set_dark_title_bar(hwnd, p.dark);
+    // In the window's own colour (issue #86): one surface with the screens
+    let bg: gpui_kit::Rgba = p.bg.into();
+    let channel = |v: f32| (v.clamp(0., 1.) * 255.).round() as u8;
+    win_sys::window::set_caption_color(hwnd, (channel(bg.r), channel(bg.g), channel(bg.b)));
+}
+
 pub fn apply_theme(cx: &mut App) {
-    let dark = cx.palette().dark;
     for handle in cx.windows() {
-        let _ = handle.update(cx, |_, window, _| {
-            win_sys::window::set_dark_title_bar(hwnd(window), dark);
-        });
+        let _ = handle.update(cx, |_, window, cx| theme_title_bar(hwnd(window), cx));
     }
 }
 
@@ -122,9 +128,8 @@ pub fn show_main(route: Option<Route>, focus: bool, cx: &mut App) {
     };
     let mut main_hwnd = 0;
     let opened = gpui_kit::open_window(options, cx, |window, cx| {
-        let dark = cx.palette().dark;
         main_hwnd = hwnd(window);
-        win_sys::window::set_dark_title_bar(main_hwnd, dark);
+        theme_title_bar(main_hwnd, cx);
         // The title bar and taskbar icons at their own sizes from the .ico
         // (issue #86: one image shrunk is a blue square at 100 % scaling)
         if !win_sys::app_icon::set_window_icons(main_hwnd, ICON_RESOURCE) {
