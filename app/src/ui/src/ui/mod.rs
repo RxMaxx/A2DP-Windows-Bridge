@@ -279,6 +279,9 @@ pub fn tab_bar<T: Clone + PartialEq + 'static>(
     let values: Vec<T> = tabs.iter().map(|c| c.value.clone()).collect();
     TabBar::new(id)
         .underline()
+        // Many tabs (the developer screen's): those that do not fit a narrow
+        // window are in a menu at the end, not cut off
+        .menu(tabs.len() > 6)
         .selected_index(selected)
         .children(tabs.into_iter().map(|c| {
             let tab = Tab::new().label(c.label);

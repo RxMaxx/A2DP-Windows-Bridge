@@ -341,10 +341,27 @@ impl AuracastMixer {
         fn absent<E: Styled>(on: bool, d: E) -> E {
             if on { d } else { d.opacity(0.4) }
         }
-        let head_cell = |text: SharedString| div().w(px(68.)).text_center().text_color(p.text_2).child(text);
+        // The columns share the card's width: the gains and the delay grow and
+        // shrink together between a least and a most, the names keep theirs.
+        // The header's cells take the same widths as the rows', so they line
+        // up; below the least width the grid scrolls sideways.
+        fn name_col<E: Styled>(d: E) -> E {
+            d.w(px(40.)).flex_none()
+        }
+        fn gain_col<E: Styled>(d: E) -> E {
+            d.flex_1().min_w(px(48.)).max_w(px(72.))
+        }
+        fn delay_col<E: Styled>(d: E) -> E {
+            d.flex_1().min_w(px(64.)).max_w(px(88.))
+        }
+        fn invert_col<E: Styled>(d: E) -> E {
+            d.w(px(64.)).flex_none()
+        }
+        let head_cell = |text: SharedString| gain_col(div()).text_center().text_color(p.text_2).child(text);
         let grid = div()
             .flex()
             .flex_col()
+            .min_w(px(40. + 8. * 48. + 64. + 64. + 10. * 4.))
             .gap(px(2.))
             .text_size(theme::FS_SMALL)
             .child(
@@ -352,18 +369,24 @@ impl AuracastMixer {
                     .flex()
                     .items_center()
                     .gap(px(4.))
-                    .child(div().w(px(56.)).text_color(p.text_2).child(t("ui.dev.auracast_mix_output")))
+                    .child(name_col(div()).truncate().text_color(p.text_2).child(t("ui.dev.auracast_mix_output")))
                     .children(INPUT_NAMES.iter().enumerate().map(|(c, name)| {
                         absent(st.present.get(c).copied().unwrap_or(false), head_cell((*name).into()))
                     }))
                     .child(
-                        div()
-                            .w(px(88.))
+                        delay_col(div())
+                            .truncate()
                             .text_center()
                             .text_color(p.text_2)
                             .child(format!("{} ({unit_label})", t("ui.dev.auracast_mix_delay"))),
                     )
-                    .child(div().w(px(56.)).text_center().text_color(p.text_2).child(t("ui.dev.auracast_mix_invert"))),
+                    .child(
+                        invert_col(div())
+                            .truncate()
+                            .text_center()
+                            .text_color(p.text_2)
+                            .child(t("ui.dev.auracast_mix_invert")),
+                    ),
             )
             .children(OUTPUT_NAMES.iter().enumerate().map(|(r, out)| {
                 let row_on = r < 2 || st.rear;
@@ -372,12 +395,12 @@ impl AuracastMixer {
                     let input = Input::new(&self.input(MixField::Cell(r, c)))
                         .readonly(mix.auto)
                         .aria_label(SharedString::from(format!("{inp} → {out}")))
-                        .w(px(68.))
+                        .w_full()
                         .when(on, |i| i.border_color(p.accent_fill))
                         .when(mix.auto, |i| i.bg(p.surface_2));
                     absent(
                         st.present.get(c).copied().unwrap_or(false),
-                        div()
+                        gain_col(div())
                             .id(("mix-cell", r * 8 + c))
                             .on_click(cx.listener(|this, ev: &gpui_kit::ClickEvent, window, cx| {
                                 if ev.click_count() == 2 && this.mix().is_some_and(|m| m.auto) {
@@ -394,15 +417,17 @@ impl AuracastMixer {
                         .flex()
                         .items_center()
                         .gap(px(4.))
-                        .child(div().w(px(56.)).text_center().child(*out))
+                        .child(name_col(div()).text_center().child(*out))
                         .children(cells)
                         .child(
-                            Input::new(&self.input(MixField::Delay(r)))
-                                .aria_label(SharedString::from(format!("{} {out}", t("ui.dev.auracast_mix_delay"))))
-                                .w(px(88.)),
+                            delay_col(div()).child(
+                                Input::new(&self.input(MixField::Delay(r)))
+                                    .aria_label(SharedString::from(format!("{} {out}", t("ui.dev.auracast_mix_delay"))))
+                                    .w_full(),
+                            ),
                         )
                         .child(
-                            div().w(px(56.)).flex().justify_center().child(
+                            invert_col(div()).flex().justify_center().child(
                                 Switch::new(("mix-invert", r))
                                     .small()
                                     .checked(invert)

@@ -131,16 +131,28 @@ fn device_pill(entry: Option<&AudioEntry>, index: usize, collapsed: bool, cx: &A
         .text_size(theme::FS_SMALL)
         // As Home's card: the device, battery and state, the codec
         .when_some(device, |d, name| {
-            d.child(div().text_size(theme::FS_BODY).font_weight(FontWeight::SEMIBOLD).line_clamp(2).child(name))
+            // Two lines at most, cut with an ellipsis inside the block
+            d.child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .text_size(theme::FS_BODY)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .line_clamp(2)
+                    .text_ellipsis()
+                    .child(name),
+            )
         })
         .child(
             div()
                 .flex()
+                // A long state goes under the battery, not out of the block
+                .flex_wrap()
                 .items_center()
-                .gap(theme::S1)
+                .gap_x(theme::S1)
                 .min_w_0()
                 .children(battery)
-                .child(div().text_color(st_text).child(model::pill_state_text(snap, state))),
+                .child(div().min_w_0().max_w_full().text_color(st_text).child(model::pill_state_text(snap, state))),
         )
         // The codec, then its details below it, as on Home and in the tray (issue #86)
         .when(info, |d| {

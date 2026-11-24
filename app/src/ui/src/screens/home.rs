@@ -438,14 +438,17 @@ impl Render for DeviceCard {
             .child(
                 div()
                     .flex()
-                    .items_center()
+                    // The dot beside the first line
+                    .items_start()
                     .gap(theme::S2)
                     .min_w_0()
+                    // No wider than the card: a long state goes onto more lines
+                    .max_w_full()
                     .text_color(text_color)
                     // No red dot for an error: it read as recording (issue #86)
-                    .when(card.dot, |d| d.child(dot(dot_color)))
+                    .when(card.dot, |d| d.child(div().flex_none().pt(px(8.)).child(dot(dot_color))))
                     // An error's text is in the panel above, with its fix
-                    .child(card.status.clone()),
+                    .child(div().min_w_0().child(card.status.clone())),
             );
         let codec = card
             .live

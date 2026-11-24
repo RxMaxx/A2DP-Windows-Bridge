@@ -329,9 +329,10 @@ fn style_components(t: &mut Theme, p: &Palette) {
     c.sidebar_accent_foreground = p.text;
     c.tab = gpui_kit::transparent_black();
     c.tab_bar = gpui_kit::transparent_black();
-    // The segmented choice: a well in the window's colour, the chosen one raised
-    c.tab_bar_segmented = p.bg;
-    c.tab_active = if p.dark { p.surface_3 } else { hex(0xffffff) };
+    // The segmented choice: a well, the chosen one in the window's colour
+    // (the library draws it so)
+    c.tab_bar_segmented = if p.dark { hex(0x161616) } else { p.surface_3 };
+    c.tab_active = p.surface_2;
     c.tab_active_foreground = p.text;
     c.tab_foreground = p.text_2;
     c.title_bar = p.bg_nav;
