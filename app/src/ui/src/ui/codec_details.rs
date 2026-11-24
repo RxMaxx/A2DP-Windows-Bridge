@@ -6,7 +6,7 @@
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, Div, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Role, Stateful,
+    App, Div, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Role, SharedString, Stateful,
     StatefulInteractiveElement as _, Styled as _, div, px, relative,
 };
 use ipc::{CodecDetails, StreamInfo};
@@ -37,12 +37,14 @@ fn row(label: &str, value: impl IntoElement, cx: &App) -> Div {
 
 /// A setting as chips: in use, offered by the device, not offered (a
 /// screen reader hears which)
-fn chip(i: usize, c: &CdChip, cx: &App) -> Stateful<Div> {
+fn chip(c: &CdChip, cx: &App) -> Stateful<Div> {
     let p = cx.palette();
+    let name: SharedString = c.accessible_text().into();
     let base = div()
-        .id(("cd-chip", i))
+        // By its words: the rows of one card hold chips of the same number
+        .id(super::child_id("cd-chip", &name))
         .role(Role::ListItem)
-        .aria_label(c.accessible_text())
+        .aria_label(name)
         .px(theme::S2)
         .h(px(20.))
         .flex()
@@ -62,7 +64,7 @@ fn chip(i: usize, c: &CdChip, cx: &App) -> Stateful<Div> {
 }
 
 fn chips(list: &[CdChip], cx: &App) -> Div {
-    div().flex().flex_wrap().gap(theme::S1).children(list.iter().enumerate().map(|(i, c)| chip(i, c, cx)))
+    div().flex().flex_wrap().gap(theme::S1).children(list.iter().map(|c| chip(c, cx)))
 }
 
 fn span(s: BarSpan) -> Div {

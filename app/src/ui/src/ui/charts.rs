@@ -431,10 +431,14 @@ impl RenderOnce for TimeChart {
             .text_size(theme::FS_12)
             .text_color(p.text_2)
             .font_weight(FontWeight::SEMIBOLD)
+            .flex_none()
             .child(self.title.clone());
         let head = div().flex().justify_between().items_baseline().gap(theme::S2).child(title).when(!multi, |d| {
             d.child(
                 div()
+                    // A long value wraps under itself instead of leaving the card
+                    .min_w_0()
+                    .text_right()
                     .text_size(theme::FS_16)
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(value_color)
