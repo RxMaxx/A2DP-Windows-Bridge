@@ -406,7 +406,17 @@ impl DevicePicker {
     fn open_rename(&mut self, d: &Device, window: &mut Window, cx: &mut Context<Self>) {
         self.renaming = Some(d.clone());
         self.rename_tried = false;
-        let name = d.name.clone();
+        // A name longer than the field takes (a device's own can be) is cut
+        // to what fits: the field refuses a longer one and would stay empty
+        let mut units = 0;
+        let name: String = d
+            .name
+            .chars()
+            .take_while(|c| {
+                units += c.len_utf16();
+                units <= 64
+            })
+            .collect();
         self.new_name.update(cx, |s, cx| {
             s.set_value(name, window, cx);
         });
@@ -626,7 +636,9 @@ impl DevicePicker {
                             .flex_wrap()
                             .items_center()
                             .gap(theme::S2)
-                            .child(div().font_weight(FontWeight::BOLD).child(device_label(&shown)))
+                            .child(
+                                div().min_w_0().max_w_full().font_weight(FontWeight::BOLD).child(device_label(&shown)),
+                            )
                             .child(
                                 div().font_family(theme::FONT_MONO).text_color(p.text_2).child(shown.address.clone()),
                             )
@@ -705,7 +717,7 @@ impl DevicePicker {
             .flex_col()
             .flex_1()
             .min_w_0()
-            .child(div().font_weight(FontWeight::SEMIBOLD).child(label.clone()))
+            .child(div().font_weight(FontWeight::SEMIBOLD).line_clamp(2).text_ellipsis().child(label.clone()))
             .child(
                 div()
                     .font_family(theme::FONT_MONO)
@@ -720,6 +732,7 @@ impl DevicePicker {
                 .small()
                 .outline()
                 .rounded(px(999.))
+                .h(px(24.))
                 .text_size(theme::FS_SMALL)
                 .on_click(move |_, window, cx| super::pairing_dialog::open(&d, window, cx))
         };

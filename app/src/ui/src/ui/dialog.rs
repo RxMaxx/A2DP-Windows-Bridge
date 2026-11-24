@@ -201,10 +201,13 @@ pub fn show(
             .child(
                 div()
                     .flex()
-                    .items_center()
+                    // The sign beside the first line of a title that wraps
+                    .items_start()
                     .gap(theme::S2)
                     .text_size(theme::FS_TITLE)
-                    .when(q.warn, |d| d.child(div().flex().text_color(p.warn_text).child(icon(IconName::Warning))))
+                    .when(q.warn, |d| {
+                        d.child(div().flex().pt(px(4.)).text_color(p.warn_text).child(icon(IconName::Warning)))
+                    })
                     .child(div().flex_1().min_w_0().child(super::text(q.title.clone()))),
             )
             .when_some(q.subtitle.clone(), |d, s| {

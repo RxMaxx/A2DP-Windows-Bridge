@@ -167,7 +167,8 @@ fn select_named<T: Clone + PartialEq + 'static>(
     };
     button.dropdown_menu(move |menu, _, _| {
         // Not a narrow strip under a wide button
-        let mut menu = menu.min_w(px(160.));
+        // nor wider than a long name (an audio device's) leaves readable
+        let mut menu = menu.min_w(px(160.)).max_w(px(480.));
         let mut group: Option<SharedString> = None;
         for c in &choices {
             if c.group != group {
@@ -213,6 +214,9 @@ pub fn menu_choice(label: SharedString, chosen: bool, disabled: bool) -> PopupMe
             .aria_toggled(if chosen { Toggled::True } else { Toggled::False })
             .when(disabled, |d| d.a11y_synthetic_children(|b| b.parent_node().set_disabled()))
             .flex_1()
+            // The entry does not shrink with its menu: a width of its own
+            .max_w(px(420.))
+            .truncate()
             .child(label.clone())
     })
     .checked(chosen)
@@ -357,8 +361,14 @@ pub fn row() -> Div {
 
 /// A setting's line in a card: a [`row`] with a hairline above it from edge
 /// to edge of the card, as the lines of Windows' Settings
-fn setting_row(cx: &App) -> Div {
+pub fn setting_row(cx: &App) -> Div {
     row().mx(-theme::S4).px(theme::S4).pt(theme::S3).min_h(px(52.)).border_t_1().border_color(cx.palette().border)
+}
+
+/// A setting's line that is the first thing in its card (a card without a
+/// heading): without the hairline, which would double the card's edge
+pub fn first_row(line: Div) -> Div {
+    line.border_t_0().pt_0().min_h(px(40.))
 }
 
 /// A line's label and hint; `read`: the label is read out too (a switch
@@ -494,7 +504,7 @@ pub fn nav_row(
                 .child(value)
                 .child(icon(IconName::ChevronRight).small()),
         );
-    div().flex().mx(-theme::S4).px(theme::S2).pt(theme::S2).border_t_1().border_color(p.border).child(line)
+    div().flex().mx(-theme::S4).px(theme::S2).pt(theme::S3).border_t_1().border_color(p.border).child(line)
 }
 
 /// A card (`.card`): children one below the other

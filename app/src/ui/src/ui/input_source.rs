@@ -207,7 +207,7 @@ impl Render for InputSource {
         div()
             .flex()
             .flex_col()
-            .gap(theme::S2)
+            .gap(theme::S3)
             .mx(-theme::S4)
             .px(theme::S4)
             .pt(theme::S3)

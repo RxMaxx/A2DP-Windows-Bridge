@@ -120,6 +120,8 @@ impl Render for About {
                                 div()
                                     .flex()
                                     .flex_col()
+                                    .flex_1()
+                                    .min_w_0()
                                     .gap(theme::S1)
                                     .child(div().font_weight(FontWeight::SEMIBOLD).child(t("help.full_name")))
                                     .child(ui::muted(

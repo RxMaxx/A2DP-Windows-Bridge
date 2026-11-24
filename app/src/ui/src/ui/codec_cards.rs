@@ -93,7 +93,7 @@ fn bar(label: String, value: u8, on: bool, cx: &App) -> Div {
         .gap(theme::S2)
         .text_size(theme::FS_SMALL)
         .text_color(p.text_2)
-        .child(div().w(px(88.)).flex_none().truncate().child(label.clone()))
+        .child(div().w(px(108.)).flex_none().truncate().child(label.clone()))
         .child(
             div()
                 .id(SharedString::from(format!("cbar-{label}")))
@@ -427,7 +427,7 @@ pub fn value_box(text: impl Into<SharedString>, cx: &App) -> Div {
     div()
         .flex()
         .items_center()
-        .min_h(px(32.))
+        .min_h(gpui_kit::rems(2.))
         .min_w(px(96.))
         .px(theme::S3)
         .rounded(theme::RADIUS)
@@ -575,7 +575,7 @@ impl Render for CodecSettings {
                         ui_model::view::codecs::FrameKey::Allocation => "sbc-allocation",
                         ui_model::view::codecs::FrameKey::ChannelMode => "sbc-channel-mode",
                     };
-                    div().flex_1().min_w(px(160.)).child(super::field_stacked(
+                    div().flex_1().min_w(px(220.)).child(super::field_stacked(
                         f.title.clone(),
                         None,
                         None,

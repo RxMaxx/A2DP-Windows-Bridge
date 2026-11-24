@@ -22,13 +22,13 @@ use crate::ui::dialog::{self, Question};
 use crate::ui::{self, BannerKind, ButtonKind, Choice, IconName, icon};
 
 /// The theme, here and on the setup's last step
-pub fn theme_choice(settings: &CoreSettings, _cx: &App) -> impl IntoElement + use<> {
+pub fn theme_choice(settings: &CoreSettings, cx: &App) -> impl IntoElement + use<> {
     let choices = vec![
         Choice::new("system".to_owned(), t("settings.theme_system")),
         Choice::new("light".to_owned(), t("settings.theme_light")),
         Choice::new("dark".to_owned(), t("settings.theme_dark")),
     ];
-    ui::row().child(div().child(t("settings.theme"))).child(ui::segmented(
+    ui::setting_row(cx).child(div().child(t("settings.theme"))).child(ui::segmented(
         "theme",
         &settings.theme,
         choices,
@@ -358,7 +358,7 @@ impl Settings {
             // A core that runs as a service keeps its folder protected
             .when(!snap.service_mode, |d| {
                 d.child(
-                    ui::row()
+                    ui::setting_row(cx)
                         .child(
                             div()
                                 .flex()
@@ -376,7 +376,7 @@ impl Settings {
                 )
             })
             .child(
-                ui::row().child(div().child(t("ui.setup.title"))).child(
+                ui::setting_row(cx).child(div().child(t("ui.setup.title"))).child(
                     ui::button("run-setup", t("ui.settings.run_setup"), ButtonKind::Default)
                         .icon(icon(IconName::Play))
                         .on_click(|_, _, cx| app::state(cx).update(cx, |s, cx| s.set_setup_active(true, cx))),
