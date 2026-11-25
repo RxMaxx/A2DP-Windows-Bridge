@@ -1587,6 +1587,7 @@ fn apply_dev_overrides(settings: &Settings) {
         rtn_p_to_c: debug.le_rtn_p_to_c,
         interleaved: debug.le_interleaved,
     });
+    bt_host::set_buffer_margin(debug.le_buffer_margin);
     crate::le_stream::set_debug(crate::le_stream::LeDebug {
         mic_preset: debug.le_mic_preset.clone(),
         retry_same_link: debug.le_mic_retry_same_link,

@@ -141,6 +141,9 @@ pub fn new_profile() -> Profile {
         le_audio: false,
         // LE Audio: LC3 unless LC3 LL is chosen (issue #86)
         le_low_latency: false,
+        // LE Audio: the channels as planned; an earbud alone plays mono
+        le_swap_channels: false,
+        le_alone_channel: String::new(),
         headset_mic: "auto".into(),
         mic_device_id: String::new(),
         mic_device_name: String::new(),

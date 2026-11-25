@@ -49,6 +49,11 @@ le_rtn_c_to_p?: number | null, le_rtn_p_to_c?: number | null,
  */
 le_interleaved: boolean, 
 /**
+ * LE Audio jitter buffer: frames over the controller queue at the
+ * start (0..=7); None: the default (3)
+ */
+le_buffer_margin?: number | null, 
+/**
  * The LE Audio microphone's preset, taken as it is; empty: as planned
  */
 le_mic_preset: string, 

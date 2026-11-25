@@ -32,4 +32,14 @@ low_latency: boolean,
  * English, v1's StreamPlan::describe ("LC3 48 kHz 10 ms 120 octets (96
  * kbps/ch), 2 ch over 2 CIS, 48_4_2")
  */
-summary: string, };
+summary: string, 
+/**
+ * The presentation delay set up: the device's time from receiving an
+ * SDU to playing it, decoding included, us; 0 from an older core
+ */
+presentation_delay_us: number, 
+/**
+ * LC3's algorithmic delay (a frame and its look-ahead), us; 0 from an
+ * older core
+ */
+codec_delay_us: number, };

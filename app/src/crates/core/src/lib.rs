@@ -6,16 +6,17 @@
 #![forbid(unsafe_code)]
 
 pub mod adapter;
-pub mod auracast_mix;
 pub mod broadcast_volume;
 pub mod compat;
 pub mod default_input;
 pub mod devices;
 mod health;
 pub mod hid;
+pub mod le_channels;
 pub mod le_sets;
 mod le_stream;
 pub mod link;
+pub mod matrix_mix;
 pub mod media_eq;
 pub mod messages;
 mod mic_test;

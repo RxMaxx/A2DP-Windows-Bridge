@@ -43,7 +43,7 @@ for reference (`git show b819893:app/src/le_audio/<file>`).
 | `app/src/crates/core/src/devices.rs` | `le_audio_devices.txt` (`load_le` / `save_le` / `remove_le`) |
 | `app/src/core/src/cli.rs` | `--le-audio`, `--le-device`, `--le-preset`, `--le-low-latency`, `--le-scan`, `--le-sim-volume`, `--mcp-dry-run`, `--ccp-sim`, `--ccp-console` (v1 `le_audio_cli.cpp`'s flow and lines); `--headset-mic`, `--mic-output` (the microphone) |
 | `app/src/core/src/state.rs`, `resident.rs` | The UI's state: LE settings, LE devices, `le_scanning`, `StreamInfo.le`, `LinkSample.iso`, `settings.set`'s `le_audio_deferred`; diagnostics section `[LE Audio (experimental)]` (`crates/core/src/diag.rs`) |
-| `app/src/ui/src/`, `app/src/crates/ui-model/src/` | The Codecs screen's LC3 and LC3 LL cards (LC3 LL = the profile's `le_low_latency`), the device picker's LE tags, Diagnostics' ISO counters |
+| `app/src/ui/src/`, `app/src/crates/ui-model/src/` | The Codecs screen's LC3 and LC3 LL cards (LC3 LL = the profile's `le_low_latency`), the device picker's LE tags, Diagnostics' ISO counters and estimated latency (LC3's frame and look-ahead + prefill x frame + the CIS transport latency + the presentation delay) |
 | `tools/a2dp_decode/le_audio_decode.cpp` | `bluecaster_decode --le-audio` |
 | `tools/emu/emu_le_audio_sink.py`, `tools/emu/le_audio/` | Bumble LE Audio sink(s); `le_audio/<profile>.py` = the sink side of each profile; `le_audio/mic.py` + `mic_frames.py` = the headset microphone (`--mic`) |
 | `tools/emu/le_audio_tests/` | `run_test.py --le-audio` cases and checks, one file per profile (`core.py`, `privacy.py`, `csip.py`, `vcp.py`, `mcp.py`, `ccp.py`, `tmap_gmap.py`, `bas.py`, `mic.py`, `gatt_cache.py`) |
@@ -346,8 +346,32 @@ switch, an output chosen); changing them restarts the LE stream.
 downmixes any PCM to stereo, resamples linearly if needed, encodes LC3 per
 channel and pushes one SDU set per frame (10 or 7.5 ms) into the jitter
 buffer (`le_audio::sdu_queue::SduQueue`: prefill queue + 3 sets, one more per
-underrun up to queue + 7, 16 at most, dropping the oldest beyond that). No
+underrun up to 4 more, 16 at most, dropping the oldest beyond that; Developer >
+Debug's jitter buffer margin, 0-7 frames, replaces the 3 for the next stream
+through `bt_host::set_buffer_margin`, each frame one frame of latency). No
 allocation per frame: sets are recycled through the queue's pool.
+
+Channels of a stream to a device (each LE Audio profile's own,
+`le_swap_channels` / `le_alone_channel`, Audio Devices): every LC3 channel
+of the plan takes its source through `pipeline::channels::Channels::source`.
+Swapped: left and right (and rear left and right) exchange, mono stays.
+While an earbud plays alone (the other one of its set left the stream:
+`LeAudioPath::set_alone`), it plays the left or right channel, the mono mix
+(the default, saved as none), or Auto: its own planned side, as if nothing
+had changed (what the earbud does with it is its business). The core keeps
+one `ChannelsHandle` (`le_channels.rs`): the profile that starts streaming
+sets it and a save of the streaming profile updates it, from the next frame,
+without reconnecting (`Profile::only_live_processing_differs`). Broadcasts
+do not use it.
+
+The TWS matrix mixer (developer mode, Developer > TWS, `tws.mix`,
+`tws.mix_set`, `tws.mix_preset_save`, `tws.mix_preset_delete`) is the
+Auracast matrix mixer (below) for the two outputs FL FR of a stream to a
+device, in `tws_mix.json` with its own presets (`matrix_mix.rs`,
+`Target::Tws`). Off by default: once turned on (`tws.mix_set` with
+`enabled`) a stream started from then on takes it instead of the fixed
+downmix, and its cells, delays and polarity are followed while it runs. The
+channel settings above apply after it.
 
 The BTstack thread sends unicast audio paced by the SDU interval
 (`le/iso_send.rs`, run loop timer `TIMER_ISO`), 2 intervals ahead of real
@@ -520,7 +544,10 @@ against a scripted peer, the CLI's parsing); btstack-sys's
 **CSIP (Set Coordinator, `csip.rs`).** Reads SIRK (plaintext, or encrypted:
 decrypted with sdf and the bond's LTK), size, rank and lock of a CSIS;
 devices with equal SIRKs form a set. Resolves RSIs in scan results (cache of
-256). `prepare_group` waits up to 6 s for the reads, adds connected members,
+256); an advertiser without an RSI whose RPA resolves to a bonded member of a
+known set counts as that set's member too (WF-1000XM6 advertises no RSI at
+all: without this its second earbud waited for the stream's rejoin scan,
+15-20 s). `prepare_group` waits up to 6 s for the reads, adds connected members,
 scans up to 10 s for the missing ones, connects them one at a time and
 orders the set by rank ("CSIP: streaming to coordinated set N, k of n
 members: ..."; "only k of n" otherwise). Locks the members in rank order
@@ -751,12 +778,13 @@ interpolation, so 0.01 ms steps work) and polarity. Automatic: fronts as
 they are, centre (-3 dB) and LFE (-6 dB) into both fronts, back/side into
 the rear (or folded into the fronts at -3 dB when the layout has no rear),
 with an optional row normalisation; or every gain by hand. The settings and
-named presets live in `auracast_mix.json`; the encode thread reads a
+named presets live in `auracast_mix.json` (`matrix_mix.rs`,
+`Target::Auracast`); the encode thread reads a
 versioned `MixHandle`, so changes from the Auracast tab (`auracast.mix_set`)
 are heard from the next block while broadcasting. Only the matrix layout
 (`matrix_<front>_<rear>`, each pair stereo / separate / subgroups / off;
-`BroadcastLayout::Matrix`) uses it: stereo, mono and split, and unicast
-streams, keep the fixed downmix. The BT600 runs two BIGs at most, which the
+`BroadcastLayout::Matrix`) uses it: stereo, mono and split keep the fixed
+downmix (unicast streams have the TWS mixer, under Audio path). The BT600 runs two BIGs at most, which the
 Auracast tab warns about (stereo and subgroups take one BIG, separate two).
 
 The rear may run at another rate than the front (`rear_quality`,
@@ -897,7 +925,18 @@ LE keys of classic devices (issue #86):
 - Broadcast works only as a source (developer mode, see above); no BASS, no CAP
   procedures beyond what BAP needs.
 - SDUs without time stamps; no LE Read ISO TX Sync; a simple jitter buffer
-  (the prefill only grows).
+  (the prefill only grows). Without time stamps the controller puts an SDU
+  in the next event of its CIS, so a CIS whose first SDUs (or those after an
+  underrun) just missed its event plays a frame behind the others: the
+  sound of a set moves to the other side (seen with WF-1000XM6 at a buffer
+  margin of 0-1). `iso_send.rs` compares the CIS's low (10th percentile)
+  completion delays every 2 s; the median is no use, as retransmissions
+  (FT 2 on 48_6_2) move it by up to an interval, and realigning on it made
+  the sound wander. A start or an underrun arms the check; the first window
+  after one is left out, and a CIS later by 80 % of a frame or more in three
+  windows in a row gets one SDU left out ("plays a frame behind the others
+  ... one SDU left out"), which disarms it until the next underrun; at most
+  4 times a stream.
 - LE Audio does not support application capture (it does support system
   loopback, virtual devices and the test tone).
 - Not verified with real LE Audio headphones or a real controller's CIS

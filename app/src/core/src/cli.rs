@@ -1781,6 +1781,7 @@ fn le_run(a: &Args, service: &Service, running: &Arc<AtomicBool>) -> i32 {
         host.stats().clone(),
         None,
         None,
+        None,
     ) {
         Ok(path) => {
             let rate = path.rate();
@@ -1867,7 +1868,7 @@ fn le_run(a: &Args, service: &Service, running: &Arc<AtomicBool>) -> i32 {
             if shown_dropped > 0 && playing > 0 {
                 outln!("\n*** LE Audio: {shown_dropped} device(s) left the stream, {playing} play on ***");
                 if let Some(p) = audio.as_ref() {
-                    p.set_mono(playing <= 1);
+                    p.set_alone(playing <= 1);
                 }
                 rejoin_at = Some(Instant::now() + LE_REJOIN_FIRST);
             }

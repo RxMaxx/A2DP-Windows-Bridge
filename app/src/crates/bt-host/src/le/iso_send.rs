@@ -37,6 +37,22 @@
 //! MediaTek controllers keep [`MEDIATEK_QUEUE_DEPTH`] or the Developer >
 //! Debug setting.
 //!
+//! Alignment: SDUs go without a time stamp, so the controller puts each
+//! one in the next event of its CIS. When one CIS's first SDUs (or those
+//! after an underrun) reach the controller just after its event while the
+//! others' make theirs, that CIS plays a frame later than the others for
+//! the rest of the stream: the sound of a set of earbuds moves to the other
+//! side. Every [`ALIGN_WINDOW_MS`] the low completion delay (the
+//! [`ALIGN_PERCENTILE`]th percentile: SDUs through at the first try, so
+//! retransmissions, which move the median by up to an interval, do not
+//! count) of each CIS is compared; a CIS more than [`ALIGN_THRESHOLD_PCT`] %
+//! of a frame later than the earliest one in [`ALIGN_CONFIRM`] windows in a
+//! row gets one SDU left out (it holds one more in the controller than the
+//! others), which brings it back in line. A skew only comes from a start or
+//! an underrun, so only those arm the check: the first window after one is
+//! left out (the stream settling), and a realignment disarms it until the
+//! next. At most [`ALIGN_MAX`] times a stream.
+//!
 //! Health: counters are published about once a second
 //! ([`BtHost::le_stream_stats`](crate::BtHost)); every 10 s an "LE stream
 //! health" line per CIS (SDUs per second, late SDUs, completion delay,
@@ -141,6 +157,20 @@ const HEALTH_MS: u32 = 10_000;
 
 /// Completion delays kept per CIS for one health line
 const DELAY_SAMPLES_MAX: usize = 4096;
+
+/// The window over which the CIS's completion delays are compared
+const ALIGN_WINDOW_MS: u32 = 2000;
+/// Completions a CIS needs in a window to be compared
+const ALIGN_MIN_SAMPLES: usize = 50;
+/// The percentile of a window's completion delays compared
+const ALIGN_PERCENTILE: usize = 10;
+/// A CIS whose low completion delay is this share of a frame (%) later
+/// than the earliest CIS's is a frame behind
+const ALIGN_THRESHOLD_PCT: u32 = 80;
+/// Windows in a row a CIS must be behind in
+const ALIGN_CONFIRM: u8 = 3;
+/// Realignments a stream gets at most
+const ALIGN_MAX: u32 = 4;
 
 /// LE CIS Established parameters kept (the latest per handle)
 const LINKS_MAX: usize = 8;
@@ -321,6 +351,10 @@ struct CisOut {
     window_late: u64,
     window_peak: usize,
     delays_ms: Vec<u32>,
+    /// Completion delays of the alignment window
+    align_ms: Vec<u32>,
+    /// The next SDU is left out to bring the CIS back in line
+    skip_next: bool,
 }
 
 impl CisOut {
@@ -340,6 +374,8 @@ impl CisOut {
             window_late: 0,
             window_peak: 0,
             delays_ms: Vec::with_capacity(256),
+            align_ms: Vec::with_capacity(512),
+            skip_next: false,
         }
     }
 
@@ -375,8 +411,12 @@ impl CisOut {
     fn on_completed(&mut self, n: u16, now: u32) {
         for _ in 0..n {
             let Some(at) = self.in_flight.pop_front() else { break };
+            let delay = now.wrapping_sub(at);
             if self.delays_ms.len() < DELAY_SAMPLES_MAX {
-                self.delays_ms.push(now.wrapping_sub(at));
+                self.delays_ms.push(delay);
+            }
+            if self.align_ms.len() < DELAY_SAMPLES_MAX {
+                self.align_ms.push(delay);
             }
             self.completed += 1;
         }
@@ -394,9 +434,24 @@ impl CisOut {
         if idle > i32::MAX as u32 { 0 } else { idle }
     }
 
+    /// The low completion delay of the alignment window (None with too few
+    /// completions); starts the next window
+    fn take_align_low(&mut self) -> Option<u32> {
+        let mut d = std::mem::take(&mut self.align_ms);
+        let low = (d.len() >= ALIGN_MIN_SAMPLES).then(|| {
+            d.sort_unstable();
+            d[d.len() * ALIGN_PERCENTILE / 100]
+        });
+        d.clear();
+        self.align_ms = d;
+        low
+    }
+
     fn down(&mut self) {
         self.alive = false;
         self.stalled = false;
+        self.skip_next = false;
+        self.align_ms.clear();
         self.in_flight.clear();
         while let Some(p) = self.pending.pop_front() {
             self.free.push(p.sdu);
@@ -484,6 +539,14 @@ pub struct IsoSender {
     /// Every CIS stalled: why, until taken
     stall: Option<String>,
     stall_reported: bool,
+    /// Alignment: the last window's end, the CIS behind and in how many
+    /// windows in a row, whether a start or an underrun armed the check,
+    /// the windows still left out, the realignments of this stream
+    last_align_ms: u32,
+    align_suspect: Option<(u16, u8)>,
+    align_armed: bool,
+    align_settle: u8,
+    realigns: u32,
     /// LE CIS Established of the recent CIS (any stream)
     links: Vec<LeCisEstablished>,
 
@@ -636,6 +699,17 @@ impl IsoSender {
         self.next_cis = 0;
         self.stall = None;
         self.stall_reported = false;
+        self.align_suspect = None;
+        self.align_armed = false;
+        self.align_settle = 0;
+        self.realigns = 0;
+    }
+
+    /// A start or an underrun: a CIS may have fallen a frame behind
+    fn arm_alignment(&mut self) {
+        self.align_armed = true;
+        self.align_settle = 1;
+        self.align_suspect = None;
     }
 
     /// Broadcast stop, first step: a round that only some BIS got goes on
@@ -941,6 +1015,7 @@ impl IsoSender {
         drop(q);
         if let Some(u) = underrun {
             tracing::warn!("{u}");
+            self.arm_alignment();
         }
         self.counters.sets_sent += 1;
         if self.counters.sets_sent.is_multiple_of(1000) {
@@ -1042,6 +1117,8 @@ impl IsoSender {
         self.t0_ms = Some(now);
         self.last_stats_ms = now;
         self.last_health_ms = now;
+        self.last_align_ms = now;
+        self.arm_alignment();
         for c in &mut self.cis {
             c.progress_ms = now;
         }
@@ -1090,6 +1167,11 @@ impl IsoSender {
         if set.len() == self.cis.len() {
             let max = self.pending_max;
             for (c, sdu) in self.cis.iter_mut().zip(&set) {
+                if c.skip_next {
+                    // Left out: the CIS holds one SDU less from now on
+                    c.skip_next = false;
+                    continue;
+                }
                 if c.alive {
                     c.give(seq, sdu, deadline, now, max);
                 }
@@ -1191,6 +1273,10 @@ impl IsoSender {
         } else if stalled > 0 && stalled < up && self.stall.is_none() {
             tracing::trace!("LE Audio: {stalled} of {up} CIS stalled, the others play on");
         }
+        if now.wrapping_sub(self.last_align_ms) >= ALIGN_WINDOW_MS {
+            self.last_align_ms = now;
+            self.check_alignment();
+        }
         if now.wrapping_sub(self.last_stats_ms) >= STATS_MS {
             self.last_stats_ms = now;
             self.refresh_queue_stats();
@@ -1212,6 +1298,59 @@ impl IsoSender {
                 s.overflows,
                 s.send_errors
             );
+        }
+    }
+
+    /// Alignment window over: a CIS a frame behind the earliest one in
+    /// [`ALIGN_CONFIRM`] windows in a row gets one SDU left out
+    fn check_alignment(&mut self) {
+        let lows: Vec<(usize, u32)> = self
+            .cis
+            .iter_mut()
+            .enumerate()
+            .filter(|(_, c)| c.alive)
+            .filter_map(|(i, c)| c.take_align_low().map(|m| (i, m)))
+            .collect();
+        if lows.len() < 2 || !self.align_armed || self.realigns >= ALIGN_MAX {
+            self.align_suspect = None;
+            return;
+        }
+        if self.align_settle > 0 {
+            self.align_settle -= 1;
+            return;
+        }
+        let earliest = lows.iter().map(|&(_, m)| m).min().unwrap_or(0);
+        let Some(&(late, latest)) = lows.iter().max_by_key(|&&(_, m)| m) else { return };
+        let threshold_ms = self.frame_us * ALIGN_THRESHOLD_PCT / 100 / 1000;
+        let handle = self.cis[late].handle;
+        if latest.saturating_sub(earliest) < threshold_ms.max(1) {
+            self.align_suspect = None;
+            return;
+        }
+        let windows = match self.align_suspect {
+            Some((h, n)) if h == handle => n + 1,
+            _ => 1,
+        };
+        if windows < ALIGN_CONFIRM {
+            tracing::debug!(
+                "LE Audio: CIS 0x{handle:04X} completes {} ms later than the earliest CIS ({latest} vs {earliest} ms, \
+                 p{ALIGN_PERCENTILE}, window {windows} of {ALIGN_CONFIRM})",
+                latest - earliest
+            );
+            self.align_suspect = Some((handle, windows));
+            return;
+        }
+        self.align_suspect = None;
+        self.align_armed = false;
+        self.realigns += 1;
+        self.cis[late].skip_next = true;
+        tracing::info!(
+            "LE Audio: CIS 0x{handle:04X} plays a frame behind the others (completion {latest} vs {earliest} ms, \
+             p{ALIGN_PERCENTILE}): one SDU left out to bring it in line ({} of {ALIGN_MAX})",
+            self.realigns
+        );
+        if self.realigns == ALIGN_MAX {
+            tracing::warn!("LE Audio: CIS realigned {ALIGN_MAX} times: no further realignment in this stream");
         }
     }
 
@@ -1237,6 +1376,13 @@ impl IsoSender {
             prefill: self.prefill as u32,
             late_sdus: self.cis.iter().map(|c| c.late).sum(),
             cis_stalled: self.cis_stalled(),
+            transport_latency_us: self
+                .cis_handles
+                .iter()
+                .filter_map(|h| self.links.iter().find(|l| l.cis_handle == *h))
+                .map(|l| l.transport_latency_c_to_p)
+                .max()
+                .unwrap_or(0),
         }
     }
 
@@ -1665,6 +1811,92 @@ mod tests {
         s.stop(&out);
         let st = *stats.lock().unwrap();
         assert_eq!((st.sets_sent, st.sdus_sent, st.silence_sets, st.sets_encoded, st.late_sdus), (6, 12, 2, 5, 0));
+    }
+
+    /// Two CIS sending each SDU at once; the second's SDUs complete one
+    /// interval later than the first's (its stream a frame behind). The
+    /// sender, the fake, the second CIS's sequence numbers.
+    fn run_skewed(until_ms: u32) -> (IsoSender, Fake, Vec<u16>) {
+        let out = Fake::default();
+        let mut s = IsoSender::new(Arc::default());
+        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 8, 100);
+        out.take();
+        let mut right = Vec::new();
+        let mut t = 10;
+        while t <= until_ms {
+            at(&mut s, &out, t);
+            for l in out.sends() {
+                if let Some(seq) = l.strip_prefix("send 61 #") {
+                    right.push(seq.split(' ').next().unwrap().parse().unwrap());
+                }
+            }
+            // One SDU leaves each controller queue an interval; the second
+            // CIS started an interval later (it holds one more SDU)
+            s.on_hci_event(&out, &completed(0x60, 1));
+            if t > 10 {
+                s.on_hci_event(&out, &completed(0x61, 1));
+            }
+            t += 10;
+        }
+        (s, out, right)
+    }
+
+    #[test]
+    fn a_cis_a_frame_behind_is_brought_in_line_once() {
+        let (s, _, right) = run_skewed(10_000);
+        // A window left out, three behind: one SDU of the second CIS left
+        // out (its numbers skip one), then they are in line and stay so
+        assert_eq!(s.realigns, 1);
+        let gaps: Vec<u16> = right.windows(2).filter(|w| w[1] != w[0] + 1).map(|w| w[1]).collect();
+        assert_eq!(gaps.len(), 1, "{gaps:?}");
+        assert!((790..=810).contains(&gaps[0]), "{gaps:?}");
+    }
+
+    #[test]
+    fn retransmissions_do_not_count_as_a_frame_behind() {
+        // The second CIS's SDUs often need the next event (FT 2): its
+        // median completion moves an interval later, its first tries not
+        let out = Fake::default();
+        let mut s = IsoSender::new(Arc::default());
+        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 8, 100);
+        out.take();
+        let mut held = 0u16;
+        for i in 1..=1500u32 {
+            at(&mut s, &out, i * 10);
+            s.on_hci_event(&out, &completed(0x60, 1));
+            // 6 of 10 SDUs through a retry an interval later
+            let retried = i % 10 < 6;
+            let n = held + u16::from(!retried);
+            if n > 0 {
+                s.on_hci_event(&out, &completed(0x61, n));
+            }
+            held = u16::from(retried);
+        }
+        assert_eq!(s.realigns, 0);
+    }
+
+    #[test]
+    fn a_realignment_waits_for_the_next_underrun() {
+        let (mut s, _, _) = run_skewed(10_000);
+        assert_eq!(s.realigns, 1);
+        assert!(!s.align_armed);
+        s.arm_alignment();
+        assert!(s.align_armed && s.align_settle == 1);
+    }
+
+    #[test]
+    fn cis_in_line_are_left_alone() {
+        let out = Fake::default();
+        let mut s = IsoSender::new(Arc::default());
+        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 8, 100);
+        out.take();
+        for i in 1..=1000u32 {
+            at(&mut s, &out, i * 10);
+            s.on_hci_event(&out, &completed(0x60, 1));
+            s.on_hci_event(&out, &completed(0x61, 1));
+        }
+        assert_eq!(s.realigns, 0);
+        assert_eq!(s.cis[0].sent, s.cis[1].sent);
     }
 
     #[test]
