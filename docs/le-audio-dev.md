@@ -362,7 +362,8 @@ had changed (what the earbud does with it is its business). The core keeps
 one `ChannelsHandle` (`le_channels.rs`): the profile that starts streaming
 sets it and a save of the streaming profile updates it, from the next frame,
 without reconnecting (`Profile::only_live_processing_differs`). Broadcasts
-do not use it.
+do not use it. Audio Devices shows the earbud-alone setting only for a member
+of a set (`Device.le_audio_set` or `set_addresses`).
 
 The TWS matrix mixer (developer mode, Developer > TWS, `tws.mix`,
 `tws.mix_set`, `tws.mix_preset_save`, `tws.mix_preset_delete`) is the
@@ -936,7 +937,11 @@ LE keys of classic devices (issue #86):
   after one is left out, and a CIS later by 80 % of a frame or more in three
   windows in a row gets one SDU left out ("plays a frame behind the others
   ... one SDU left out"), which disarms it until the next underrun; at most
-  4 times a stream.
+  4 times a stream. A CIS whose events come later in the CIG event completes
+  later while in line, so that much of the gap does not count: the
+  difference of the two CIS's `CIG_Sync_Delay - CIS_Sync_Delay` (LE CIS
+  Established). Developer > Debug's "Realign a CIS that plays a frame
+  behind" turns it off (`bt_host::set_realign_off`), at once.
 - LE Audio does not support application capture (it does support system
   loopback, virtual devices and the test tone).
 - Not verified with real LE Audio headphones or a real controller's CIS

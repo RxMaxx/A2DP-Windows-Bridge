@@ -698,11 +698,9 @@ impl LeModule for CsipModule {
             if by_rsi.is_some() {
                 tracing::debug!("CSIP: {} RSI {:02X?} resolves to coordinated set {set}", result.addr, result.rsi);
             } else if result.set_id != Some(set as u32) {
-                tracing::debug!(
-                    "CSIP: {} is bonded member {} of coordinated set {set}",
-                    result.addr,
-                    scan_identity(result)
-                );
+                // Its address beside its identity would tie the two
+                // together in the log: neither is written
+                tracing::debug!("CSIP: an advertiser without an RSI is a bonded member of coordinated set {set}");
             }
             (set, st.sets[set].size)
         };

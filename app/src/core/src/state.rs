@@ -436,6 +436,7 @@ fn to_ipc_settings(s: &CoreSettings) -> Settings {
             le_rtn_p_to_c: s.dev_debug.le_rtn_p_to_c,
             le_interleaved: s.dev_debug.le_interleaved,
             le_buffer_margin: s.dev_debug.le_buffer_margin,
+            le_realign_off: s.dev_debug.le_realign_off,
             le_mic_preset: s.dev_debug.le_mic_preset.clone(),
             le_mic_retry_same_link: s.dev_debug.le_mic_retry_same_link,
         },
@@ -579,6 +580,7 @@ fn merge_settings(base: &CoreSettings, s: &Settings) -> CoreSettings {
         le_rtn_p_to_c: s.dev_debug.le_rtn_p_to_c.map(|r| r.min(15)),
         le_interleaved: s.dev_debug.le_interleaved,
         le_buffer_margin: s.dev_debug.le_buffer_margin.map(|m| m.min(7)),
+        le_realign_off: s.dev_debug.le_realign_off,
         le_mic_preset: s.dev_debug.le_mic_preset.trim().to_string(),
         le_mic_retry_same_link: s.dev_debug.le_mic_retry_same_link,
     };

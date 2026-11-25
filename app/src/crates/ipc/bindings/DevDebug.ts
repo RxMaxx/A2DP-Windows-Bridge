@@ -54,6 +54,11 @@ le_interleaved: boolean,
  */
 le_buffer_margin?: number | null, 
 /**
+ * LE Audio: a CIS that plays a frame behind the others is not
+ * realigned
+ */
+le_realign_off: boolean, 
+/**
  * The LE Audio microphone's preset, taken as it is; empty: as planned
  */
 le_mic_preset: string, 

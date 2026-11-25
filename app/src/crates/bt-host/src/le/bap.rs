@@ -430,6 +430,20 @@ pub(crate) fn buffer_margin() -> Option<u8> {
     Some(BUFFER_MARGIN.load(std::sync::atomic::Ordering::Acquire)).filter(|&m| m != u8::MAX)
 }
 
+/// Developer > Debug: a CIS a frame behind the others is left as it is
+static REALIGN_OFF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Turns the realignment of a CIS that plays a frame behind the others off
+/// (true) or on again (the default); followed while a stream runs
+pub fn set_realign_off(off: bool) {
+    REALIGN_OFF.store(off, std::sync::atomic::Ordering::Release);
+}
+
+/// [`set_realign_off`]'s value
+pub(crate) fn realign_off() -> bool {
+    REALIGN_OFF.load(std::sync::atomic::Ordering::Acquire)
+}
+
 /// Sets the overrides the next CIG is created with (default: none)
 pub fn set_cig_overrides(o: CigOverrides) {
     *CIG_OVERRIDES.lock().unwrap_or_else(|e| e.into_inner()) = o;

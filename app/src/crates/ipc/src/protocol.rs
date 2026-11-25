@@ -1107,6 +1107,10 @@ pub struct DevDebug {
     #[ts(optional = nullable)]
     #[serde(default)]
     pub le_buffer_margin: Option<u8>,
+    /// LE Audio: a CIS that plays a frame behind the others is not
+    /// realigned
+    #[serde(default)]
+    pub le_realign_off: bool,
     /// The LE Audio microphone's preset, taken as it is; empty: as planned
     pub le_mic_preset: String,
     /// A stream with the microphone that failed is retried without it on

@@ -881,6 +881,15 @@ impl Developer {
                         false,
                         cx,
                     ))
+                    // On unless turned off: saved as le_realign_off
+                    .child(toggle(
+                        "dev-le-realign",
+                        "ui.dev.le_realign",
+                        !d.le_realign_off,
+                        false,
+                        |s, v| s.dev_debug.le_realign_off = !v,
+                        cx,
+                    ))
                     .child(ui::field(
                         t("ui.dev.le_mic_preset"),
                         None,

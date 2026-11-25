@@ -1,6 +1,6 @@
 //! An LE Audio device's channels on Audio Devices: left and right swapped,
-//! and what an earbud plays while the other one of its set is gone (Auto:
-//! its own side, as planned; Left; Right; Mono, the default). Kept in its
+//! and, for a member of a set, what an earbud plays while the other one is
+//! gone (Auto: its own side, as planned; Left; Right; Mono, the default). Kept in its
 //! profile (`le_swap_channels`, `le_alone_channel`); a stream of it takes a
 //! change in place, from the next frame.
 
@@ -70,7 +70,14 @@ fn save(key: &str, edit: impl FnOnce(&mut Profile) + 'static, cx: &mut App) {
     }
 }
 
-/// The two settings of an LE Audio device; None for a classic one
+/// A member of a coordinated set: seen as one in a scan, or the other
+/// members learned at a connection
+fn in_set(device: &Device) -> bool {
+    device.le_audio_set || !device.set_addresses.is_empty()
+}
+
+/// The settings of an LE Audio device (what an earbud alone plays only for
+/// a member of a set); None for a classic one
 pub fn le_channels(device: &Device, cx: &App) -> Option<Div> {
     if !device.le_audio {
         return None;
@@ -84,7 +91,7 @@ pub fn le_channels(device: &Device, cx: &App) -> Option<Div> {
         super::toggle(
             "le-swap-channels",
             t("ui.profile.le_swap_channels"),
-            Some(t("ui.profile.le_swap_channels_hint").into()),
+            None,
             swapped,
             false,
             move |v: &bool, _, cx| {
@@ -106,13 +113,17 @@ pub fn le_channels(device: &Device, cx: &App) -> Option<Div> {
             save(&key, move |p| p.le_alone_channel = v.saved().to_owned(), cx);
         },
     );
-    Some(div().flex().flex_col().gap(theme::S3).child(swap).child(super::field(
-        t("ui.profile.le_alone_channel"),
-        Some(t("ui.profile.le_alone_channel_hint").into()),
-        None,
-        div().min_w(gpui_kit::px(200.)).child(alone_select.into_any_element()),
-        cx,
-    )))
+    // Only a set has an earbud that can be left alone
+    let alone_field = in_set(device).then(|| {
+        super::field(
+            t("ui.profile.le_alone_channel"),
+            Some(t("ui.profile.le_alone_channel_hint").into()),
+            None,
+            div().min_w(gpui_kit::px(200.)).child(alone_select.into_any_element()),
+            cx,
+        )
+    });
+    Some(div().flex().flex_col().gap(theme::S3).child(swap).children(alone_field))
 }
 
 #[cfg(test)]
@@ -134,6 +145,17 @@ mod tests {
     }
 
     const ADDR: &str = "0A:00:00:00:00:02";
+
+    #[test]
+    fn only_a_set_member_can_be_left_alone() {
+        let mut d = le_device(true);
+        assert!(!in_set(&d));
+        d.set_addresses = vec!["0A:00:00:00:00:03".into()];
+        assert!(in_set(&d));
+        d.set_addresses.clear();
+        d.le_audio_set = true;
+        assert!(in_set(&d));
+    }
 
     fn le_device(le_audio: bool) -> Device {
         serde_json::from_value(serde_json::json!({

@@ -324,6 +324,11 @@ pub fn cis_can_send_now(packet: &[u8]) -> Option<CisCanSendNow> {
 pub struct LeCisEstablished {
     pub status: u8,
     pub cis_handle: u16,
+    /// The longest time the PDUs of a CIG event take over all its CIS, and
+    /// over this CIS (both end at the same point, so their difference is
+    /// how long after the CIG event's start this CIS's events begin), us
+    pub cig_sync_delay: u32,
+    pub cis_sync_delay: u32,
     /// Microseconds
     pub transport_latency_c_to_p: u32,
     pub transport_latency_p_to_c: u32,
@@ -359,6 +364,8 @@ pub fn le_cis_established(packet: &[u8]) -> Option<LeCisEstablished> {
     Some(LeCisEstablished {
         status: *packet.get(3)?,
         cis_handle: u16_at(packet, 4)? & 0x0FFF,
+        cig_sync_delay: u24(6)?,
+        cis_sync_delay: u24(9)?,
         transport_latency_c_to_p: u24(12)?,
         transport_latency_p_to_c: u24(15)?,
         phy_c_to_p: *packet.get(18)?,
