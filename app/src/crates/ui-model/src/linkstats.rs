@@ -4,7 +4,7 @@
 //! milliseconds. The core keeps cumulative counters only; the baselines are
 //! the view's.
 
-use ipc::{LinkCounters, LinkSample, LinkTotals};
+use ipc::{IsoCounters, LeStreamInfo, LinkCounters, LinkSample, LinkTotals};
 
 use crate::series::to_fixed;
 
@@ -169,9 +169,83 @@ pub fn format_bytes(n: u64) -> String {
     format!("{} {}", to_fixed(v, if v >= 100.0 { 0 } else { 1 }), UNITS[i])
 }
 
+/// An LE Audio stream's latency from the captured audio to the sound, ms
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LeLatency {
+    pub total: f64,
+    /// LC3: a frame and its look-ahead
+    pub codec: f64,
+    /// The frames buffered before the radio (the jitter buffer's prefill)
+    pub buffer: f64,
+    /// The radio's transport latency; None while not known (a broadcast)
+    pub radio: Option<f64>,
+    /// The device's presentation delay, decoding included
+    pub device: f64,
+}
+
+/// The parts the core knows of an LE Audio stream's latency: LC3's delay,
+/// the prefill in frames, the CIS transport latency and the presentation
+/// delay. Not in it: Windows' path before the capture, and a device's work
+/// beyond its presentation delay. None without them (an older core).
+pub fn le_latency(le: Option<&LeStreamInfo>, iso: Option<&IsoCounters>) -> Option<LeLatency> {
+    let (le, iso) = (le?, iso?);
+    if le.codec_delay_us == 0 || le.presentation_delay_us == 0 {
+        return None;
+    }
+    let codec = f64::from(le.codec_delay_us) / 1000.;
+    let buffer = f64::from(iso.prefill) * f64::from(le.frame_us) / 1000.;
+    let radio = iso.transport_latency_us.filter(|&us| us > 0).map(|us| f64::from(us) / 1000.);
+    let device = f64::from(le.presentation_delay_us) / 1000.;
+    Some(LeLatency { total: codec + buffer + radio.unwrap_or(0.) + device, codec, buffer, radio, device })
+}
+
+/// A part of the latency: tenths where they matter (4.2 ms over the air)
+pub fn ms_fine(v: f64) -> String {
+    if v < 20. && v.fract().abs() > 1e-9 { format!("{v:.1} ms") } else { format!("{} ms", v.round()) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn le(frame_us: u32, codec_delay_us: u32, presentation_delay_us: u32) -> LeStreamInfo {
+        LeStreamInfo {
+            preset: String::new(),
+            frame_us,
+            octets: 0,
+            cis: 2,
+            devices: 2,
+            low_latency: false,
+            summary: String::new(),
+            presentation_delay_us,
+            codec_delay_us,
+        }
+    }
+
+    fn iso(prefill: u32, transport_latency_us: Option<u32>) -> IsoCounters {
+        IsoCounters { cis: 2, sdu_sets: 0, silence: 0, underruns: 0, dropped: 0, prefill, transport_latency_us }
+    }
+
+    #[test]
+    fn le_latency_adds_lc3_the_buffered_frames_the_radio_and_the_device() {
+        // WF-1000XM6, 48_3_gr: 7.5 ms frames, prefill 5, 4.2 ms over the air, 10 ms
+        let l = le_latency(Some(&le(7500, 11500, 10000)), Some(&iso(5, Some(4200)))).unwrap();
+        assert_eq!((l.codec, l.buffer, l.radio, l.device), (11.5, 37.5, Some(4.2), 10.));
+        assert!((l.total - 63.2).abs() < 1e-9);
+        assert_eq!(
+            (ms_fine(l.codec), ms_fine(l.buffer), ms_fine(4.2), ms_fine(10.)),
+            ("11.5 ms".into(), "38 ms".into(), "4.2 ms".into(), "10 ms".into())
+        );
+    }
+
+    #[test]
+    fn le_latency_leaves_the_radio_out_while_not_known_and_is_none_without_the_cores_figures() {
+        let l = le_latency(Some(&le(10000, 12500, 40000)), Some(&iso(4, None))).unwrap();
+        assert_eq!(l.radio, None);
+        assert_eq!(l.total, 92.5);
+        assert_eq!(le_latency(Some(&le(10000, 0, 0)), Some(&iso(4, None))), None);
+        assert_eq!(le_latency(None, Some(&iso(4, None))), None);
+    }
 
     fn sample(total: LinkTotals, start: LinkTotals) -> LinkSample {
         LinkSample {

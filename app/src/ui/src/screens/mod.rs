@@ -21,6 +21,7 @@ pub mod service_addon;
 pub mod settings;
 pub mod setup;
 pub mod status;
+pub mod tws;
 
 use gpui_kit::{AnyView, App, AppContext as _, Window};
 

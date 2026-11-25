@@ -86,6 +86,17 @@ fn the_mediatek_fields_and_le_audio_values(cx: &mut TestAppContext) {
     type_into(&mut h, cx, w, &d, Num::LeRtnPToC, "");
     h.on(cx, w, |window, cx| window.press("enter", cx));
     assert_eq!(settings(&h)["dev_debug"]["le_rtn_p_to_c"], serde_json::Value::Null);
+    // The jitter buffer's margin: 0 is a value of its own, at most 7, empty is the core's 3
+    type_into(&mut h, cx, w, &d, Num::LeBufferMargin, "0");
+    h.on(cx, w, |window, cx| window.press("enter", cx));
+    assert_eq!(settings(&h)["dev_debug"]["le_buffer_margin"], 0);
+    type_into(&mut h, cx, w, &d, Num::LeBufferMargin, "9");
+    h.on(cx, w, |window, cx| window.press("enter", cx));
+    assert_eq!(settings(&h)["dev_debug"]["le_buffer_margin"], 7);
+    assert_eq!(shown(&d, cx, Num::LeBufferMargin), "7");
+    type_into(&mut h, cx, w, &d, Num::LeBufferMargin, "");
+    h.on(cx, w, |window, cx| window.press("enter", cx));
+    assert_eq!(settings(&h)["dev_debug"]["le_buffer_margin"], serde_json::Value::Null);
     tab(&mut h, cx, w, &d, Tab::Logging);
     type_into(&mut h, cx, w, &d, Num::KeepDays, "1000");
     h.on(cx, w, |window, cx| window.press("enter", cx));
@@ -103,4 +114,16 @@ fn the_log_note_is_held_to_200_characters(cx: &mut TestAppContext) {
         window.input(&"m".repeat(210), cx);
     });
     assert_eq!(cx.read(|cx| note.read(cx).value().chars().count()), 200);
+}
+
+#[gpui_kit::test]
+fn the_tws_tab_reads_the_earbuds_mixer_while_it_is_shown(cx: &mut TestAppContext) {
+    let (mut h, w, d) = open(cx);
+    assert!(!h.methods().iter().any(|m| m == "tws.mix"));
+    tab(&mut h, cx, w, &d, Tab::Tws);
+    h.settle(cx);
+    assert!(h.methods().iter().any(|m| m == "tws.mix"));
+    assert!(cx.read(|cx| d.read(cx).tws.is_some()));
+    tab(&mut h, cx, w, &d, Tab::App);
+    assert!(cx.read(|cx| d.read(cx).tws.is_none()));
 }
