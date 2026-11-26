@@ -229,8 +229,10 @@ impl Render for ConnectButton {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(snap) = snap(cx) else { return div().into_any_element() };
         let state = snap.stream.state;
-        connect_button("connect", state, model::stream_active(state), self.compact)
-            .disabled(self.busy || current_profile(&snap).is_none())
+        let active = model::stream_active(state);
+        // A broadcast has no profile, and stops from here as a device does
+        connect_button("connect", state, active, self.compact)
+            .disabled(self.busy || (current_profile(&snap).is_none() && !active))
             .on_click(cx.listener(|this, _, _, cx| this.press(cx)))
             .into_any_element()
     }

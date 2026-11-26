@@ -568,6 +568,11 @@ pub struct StreamStatus {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub slow_link: Option<u32>,
+    /// The stream is an Auracast broadcast of this name (developer mode,
+    /// stream.start_broadcast), from its start until it is Idle again
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub broadcast: Option<String>,
 }
 
 /// Why the stream stopped over its codec (StreamStatus.codec_stop)

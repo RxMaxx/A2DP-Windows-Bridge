@@ -19,7 +19,7 @@ use gpui_kit::{
 use ipc::{ErrorInfo, StreamState};
 use ui_model::i18n::{t, tm};
 use ui_model::profile::{audio_entries, entry_of};
-use ui_model::view::flyout::{FixTarget, FlyoutError, fix_target, flyout_error, flyout_parts};
+use ui_model::view::flyout::{FixTarget, FlyoutError, FlyoutParts, fix_target, flyout_error, flyout_parts};
 use ui_model::view::stream::stream_status_text;
 
 use crate::app;
@@ -127,9 +127,21 @@ impl Flyout {
         let entries = audio_entries(snap);
         let entry = entry_of(&entries, current_profile(snap));
         let (dot_color, text_color) = state_colors(s.state, &p);
+        // An Auracast broadcast (developer mode) is no device: its name in
+        // the title's place, no battery, codec or microphone
+        let broadcast = s.broadcast.as_ref();
+        let parts = if broadcast.is_some() { FlyoutParts { battery: false, ..parts } } else { parts };
+        let entry = entry.filter(|_| broadcast.is_none());
 
         // The device chooser is the title: the device once (issue #86)
-        let title = if parts.profile {
+        let title = if let Some(name) = broadcast {
+            div()
+                .text_size(theme::FS_LARGE)
+                .font_family(theme::FONT_DISPLAY)
+                .font_weight(FontWeight::SEMIBOLD)
+                .truncate()
+                .child(format!("{} · {name}", t("ui.dev.auracast")))
+        } else if parts.profile {
             device_switcher(cx)
         } else {
             div()
@@ -162,21 +174,34 @@ impl Flyout {
             );
         // The codec chosen right there, as on Home (issue #86); the link
         // quality beside its details
-        let codec = codec_badge(
-            CodecBadge {
-                aside: Some(self.quality.clone().into_any_element()),
-                picker: entry.map(|e| codec_picker(e, cx)),
-                stretch: true,
-                ..CodecBadge::default()
-            },
-            cx,
-        );
+        let codec = broadcast
+            .is_none()
+            .then(|| {
+                codec_badge(
+                    CodecBadge {
+                        aside: Some(self.quality.clone().into_any_element()),
+                        picker: entry.map(|e| codec_picker(e, cx)),
+                        stretch: true,
+                        ..CodecBadge::default()
+                    },
+                    cx,
+                )
+            })
+            .flatten();
         Some(
             div()
                 .flex()
                 .items_start()
                 .gap(theme::S3)
-                .child(ring_sized("fly-ring", s.state, s.volume, FLY_RING, true, icon(IconName::Headphones), cx))
+                .child(ring_sized(
+                    "fly-ring",
+                    s.state,
+                    s.volume,
+                    FLY_RING,
+                    true,
+                    icon(if broadcast.is_some() { IconName::Pulse } else { IconName::Headphones }),
+                    cx,
+                ))
                 .child(
                     div()
                         .flex_1()

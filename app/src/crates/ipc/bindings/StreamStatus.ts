@@ -54,4 +54,9 @@ codec_stop?: CodecStop | null,
  * (info.bitrate_kbps stays the one asked for). Some only while
  * streaming.
  */
-slow_link?: number | null, };
+slow_link?: number | null, 
+/**
+ * The stream is an Auracast broadcast of this name (developer mode,
+ * stream.start_broadcast), from its start until it is Idle again
+ */
+broadcast?: string | null, };

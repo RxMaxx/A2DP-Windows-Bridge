@@ -127,6 +127,8 @@ pub struct CoreState {
     /// The profile the last stream.start asked for: the session stopped for
     /// it reports Idle after it, which clears the snapshot's profile
     starting_profile: Mutex<Option<String>>,
+    /// The broadcast's name of the session starting (StreamStatus.broadcast)
+    starting_broadcast: Mutex<Option<String>>,
     /// The Auracast assistants of the broadcast running (its receivers)
     assistants: Mutex<Option<bluecaster_core::auracast_assist::Assistants>>,
     /// The message a microphone note replaced (a codec's fallback reason),
@@ -2334,6 +2336,7 @@ impl CoreState {
             started: Instant::now(),
             rates: Mutex::new(None),
             starting_profile: Mutex::new(None),
+            starting_broadcast: Mutex::new(None),
             assistants: Mutex::new(None),
             mic_note_over: Mutex::new(None),
             battery_warned: AtomicBool::new(false),
@@ -2642,12 +2645,14 @@ impl CoreState {
                     stream.mic_rates.clear();
                     if state == CoreStreamState::Idle {
                         stream.profile = None;
+                        stream.broadcast = None;
                     }
                 }
                 // The new session starts (after the old one's Idle when
                 // switching profiles): its profile is the one asked for
                 if state == CoreStreamState::Connecting {
                     stream.profile = self.starting_profile.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                    stream.broadcast = self.starting_broadcast.lock().unwrap_or_else(|e| e.into_inner()).clone();
                 }
                 // The stack runs once anything connected
                 let adapter_status = match state {
@@ -3314,6 +3319,8 @@ impl CoreState {
 
     fn begin_stream(&self, req: StreamRequest, profile: Option<String>) {
         *self.starting_profile.lock().unwrap_or_else(|e| e.into_inner()) = profile.clone();
+        let broadcast = req.le.as_ref().and_then(|l| l.broadcast.as_ref()).map(|b| b.name.clone());
+        *self.starting_broadcast.lock().unwrap_or_else(|e| e.into_inner()) = broadcast.clone();
         // The profile's playback EQ (none for a stream without one)
         let eq = profile
             .as_deref()
@@ -3333,6 +3340,7 @@ impl CoreState {
             voice: None,
             codec_stop: None,
             slow_link: None,
+            broadcast,
         }));
         let service = self.service.clone();
         // A restart for a save waits a moment: a request right behind it
