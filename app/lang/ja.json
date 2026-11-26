@@ -652,7 +652,7 @@
   "ui.dev.auracast_receivers": "受信機",
   "ui.dev.auracast_receivers_hint": "BASS に対応したペアリング済みの LE Audio デバイスです。配信の開始時に、再生する BIS を各デバイスに指示します。",
   "ui.dev.auracast_leave_receivers": "再生が始まったら切断",
-  "ui.dev.auracast_leave_receivers_hint": "各デバイスが再生を始めて数秒後に BlueCaster は接続を閉じ、ブロードキャストだけが電波に残ります。デバイスは再生を続けますが、終了時に停止は伝えられません。",
+  "ui.dev.auracast_leave_receivers_hint": "各デバイスが再生を始めて数秒後に BlueCaster は切断します。デバイスは再生を続け、終了時に停止は伝えられません。",
   "ui.dev.auracast_arrangement": "再生の割り当て",
   "ui.dev.auracast_rx_one": "受信機 1 台",
   "ui.dev.auracast_rx_left_right": "左 + 右",

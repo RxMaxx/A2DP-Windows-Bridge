@@ -652,7 +652,7 @@
   "ui.dev.auracast_receivers": "接收器",
   "ui.dev.auracast_receivers_hint": "支持 BASS 的已配对 LE Audio 设备。广播开始时，BlueCaster 会通知每台设备播放哪个 BIS。",
   "ui.dev.auracast_leave_receivers": "开始播放后断开连接",
-  "ui.dev.auracast_leave_receivers_hint": "每台设备开始播放几秒后，BlueCaster 会断开与它的连接，空中只保留广播。设备会继续播放；结束时不会通知它停止。",
+  "ui.dev.auracast_leave_receivers_hint": "每台设备开始播放几秒后，BlueCaster 会断开与它的连接。设备继续播放；结束时不会通知它停止。",
   "ui.dev.auracast_arrangement": "播放分配",
   "ui.dev.auracast_rx_one": "一台接收器",
   "ui.dev.auracast_rx_left_right": "左 + 右",

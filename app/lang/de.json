@@ -652,7 +652,7 @@
   "ui.dev.auracast_receivers": "Empfänger",
   "ui.dev.auracast_receivers_hint": "Gekoppelte LE-Audio-Geräte mit BASS. Beim Start teilt BlueCaster jedem Gerät mit, welche BIS es wiedergibt.",
   "ui.dev.auracast_leave_receivers": "Nach dem Start der Wiedergabe trennen",
-  "ui.dev.auracast_leave_receivers_hint": "BlueCaster trennt die Verbindung zu jedem Gerät einige Sekunden nach dem Start der Wiedergabe, sodass nur die Übertragung sendet. Das Gerät spielt weiter; am Ende wird ihm kein Stopp mitgeteilt.",
+  "ui.dev.auracast_leave_receivers_hint": "Einige Sekunden nach dem Start der Wiedergabe trennt BlueCaster die Verbindung. Das Gerät spielt weiter; am Ende wird es nicht gestoppt.",
   "ui.dev.auracast_arrangement": "Wer spielt was",
   "ui.dev.auracast_rx_one": "Ein Empfänger",
   "ui.dev.auracast_rx_left_right": "Links + rechts",

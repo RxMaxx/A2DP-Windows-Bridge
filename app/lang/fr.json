@@ -652,7 +652,7 @@
   "ui.dev.auracast_receivers": "Récepteurs",
   "ui.dev.auracast_receivers_hint": "Appareils LE Audio associés dotés de BASS. Au début de la diffusion, BlueCaster indique à chacun quels BIS lire.",
   "ui.dev.auracast_leave_receivers": "Déconnecter dès la lecture",
-  "ui.dev.auracast_leave_receivers_hint": "BlueCaster ferme sa connexion à chaque appareil quelques secondes après le début de la lecture : seule la diffusion reste à l'antenne. L'appareil continue de jouer ; à la fin, il n'est pas prévenu de l'arrêt.",
+  "ui.dev.auracast_leave_receivers_hint": "Quelques secondes après le début de la lecture, BlueCaster se déconnecte de l'appareil. Il continue de jouer ; à la fin, il n'est pas arrêté.",
   "ui.dev.auracast_arrangement": "Qui joue quoi",
   "ui.dev.auracast_rx_one": "Un récepteur",
   "ui.dev.auracast_rx_left_right": "Gauche + droite",

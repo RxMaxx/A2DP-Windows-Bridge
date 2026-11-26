@@ -652,7 +652,7 @@
   "ui.dev.auracast_receivers": "Приёмники",
   "ui.dev.auracast_receivers_hint": "Сопряжённые устройства LE Audio с BASS. При запуске трансляции BlueCaster сообщает каждому, какой BIS воспроизводить.",
   "ui.dev.auracast_leave_receivers": "Отключаться после запуска",
-  "ui.dev.auracast_leave_receivers_hint": "Через несколько секунд после начала воспроизведения BlueCaster разрывает соединение с каждым устройством, и в эфире остаётся только трансляция. Устройство продолжает играть; в конце ему не сообщается об остановке.",
+  "ui.dev.auracast_leave_receivers_hint": "Через несколько секунд после начала воспроизведения BlueCaster отключается от устройства. Оно продолжает играть; в конце его не останавливают.",
   "ui.dev.auracast_arrangement": "Кто что воспроизводит",
   "ui.dev.auracast_rx_one": "Один приёмник",
   "ui.dev.auracast_rx_left_right": "Левый + правый",

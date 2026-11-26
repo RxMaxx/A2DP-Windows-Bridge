@@ -652,7 +652,7 @@
   "ui.dev.auracast_receivers": "Receptores",
   "ui.dev.auracast_receivers_hint": "Dispositivos LE Audio emparejados que tienen BASS. Al emitir, BlueCaster indica a cada uno qué BIS reproducir.",
   "ui.dev.auracast_leave_receivers": "Desconectar al empezar a sonar",
-  "ui.dev.auracast_leave_receivers_hint": "BlueCaster cierra su conexión con cada dispositivo unos segundos después de que empiece a sonar, de modo que solo queda la transmisión en el aire. El dispositivo sigue sonando; al final no se le indica que pare.",
+  "ui.dev.auracast_leave_receivers_hint": "Unos segundos después de que cada dispositivo empiece a sonar, BlueCaster se desconecta. Sigue sonando; al final no se le indica que pare.",
   "ui.dev.auracast_arrangement": "Quién reproduce qué",
   "ui.dev.auracast_rx_one": "Un receptor",
   "ui.dev.auracast_rx_left_right": "Izquierdo + derecho",

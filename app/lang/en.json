@@ -652,7 +652,7 @@
   "ui.dev.auracast_receivers": "Receivers",
   "ui.dev.auracast_receivers_hint": "Saved LE Audio devices with BASS. When the broadcast starts, BlueCaster tells each device which BIS to play.",
   "ui.dev.auracast_leave_receivers": "Disconnect once playing",
-  "ui.dev.auracast_leave_receivers_hint": "BlueCaster closes its connection to each device a few seconds after it starts playing, so only the broadcast is on the air. The device keeps playing; at the end it is not told to stop.",
+  "ui.dev.auracast_leave_receivers_hint": "Disconnects from each device a few seconds after it starts playing. It keeps playing; nothing stops it at the end.",
   "ui.dev.auracast_arrangement": "Who plays what",
   "ui.dev.auracast_rx_one": "One receiver",
   "ui.dev.auracast_rx_left_right": "Left + right",

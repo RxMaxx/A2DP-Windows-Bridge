@@ -652,7 +652,7 @@
   "ui.dev.auracast_receivers": "수신기",
   "ui.dev.auracast_receivers_hint": "BASS를 지원하는 페어링된 LE Audio 장치입니다. 브로드캐스트를 시작하면 각 장치에 재생할 BIS를 알려 줍니다.",
   "ui.dev.auracast_leave_receivers": "재생이 시작되면 연결 해제",
-  "ui.dev.auracast_leave_receivers_hint": "각 기기가 재생을 시작하고 몇 초 뒤 BlueCaster가 연결을 닫아 방송만 남깁니다. 기기는 계속 재생하며, 끝날 때 중지하라는 알림을 받지 않습니다.",
+  "ui.dev.auracast_leave_receivers_hint": "각 기기가 재생을 시작하고 몇 초 뒤 BlueCaster가 연결을 끊습니다. 기기는 계속 재생하며, 끝날 때 중지 알림을 받지 않습니다.",
   "ui.dev.auracast_arrangement": "재생 배분",
   "ui.dev.auracast_rx_one": "수신기 1대",
   "ui.dev.auracast_rx_left_right": "왼쪽 + 오른쪽",
