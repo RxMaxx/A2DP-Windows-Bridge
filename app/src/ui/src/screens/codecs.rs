@@ -96,7 +96,7 @@ use crate::app::{self, RouteName};
 use crate::core::Core;
 use crate::theme::{self, ActivePalette as _};
 use crate::ui::codec_cards::{
-    Act, CARD_MIN_W, CardActions, CardSpec, CardState, DraggedCodec, SettingsInput, codec_card, open_codec_settings,
+    Act, CardActions, CardSpec, CardState, DraggedCodec, SettingsInput, card_min_w, codec_card, open_codec_settings,
     value_box,
 };
 use crate::ui::device_picker::tag;
@@ -453,6 +453,9 @@ pub struct DeviceCodecs {
     focus: HashMap<&'static str, FocusHandle>,
     /// The grid's width, for its columns (`.codec-grid`: auto-fill)
     grid_width: Rc<Cell<f32>>,
+    /// A card's smallest width in the language shown (card_min_w), as of the
+    /// last draw
+    card_min_w: f32,
 }
 
 impl DeviceCodecs {
@@ -487,6 +490,7 @@ impl DeviceCodecs {
             dragging: None,
             focus: HashMap::new(),
             grid_width: Rc::new(Cell::new(0.)),
+            card_min_w: 152.,
         };
         this.on_core(cx);
         this
@@ -954,7 +958,7 @@ impl DeviceCodecs {
         let id = cx.entity_id();
         let w = self.grid_width.get();
         let gap = 8.;
-        let cols = if w > 0. { (((w + gap) / (CARD_MIN_W + gap)).floor() as u16).max(1) } else { 3 };
+        let cols = if w > 0. { (((w + gap) / (self.card_min_w + gap)).floor() as u16).max(1) } else { 3 };
         div()
             .relative()
             .w_full()
@@ -979,8 +983,8 @@ impl DeviceCodecs {
     fn cell_width(&self) -> Pixels {
         let w = self.grid_width.get();
         let gap = 8.;
-        let cols = if w > 0. { ((w + gap) / (CARD_MIN_W + gap)).floor().max(1.) } else { 3. };
-        px(if w > 0. { (w - gap * (cols - 1.)) / cols } else { CARD_MIN_W })
+        let cols = if w > 0. { ((w + gap) / (self.card_min_w + gap)).floor().max(1.) } else { 3. };
+        px(if w > 0. { (w - gap * (cols - 1.)) / cols } else { self.card_min_w })
     }
 
     /// The music codec cards with their order hint and Reset
@@ -1361,6 +1365,7 @@ impl Render for DeviceCodecs {
         if self.dragging.is_some() && !cx.has_active_drag() {
             self.end_drag(cx);
         }
+        self.card_min_w = card_min_w(window);
         let Some(snap) = self.core.read(cx).snap().cloned() else { return div() };
         let snap = &snap;
         let Some(e) = self.current.clone() else { return div() };

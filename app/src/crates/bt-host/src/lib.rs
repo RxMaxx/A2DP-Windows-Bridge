@@ -64,6 +64,12 @@ pub use le::iso_recv::{
     ISO_STATUS_LOST, ISO_STATUS_POSSIBLY_INVALID, ISO_STATUS_VALID, LeRxHandle, LeRxStats, LeRxStream, MAX_RX_SDU,
     RxSdu,
 };
+pub use le::modules::asha::{
+    AshaSink, SDU_BYTES as ASHA_SDU_BYTES, UUID_AUDIO_CONTROL_POINT as ASHA_AUDIO_CONTROL_POINT,
+    UUID_AUDIO_STATUS as ASHA_AUDIO_STATUS, UUID_LE_PSM_OUT as ASHA_LE_PSM_OUT,
+    UUID_READ_ONLY_PROPERTIES as ASHA_READ_ONLY_PROPERTIES, UUID_SERVICE_ASHA as ASHA_SERVICE,
+    UUID_VOLUME as ASHA_VOLUME,
+};
 pub use le::modules::csip::{forget_stored_file as le_forget_stored_sirk, stored_sets as le_stored_sets};
 pub use le::{
     BroadcastLayout, LeAddr, LeBroadcast, LeConfig, LeDeviceId, LeDeviceInfo, LeRequest, LeScanResult, LeSduSink,
