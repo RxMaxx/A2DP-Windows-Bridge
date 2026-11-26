@@ -817,6 +817,8 @@ impl<'a> LeCtx<'a> {
             o.identity_known = true;
             o.peer_addr = from.peer_addr;
             o.hid |= from.hid;
+            // As this link was asked for, not as the device's last one was
+            o.bare = from.bare;
             o.acl = from.acl;
             o.encrypted = from.encrypted;
             o.pairing = from.pairing;

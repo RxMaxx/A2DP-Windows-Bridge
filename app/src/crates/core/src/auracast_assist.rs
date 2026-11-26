@@ -33,6 +33,10 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const BROADCAST_TIMEOUT: Duration = Duration::from_secs(45);
 /// Broadcast Receive State PA_Sync_State: synchronized to the PA
 const PA_SYNCHRONIZED: u8 = 2;
+/// PA_Sync_State: failed to synchronize to the PA
+const PA_SYNC_FAILED: u8 = 3;
+/// BIG_Encryption: the Broadcast_Code given is wrong
+const BIG_BAD_CODE: u8 = 3;
 
 /// One receiver to tell
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,26 +154,45 @@ pub struct Receiver {
     pub detail: String,
 }
 
-static RECEIVERS: Mutex<Vec<Receiver>> = Mutex::new(Vec::new());
+/// The receivers of the last [`Assistants::start`], and its number: the
+/// assistants of a broadcast before it may still run (a stop does not wait
+/// for one that looks for its receiver), and their receivers are no longer
+/// these
+static RECEIVERS: Mutex<(u64, Vec<Receiver>)> = Mutex::new((0, Vec::new()));
 
 /// The receivers of the broadcast running (or of the last one)
 pub fn receivers() -> Vec<Receiver> {
-    RECEIVERS.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    RECEIVERS.lock().unwrap_or_else(|e| e.into_inner()).1.clone()
 }
 
-fn set_phase(i: usize, phase: Phase, detail: &str) {
-    if let Some(r) = RECEIVERS.lock().unwrap_or_else(|e| e.into_inner()).get_mut(i) {
+/// A receiver's place in [`RECEIVERS`]: the start it belongs to and its index
+#[derive(Debug, Clone, Copy)]
+struct At {
+    run: u64,
+    index: usize,
+}
+
+/// Changes the receiver at `at`, unless a newer start has replaced the list
+fn update(at: At, f: impl FnOnce(&mut Receiver)) {
+    let mut list = RECEIVERS.lock().unwrap_or_else(|e| e.into_inner());
+    if list.0 == at.run
+        && let Some(r) = list.1.get_mut(at.index)
+    {
+        f(r);
+    }
+}
+
+fn set_phase(i: At, phase: Phase, detail: &str) {
+    update(i, |r| {
         r.phase = phase;
-        if !detail.is_empty() || matches!(phase, Phase::Ready | Phase::Added | Phase::Playing) {
+        if !detail.is_empty() || matches!(phase, Phase::Ready | Phase::Added | Phase::Synced | Phase::Playing) {
             r.detail = detail.to_string();
         }
-    }
+    });
 }
 
-fn set_bis(i: usize, bis: Vec<u8>) {
-    if let Some(r) = RECEIVERS.lock().unwrap_or_else(|e| e.into_inner()).get_mut(i) {
-        r.bis = bis;
-    }
+fn set_bis(i: At, bis: Vec<u8>) {
+    update(i, |r| r.bis = bis);
 }
 
 /// Where a step is told: a line each
@@ -182,25 +205,33 @@ pub struct Assistants {
 }
 
 impl Assistants {
-    /// One thread per job; `host` gives the host once it is up (it comes
-    /// up as the stream starts)
+    /// One thread per job; `host` gives the host running now. Each thread
+    /// waits for the host that broadcasts: the stream's start may replace
+    /// the one running before (a broadcast on the Auracast adapter, a stack
+    /// restarted after sleep or for changed settings), and a receiver looked
+    /// for on that one is never found.
     pub fn start(
         host: impl Fn() -> Option<Arc<BtHost>> + Send + Sync + 'static,
         jobs: Vec<Job>,
         out: Out,
     ) -> Assistants {
         let stop = Arc::new(AtomicBool::new(false));
-        *RECEIVERS.lock().unwrap_or_else(|e| e.into_inner()) = jobs
-            .iter()
-            .map(|j| Receiver {
-                address: j.address.clone(),
-                name: j.name.clone(),
-                asked: j.bis.clone(),
-                phase: Phase::Waiting,
-                bis: Vec::new(),
-                detail: String::new(),
-            })
-            .collect();
+        let run = {
+            let mut list = RECEIVERS.lock().unwrap_or_else(|e| e.into_inner());
+            list.0 += 1;
+            list.1 = jobs
+                .iter()
+                .map(|j| Receiver {
+                    address: j.address.clone(),
+                    name: j.name.clone(),
+                    asked: j.bis.clone(),
+                    phase: Phase::Waiting,
+                    bis: Vec::new(),
+                    detail: String::new(),
+                })
+                .collect();
+            list.0
+        };
         if jobs.is_empty() {
             return Assistants { stop, threads: Vec::new() };
         }
@@ -210,7 +241,8 @@ impl Assistants {
         let threads = jobs
             .into_iter()
             .enumerate()
-            .filter_map(|(i, job)| {
+            .filter_map(|(index, job)| {
+                let i = At { run, index };
                 let (host, stop, turn, start, out) =
                     (host.clone(), stop.clone(), turn.clone(), start.clone(), out.clone());
                 std::thread::Builder::new()
@@ -219,19 +251,21 @@ impl Assistants {
                         let stopped = || stop.load(Ordering::Acquire);
                         let until = Instant::now() + BROADCAST_TIMEOUT;
                         let host = loop {
-                            if let Some(h) = host() {
+                            if let Some(h) = host().filter(|h| !h.le_broadcast_groups().is_empty()) {
                                 break Some(h);
                             }
                             if stopped() || Instant::now() > until {
                                 break None;
                             }
-                            std::thread::sleep(Duration::from_millis(50));
+                            std::thread::sleep(Duration::from_millis(100));
                         };
                         match host {
                             Some(h) => assist(&h, i, &job, &stopped, &turn, &start, &*out),
                             None => {
-                                out(&format!("Assistant {}: Bluetooth did not start", job.address));
-                                set_phase(i, Phase::Failed, "Bluetooth did not start");
+                                if !stopped() {
+                                    out(&format!("Assistant {}: the broadcast did not start", job.address));
+                                    set_phase(i, Phase::Failed, "the broadcast did not start");
+                                }
                                 start.wait();
                             }
                         }
@@ -299,7 +333,7 @@ fn show_state(out: &dyn Fn(&str), who: &str, handle: u16, v: &[u8]) -> Option<ba
 /// and takes a source left from before off it. `turn`: held throughout.
 fn connect(
     host: &BtHost,
-    i: usize,
+    i: At,
     who: &str,
     stopped: &dyn Fn() -> bool,
     turn: &Mutex<()>,
@@ -483,7 +517,7 @@ fn synced_bis(s: &bass::ReceiveState) -> Vec<u8> {
 /// One receiver from connection to stop (see the module's description)
 fn assist(
     host: &BtHost,
-    i: usize,
+    i: At,
     job: &Job,
     stopped: &dyn Fn() -> bool,
     turn: &Mutex<()>,
@@ -498,7 +532,10 @@ fn assist(
     let (g, source) = match plan {
         Some(Ok(p)) if !stopped() => p,
         other => {
-            if let Some(Err(e)) = other {
+            // Not a failure when the stop came first
+            if let Some(Err(e)) = other
+                && !stopped()
+            {
                 out(&format!("Assistant {who}: {e}"));
                 set_phase(i, Phase::Failed, &e);
             }
@@ -535,15 +572,19 @@ fn assist(
                 }
                 source_id = Some(s.source_id);
                 let bis = synced_bis(&s);
-                let phase = if !bis.is_empty() {
-                    Phase::Playing
+                let (phase, detail) = if !bis.is_empty() {
+                    (Phase::Playing, "")
+                } else if s.big_encryption == BIG_BAD_CODE {
+                    (Phase::Failed, "wrong Broadcast_Code")
                 } else if s.pa_sync == PA_SYNCHRONIZED {
-                    Phase::Synced
+                    (Phase::Synced, "")
+                } else if s.pa_sync == PA_SYNC_FAILED {
+                    (Phase::Failed, "cannot synchronize to the broadcast")
                 } else {
-                    Phase::Added
+                    (Phase::Added, "")
                 };
                 set_bis(i, bis);
-                set_phase(i, phase, "");
+                set_phase(i, phase, detail);
                 if s.big_encryption == 1 && !code_sent {
                     match &job.code {
                         Some(code) => {

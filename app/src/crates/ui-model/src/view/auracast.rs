@@ -461,7 +461,9 @@ impl Choices {
     }
 
     /// The slots for receivers: of the arrangement, those whose outputs
-    /// the layout sends (a matrix pair off sends none)
+    /// the layout sends (a matrix pair off sends none). A matrix pair sent
+    /// separately is two broadcasts, and a receiver plays one: its stereo
+    /// slot is the two mono ones.
     pub fn slots(&self) -> Vec<Slot> {
         let all: &[Slot] = match self.arrangement() {
             Arrangement::One if self.channels == Channels::Mono => &[MONO],
@@ -477,7 +479,16 @@ impl Choices {
                     .iter()
                     .all(|c| if c.starts_with('R') { self.rear != PairMode::Off } else { self.front != PairMode::Off })
         };
-        all.iter().copied().filter(sent).collect()
+        let apart = |pair: PairMode| self.matrix() && pair == PairMode::Separate;
+        all.iter()
+            .copied()
+            .filter(sent)
+            .flat_map(|s| match s.key {
+                "FL+FR" if apart(self.front) => vec![FL, FR],
+                "RL+RR" if apart(self.rear) => vec![RL, RR],
+                _ => vec![s],
+            })
+            .collect()
     }
 
     /// The receiver chosen for a slot (its first)
@@ -869,6 +880,33 @@ mod tests {
         // A matrix with both pairs off sends nothing
         let off = Choices { channels: Channels::Matrix, front: PairMode::Off, rear: PairMode::Off, ..c };
         assert!(off.start_disabled(false));
+    }
+
+    #[test]
+    fn a_pair_sent_separately_has_a_slot_per_speaker() {
+        let keys = |c: &Choices| c.slots().iter().map(|s| s.key).collect::<Vec<_>>();
+        let mut c = Choices {
+            channels: Channels::Matrix,
+            front: PairMode::Stereo,
+            rear: PairMode::Stereo,
+            arrangement: Arrangement::TwoStereo,
+            ..Choices::default()
+        };
+        assert_eq!(keys(&c), ["FL+FR", "RL+RR"]);
+        // Two broadcasts: no receiver plays both
+        c.rear = PairMode::Separate;
+        assert_eq!(keys(&c), ["FL+FR", "RL", "RR"]);
+        c.front = PairMode::Separate;
+        assert_eq!(keys(&c), ["FL", "FR", "RL", "RR"]);
+        // Subgroups are one broadcast
+        c.front = PairMode::Subgroups;
+        assert_eq!(keys(&c), ["FL+FR", "RL", "RR"]);
+        c.rear = PairMode::Off;
+        assert_eq!(keys(&c), ["FL+FR"]);
+        // One BIG: every output in the one broadcast, whatever the pairs say
+        c.channels = Channels::Single;
+        c.front = PairMode::Separate;
+        assert_eq!(keys(&c), ["FL+FR", "RL+RR"]);
     }
 
     fn stream(state: StreamState, key: &str, profile: Option<&str>) -> StreamStatus {

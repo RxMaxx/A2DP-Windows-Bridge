@@ -20,7 +20,7 @@ use ipc::{ErrorInfo, StreamState};
 use ui_model::i18n::{t, tm};
 use ui_model::profile::{audio_entries, entry_of};
 use ui_model::view::flyout::{FixTarget, FlyoutError, FlyoutParts, fix_target, flyout_error, flyout_parts};
-use ui_model::view::stream::stream_status_text;
+use ui_model::view::stream::{stream_active, stream_status_text};
 
 use crate::app;
 use crate::core::{self, Core, WantKind};
@@ -128,8 +128,10 @@ impl Flyout {
         let entry = entry_of(&entries, current_profile(snap));
         let (dot_color, text_color) = state_colors(s.state, &p);
         // An Auracast broadcast (developer mode) is no device: its name in
-        // the title's place, no battery, codec or microphone
-        let broadcast = s.broadcast.as_ref();
+        // the title's place, no battery, codec or microphone. While it runs
+        // or starts only: one that ended in an error keeps its name until
+        // the next stream, and Connect is for the device again
+        let broadcast = s.broadcast.as_ref().filter(|_| stream_active(s.state));
         let parts = if broadcast.is_some() { FlyoutParts { battery: false, ..parts } } else { parts };
         let entry = entry.filter(|_| broadcast.is_none());
 

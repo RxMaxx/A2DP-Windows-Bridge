@@ -1382,20 +1382,29 @@ const ASSISTANT_STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(
 
 /// The assistants' jobs of stream.start_broadcast's receivers, for the
 /// layout `req` broadcasts; error stream.bad_receiver for a channel it has
-/// not (or channels in two of its broadcasts)
+/// not (or channels in two of its broadcasts), for an address that is none
+/// and for a receiver listed twice (it can be told one source)
 fn assistant_jobs(
     b: &BroadcastStream,
     req: &StreamRequest,
 ) -> Result<Vec<bluecaster_core::auracast_assist::Job>, ErrorInfo> {
     let layout = req.le.as_ref().and_then(|l| l.broadcast.as_ref()).map(|b| b.layout).unwrap_or_default();
-    b.receivers
-        .iter()
-        .map(|r| {
-            bluecaster_core::auracast_assist::job_for(layout, &r.address, &r.name, &r.channels, b.code.clone()).map_err(
-                |why| bad_request("stream.bad_receiver", "stream.start_broadcast", format!("{}: {why}", r.address)),
-            )
-        })
-        .collect()
+    let bad = |r: &ipc::BroadcastReceiver, why: &str| {
+        bad_request("stream.bad_receiver", "stream.start_broadcast", format!("{}: {why}", r.address))
+    };
+    let mut jobs: Vec<bluecaster_core::auracast_assist::Job> = Vec::with_capacity(b.receivers.len());
+    for r in &b.receivers {
+        if bt_host::parse_addr(r.address.trim()).is_none() {
+            return Err(bad(r, "not an address"));
+        }
+        let job = bluecaster_core::auracast_assist::job_for(layout, &r.address, &r.name, &r.channels, b.code.clone())
+            .map_err(|why| bad(r, &why))?;
+        if jobs.iter().any(|j| j.address == job.address) {
+            return Err(bad(r, "listed twice"));
+        }
+        jobs.push(job);
+    }
+    Ok(jobs)
 }
 
 /// auracast.receivers
@@ -3321,6 +3330,12 @@ impl CoreState {
         *self.starting_profile.lock().unwrap_or_else(|e| e.into_inner()) = profile.clone();
         let broadcast = req.le.as_ref().and_then(|l| l.broadcast.as_ref()).map(|b| b.name.clone());
         *self.starting_broadcast.lock().unwrap_or_else(|e| e.into_inner()) = broadcast.clone();
+        // The stream before may be a broadcast with receivers: its
+        // assistants take the source off them and let go of their links (a
+        // new broadcast starts its own after this)
+        if let Some(old) = self.assistants.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            old.signal_stop();
+        }
         // The profile's playback EQ (none for a stream without one)
         let eq = profile
             .as_deref()
