@@ -25,9 +25,9 @@ use std::time::Duration;
 use btstack_sys::events::{cbm_channel_opened, l2cap_channel_closed, l2cap_packet_sent};
 use tracing::{debug, info, warn};
 
-use super::super::LeDeviceId;
 use super::super::core::{LeCtx, LeDone, LePoster};
-use super::super::module::{LeModule, LeModuleEntry, LeModuleSetup};
+use super::super::module::{LeGroupHooks, LeModule, LeModuleEntry, LeModuleSetup};
+use super::super::{HearingAidAdvert, LeDeviceId, LeScanResult};
 use crate::BtHost;
 
 /// The ASHA service
@@ -139,6 +139,93 @@ pub struct AshaModule {
     poster: LePoster,
     /// By local cid
     channels: BTreeMap<u16, Channel>,
+    volume: Arc<VolumeState>,
+}
+
+/// The volume of the hearing aids that stream, for the volume slider and
+/// VolumeSync (which use the AVRCP scale, 0 to 127)
+#[derive(Default)]
+struct VolumeState {
+    /// The Volume characteristic of each hearing aid of the stream
+    targets: Mutex<Vec<(LeDeviceId, u16)>>,
+    /// The level set last, -1 while nothing streams
+    level: std::sync::atomic::AtomicI32,
+}
+
+/// The hearing aids' volume (-128 muted, -127 to 0 in steps of 0.375 dB) for
+/// a level of the AVRCP scale
+pub fn volume_of_level(level: u8) -> i8 {
+    match level.min(127) {
+        0 => -128,
+        l => (-127 + ((i32::from(l) - 1) * 127 + 63) / 126) as i8,
+    }
+}
+
+/// The level of the AVRCP scale for a hearing aid volume
+pub fn level_of_volume(volume: i8) -> u8 {
+    match volume {
+        -128 => 0,
+        v => (1 + ((i32::from(v) + 127) * 126 + 63) / 127) as u8,
+    }
+}
+
+/// The ASHA service data of an advertising report: version, capabilities,
+/// the first four bytes of the HiSyncId
+fn advert(ad: &[u8]) -> Option<HearingAidAdvert> {
+    let mut rest = ad;
+    while let [len, tail @ ..] = rest {
+        let len = usize::from(*len);
+        if len == 0 || tail.len() < len {
+            return None;
+        }
+        if let [0x16, 0xF0, 0xFD, _version, caps, set @ ..] = &tail[..len]
+            && let Some(set) = set.get(..4)
+        {
+            return Some(HearingAidAdvert {
+                right: caps & 0x01 != 0,
+                binaural: caps & 0x02 != 0,
+                set: set.try_into().ok()?,
+            });
+        }
+        rest = &tail[len..];
+    }
+    None
+}
+
+struct AshaHooks {
+    volume: Arc<VolumeState>,
+    poster: LePoster,
+}
+
+impl LeGroupHooks for AshaHooks {
+    fn name(&self) -> &'static str {
+        "ASHA"
+    }
+
+    fn remote_volume(&self) -> Option<u8> {
+        u8::try_from(self.volume.level.load(Ordering::Acquire)).ok()
+    }
+
+    fn request_volume(&self, level: u8) -> bool {
+        let targets = self.volume.targets.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if targets.is_empty() {
+            return false;
+        }
+        let level = level.min(127);
+        self.volume.level.store(i32::from(level), Ordering::Release);
+        let value = [volume_of_level(level) as u8];
+        self.poster.post(move |ctx| {
+            for (device, handle) in targets {
+                if let Some(con) = ctx.device(device).filter(|d| d.connected()).map(|d| d.acl) {
+                    let status = ctx.stack().gatt_write_without_response(con, handle, &value);
+                    if status != 0 {
+                        debug!("ASHA: device {device}: volume not written (0x{status:02x})");
+                    }
+                }
+            }
+        });
+        true
+    }
 }
 
 impl AshaModule {
@@ -225,12 +312,20 @@ impl LeModule for AshaModule {
         "ASHA"
     }
 
+    fn on_scan_result(&mut self, _ctx: &mut LeCtx<'_>, result: &mut LeScanResult, ad: &[u8]) {
+        if let Some(found) = advert(ad) {
+            result.hearing_aid = Some(found);
+        }
+    }
+
     fn on_disconnected(&mut self, _ctx: &mut LeCtx<'_>, dev: LeDeviceId, _reason: u8) {
         self.drop_channels(Some(dev));
     }
 
     fn on_stack_deinit(&mut self) {
         self.drop_channels(None);
+        self.volume.targets.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.volume.level.store(-1, Ordering::Release);
     }
 }
 
@@ -251,9 +346,15 @@ fn update_connection(ctx: &mut LeCtx<'_>, device: LeDeviceId, con: u16, tries: u
 }
 
 pub fn create(setup: &mut LeModuleSetup) -> LeModuleEntry {
+    let volume = Arc::new(VolumeState::default());
+    volume.level.store(-1, Ordering::Release);
     LeModuleEntry {
-        module: Box::new(AshaModule { poster: setup.poster.clone(), channels: BTreeMap::new() }),
-        hooks: None,
+        module: Box::new(AshaModule {
+            poster: setup.poster.clone(),
+            channels: BTreeMap::new(),
+            volume: volume.clone(),
+        }),
+        hooks: Some(Arc::new(AshaHooks { volume, poster: setup.poster.clone() })),
     }
 }
 
@@ -286,6 +387,19 @@ impl BtHost {
             ctx.stack().le_connection_interval(con)
         })
         .flatten()
+    }
+
+    /// The hearing aids of the stream that starts, each with the handle of
+    /// its Volume characteristic, and the volume they start with: from now
+    /// on [`BtHost::le_remote_volume`] / [`BtHost::le_request_volume`] are
+    /// theirs. Empty: the stream ended.
+    pub fn asha_volume_targets(&self, targets: Vec<(LeDeviceId, u16)>, volume: i8) {
+        self.le_run(Duration::from_secs(3), move |ctx| {
+            let Some(m) = ctx.module_mut::<AshaModule>() else { return };
+            let level = if targets.is_empty() { -1 } else { i32::from(level_of_volume(volume)) };
+            *m.volume.targets.lock().unwrap_or_else(|e| e.into_inner()) = targets;
+            m.volume.level.store(level, Ordering::Release);
+        });
     }
 
     /// Opens the audio channel of a connected hearing aid on `psm` (its
@@ -346,6 +460,29 @@ mod tests {
 
     fn sink() -> AshaSink {
         AshaSink { cid: 0x40, shared: Arc::new(Shared::default()), poster: LePoster::detached() }
+    }
+
+    #[test]
+    fn the_volume_scales_cover_each_other() {
+        assert_eq!((volume_of_level(0), volume_of_level(1), volume_of_level(127)), (-128, -127, 0));
+        assert_eq!((level_of_volume(-128), level_of_volume(-127), level_of_volume(0)), (0, 1, 127));
+        for level in 0..=127u8 {
+            assert_eq!(level_of_volume(volume_of_level(level)), level, "level {level}");
+        }
+        assert!(volume_of_level(200) == 0, "levels above 127 are the loudest");
+    }
+
+    #[test]
+    fn a_hearing_aid_is_known_by_its_service_data() {
+        // Flags, the ASHA service data (version 1, right of a pair), a name
+        let ad = [2, 0x01, 0x06, 9, 0x16, 0xF0, 0xFD, 1, 0x03, 0xA2, 0xD0, 0, 1, 3, 0x09, b'B', b'C'];
+        assert_eq!(advert(&ad), Some(HearingAidAdvert { right: true, binaural: true, set: [0xA2, 0xD0, 0, 1] }));
+        // Another service's data, a cut structure, nothing
+        assert_eq!(advert(&[5, 0x16, 0x4E, 0x18, 1, 2]), None);
+        assert_eq!(advert(&[9, 0x16, 0xF0, 0xFD, 1]), None);
+        assert_eq!(advert(&[]), None);
+        // Too short for the HiSyncId
+        assert_eq!(advert(&[6, 0x16, 0xF0, 0xFD, 1, 0, 9]), None);
     }
 
     #[test]

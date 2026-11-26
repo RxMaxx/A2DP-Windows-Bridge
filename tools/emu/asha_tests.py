@@ -1,9 +1,13 @@
 """The hearing aid cases of run_test.py --asha (ASHA, a proof of concept).
 
 Each case runs bluecaster-core.exe --cli --asha with the test tone (1 kHz
-left, 1.5 kHz right) against emulated hearing aids:
-  asha-pair     emu_asha.py --layout pair: left and right of a pair
-  asha-left     emu_asha.py --layout left: one hearing aid, both sides mixed
+left, 1.5 kHz right) against emulated hearing aids. The command line starts
+the same sessions the window does (crates/core asha_stream.rs, and the
+hearing aid beside an A2DP stream of asha.rs):
+  asha-pair     emu_asha.py --layout pair: left and right of a pair; the
+                session is given the left one and finds the right one
+  asha-left     emu_asha.py --layout left: one hearing aid, both sides
+                mixed, its volume set once it streams
   asha-bimodal  emu_sink.py --asha right: an A2DP sink (SBC) and a right
                 hearing aid beside it, delayed 40 ms
 
@@ -80,7 +84,9 @@ def run_case(rt, args, case, port):
     failures = []
     if rc != 0:
         failures.append(f'BlueCaster exited with {rc} (see bluecaster.log)')
-    volume = VOLUME if '--asha-volume' in cli_args else -20
+    # The session starts them at -20; --asha-volume sets theirs afterwards,
+    # as the volume slider does
+    volume = -20
     details = []
     for index, (side, (heard, silent)) in enumerate(sides.items()):
         # The side started second is told that the other one streams
@@ -93,6 +99,8 @@ def run_case(rt, args, case, port):
         if got != (1, 0, volume, other):
             failures.append(f'{side}: started with codec, type, volume, other = {got}, '
                             f'expected {(1, 0, volume, other)}')
+        if '--asha-volume' in cli_args and f'asha: {side} volume {VOLUME}' not in emu_text:
+            failures.append(f'{side}: the volume {VOLUME} was not set')
         told = f'asha: {side} status 1' in emu_text
         if len(sides) == 2 and told != (index == 0):
             failures.append(f'{side}: {"" if told else "not "}told that the other side is connected')
@@ -125,7 +133,7 @@ def run_case(rt, args, case, port):
             failures.append(f'{side}: hears the other side too (shares {shares})')
         details.append(f'{side} {frames} SDUs ' + '+'.join(f'{hz} Hz {shares[hz]:.2f}' for hz in heard))
     # BlueCaster's own counts, as it printed them last
-    counts = re.findall(r'^ASHA: .* sent, .*$', text, re.M)
+    counts = re.findall(r'ASHA: (?:left|right) \d+ sent, .*$', text, re.M)
     final = re.findall(r'(\d+) sent, (\d+) dropped', counts[-1]) if counts else []
     if not final:
         failures.append('no "ASHA: ... sent" line (see bluecaster.log)')
@@ -146,7 +154,7 @@ def run_case(rt, args, case, port):
                 failures.append(f'A2DP: {packets} packets sent, {dropped} dropped, expected {80 * seconds} or more '
                                 'and none dropped')
             details.append(f'A2DP {packets} packets')
-        if 'delayed 40 ms' not in text:
+        if 'plays beside this stream, 40 ms later' not in text:
             failures.append('the delay was not taken')
     return failures, ', '.join(details) or 'nothing received'
 

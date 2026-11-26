@@ -313,6 +313,11 @@ pub struct Device {
     /// are only in Snapshot.hid_candidates, never in the device list.
     #[serde(default)]
     pub hid_le: Option<u8>,
+    /// An ASHA hearing aid (a proof of concept), or the two of a pair as
+    /// one entry. An LE entry (`le_audio` is true) that streams G.722, not
+    /// LE Audio; listed while Settings.le_audio_experimental is on.
+    #[serde(default)]
+    pub hearing_aid: bool,
     /// LE Audio: the addresses of the other members of its coordinated set
     /// (the other earbud), once a connection learned it
     #[serde(default)]
@@ -833,6 +838,18 @@ pub struct Profile {
     /// Settings.le_audio_experimental (error.le_audio_disabled)
     #[serde(default)]
     pub le_audio: bool,
+    /// The device is an ASHA hearing aid (a proof of concept; `le_audio` is
+    /// true too): G.722 at 16 kHz, no codec settings
+    #[serde(default)]
+    pub hearing_aid: bool,
+    /// A classic device: the address of the saved hearing aid that plays
+    /// beside this device's stream, for the other ear ("" = none)
+    #[serde(default)]
+    pub hearing_aid_beside: String,
+    /// With hearing_aid_beside: the hearing aid plays this many
+    /// milliseconds later (0 to 500)
+    #[serde(default)]
+    pub hearing_aid_delay_ms: u32,
     /// LE Audio: GMAP low-latency presets with a gaming headset (LC3 LL; off
     /// by default: LC3); other headsets get the media configuration either way
     #[serde(default)]

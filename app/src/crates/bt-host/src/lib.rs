@@ -68,12 +68,13 @@ pub use le::modules::asha::{
     AshaSink, INTERVAL_20_MS as ASHA_INTERVAL_20_MS, SDU_BYTES as ASHA_SDU_BYTES,
     UUID_AUDIO_CONTROL_POINT as ASHA_AUDIO_CONTROL_POINT, UUID_AUDIO_STATUS as ASHA_AUDIO_STATUS,
     UUID_LE_PSM_OUT as ASHA_LE_PSM_OUT, UUID_READ_ONLY_PROPERTIES as ASHA_READ_ONLY_PROPERTIES,
-    UUID_SERVICE_ASHA as ASHA_SERVICE, UUID_VOLUME as ASHA_VOLUME,
+    UUID_SERVICE_ASHA as ASHA_SERVICE, UUID_VOLUME as ASHA_VOLUME, level_of_volume as asha_level_of_volume,
+    volume_of_level as asha_volume_of_level,
 };
 pub use le::modules::csip::{forget_stored_file as le_forget_stored_sirk, stored_sets as le_stored_sets};
 pub use le::{
-    BroadcastLayout, LeAddr, LeBroadcast, LeConfig, LeDeviceId, LeDeviceInfo, LeRequest, LeScanResult, LeSduSink,
-    LeStreamRequest, LeStreamStarted, LeStreamStats, LeStreamStatus, SingleMode,
+    BroadcastLayout, HearingAidAdvert, LeAddr, LeBroadcast, LeConfig, LeDeviceId, LeDeviceInfo, LeRequest,
+    LeScanResult, LeSduSink, LeStreamRequest, LeStreamStarted, LeStreamStats, LeStreamStatus, SingleMode,
 };
 pub use media::{MediaPacket, MediaSink};
 pub use rfcomm::{

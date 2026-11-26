@@ -566,7 +566,7 @@ pub fn codec_picker(entry: &AudioEntry, cx: &App) -> AnyElement {
             .border_color(p.border)
             .rounded(theme::RADIUS)
             .font_weight(FontWeight::SEMIBOLD)
-            .child(t("ui.codec.lc3"))
+            .child(t(if entry.device.hearing_aid { "codec.g722" } else { "ui.codec.lc3" }))
             .into_any_element();
     }
     let Some(snap) = app::core(cx).read(cx).snap() else { return div().into_any_element() };
