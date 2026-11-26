@@ -56,9 +56,10 @@ pub use btstack_sys::{CtkdOutcome, ImportedLeBond, LeBondAdded, LeKeys, expect_t
 pub use capture::HciCapture;
 pub use events::{addr_str, parse_addr};
 pub use hid::{HidConfig, HidCounters, HidEvent, Passkey};
-pub use le::api::LE_NO_LINK;
+pub use le::api::{LE_NO_ANSWER, LE_NO_LINK};
 pub use le::bap::{CigOverrides, set_cig_overrides};
 pub use le::gatt_cache as le_gatt_cache;
+pub use le::gatt_client::{GattChar as LeGattChar, GattService as LeGattService};
 pub use le::iso_recv::{
     ISO_STATUS_LOST, ISO_STATUS_POSSIBLY_INVALID, ISO_STATUS_VALID, LeRxHandle, LeRxStats, LeRxStream, MAX_RX_SDU,
     RxSdu,
@@ -66,7 +67,7 @@ pub use le::iso_recv::{
 pub use le::modules::csip::{forget_stored_file as le_forget_stored_sirk, stored_sets as le_stored_sets};
 pub use le::{
     BroadcastLayout, LeAddr, LeBroadcast, LeConfig, LeDeviceId, LeDeviceInfo, LeRequest, LeScanResult, LeSduSink,
-    LeStreamRequest, LeStreamStarted, LeStreamStats, LeStreamStatus,
+    LeStreamRequest, LeStreamStarted, LeStreamStats, LeStreamStatus, SingleMode,
 };
 pub use media::{MediaPacket, MediaSink};
 pub use rfcomm::{

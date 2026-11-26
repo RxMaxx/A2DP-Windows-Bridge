@@ -103,8 +103,8 @@
 #define MAX_NR_CIS                 4
 #define HCI_ISO_PAYLOAD_SIZE       400
 
-/* Broadcast (Auracast source): BIS of the one BIG (left and right) */
-#define MAX_NR_BIS                 2
+/* Broadcast (Auracast source): BIS per BIG (layout single: FL FR RL RR) */
+#define MAX_NR_BIS                 4
 
 /* CCC values of bonded GATT clients att_server keeps in the bond TLV, for
  * all clients together (default 20; the oldest go first, and that client is

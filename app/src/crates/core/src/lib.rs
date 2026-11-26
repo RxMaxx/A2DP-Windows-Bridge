@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 pub mod adapter;
+pub mod auracast_assist;
 pub mod auracast_mix;
 pub mod broadcast_volume;
 pub mod compat;
@@ -31,8 +32,8 @@ mod voice;
 
 pub use hid::{HidCounts, HidDevice};
 pub use le_stream::{
-    BROADCAST_PRESET_HQ, BROADCAST_PRESET_SQ, LeAudioPath, LeMicPath, LeStreamDetails, broadcast_config, le_mic_target,
-    le_silence_set, le_stats_line, start_mic,
+    BROADCAST_PRESET_HQ, BROADCAST_PRESET_MQ, BROADCAST_PRESET_SQ, LeAudioPath, LeMicPath, LeStreamDetails,
+    broadcast_config, le_mic_target, le_silence_set, le_stats_line, start_mic,
 };
 pub use messages::{CodecStop, CodecStopKind, Msg};
 pub use service::{LeCliOptions, ScannedDevice, Service, ServiceEvent, ServiceOptions, VoiceChange};
