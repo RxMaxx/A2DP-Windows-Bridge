@@ -798,8 +798,7 @@ mod tests {
 
     #[test]
     fn layouts_by_name() {
-        let mut all =
-            vec![BroadcastLayout::Stereo, BroadcastLayout::Mono, BroadcastLayout::Split];
+        let mut all = vec![BroadcastLayout::Stereo, BroadcastLayout::Mono, BroadcastLayout::Split];
         all.extend(SingleMode::ALL.map(BroadcastLayout::Single));
         for front in PairMode::ALL {
             for rear in PairMode::ALL {

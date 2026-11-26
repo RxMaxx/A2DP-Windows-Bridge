@@ -324,8 +324,8 @@ pub fn receiver_status_text(r: &AuracastReceiverStatus) -> String {
     let bis = |v: &[u8]| v.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", ");
     let phase = match r.phase.as_str() {
         "playing" => t!("ui.dev.auracast_rx_playing", bis(&r.bis)),
-        p @ ("waiting" | "looking" | "connecting" | "ready" | "added" | "synced" | "done" | "not_found"
-        | "no_bass" | "failed") => t(&format!("ui.dev.auracast_rx_{p}")),
+        p @ ("waiting" | "looking" | "connecting" | "ready" | "added" | "synced" | "done" | "not_found" | "no_bass"
+        | "failed") => t(&format!("ui.dev.auracast_rx_{p}")),
         other => other.to_owned(),
     };
     let asked = if r.asked.is_empty() { String::new() } else { t!("ui.dev.auracast_rx_asked", bis(&r.asked)) };

@@ -138,7 +138,8 @@ impl Auracast {
         ];
         let poll = cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             loop {
-                let Ok(task) = this.update(cx, |_, cx| app::request::<AuracastReceivers>(Method::AuracastReceivers, cx))
+                let Ok(task) =
+                    this.update(cx, |_, cx| app::request::<AuracastReceivers>(Method::AuracastReceivers, cx))
                 else {
                     return;
                 };
@@ -699,13 +700,19 @@ impl Auracast {
                 t(slot.label_key),
                 None,
                 None,
-                ui::select(SharedString::from(format!("auracast-rx-{key}")), &chosen, choices, locked, move |v: &String, _, cx| {
-                    let pick = (!v.is_empty()).then(|| ReceiverPick {
-                        address: v.clone(),
-                        name: names.iter().find(|(a, _)| a == v).map(|(_, n)| n.clone()).unwrap_or_default(),
-                    });
-                    set_r(Box::new(move |c| c.set_receiver(key, pick)), cx);
-                }),
+                ui::select(
+                    SharedString::from(format!("auracast-rx-{key}")),
+                    &chosen,
+                    choices,
+                    locked,
+                    move |v: &String, _, cx| {
+                        let pick = (!v.is_empty()).then(|| ReceiverPick {
+                            address: v.clone(),
+                            name: names.iter().find(|(a, _)| a == v).map(|(_, n)| n.clone()).unwrap_or_default(),
+                        });
+                        set_r(Box::new(move |c| c.set_receiver(key, pick)), cx);
+                    },
+                ),
                 cx,
             ));
         }

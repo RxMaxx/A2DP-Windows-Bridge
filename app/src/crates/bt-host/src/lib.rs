@@ -66,8 +66,8 @@ pub use le::iso_recv::{
 };
 pub use le::modules::csip::{forget_stored_file as le_forget_stored_sirk, stored_sets as le_stored_sets};
 pub use le::{
-    BroadcastLayout, LeAddr, SingleMode, LeBroadcast, LeConfig, LeDeviceId, LeDeviceInfo, LeRequest, LeScanResult, LeSduSink,
-    LeStreamRequest, LeStreamStarted, LeStreamStats, LeStreamStatus,
+    BroadcastLayout, LeAddr, LeBroadcast, LeConfig, LeDeviceId, LeDeviceInfo, LeRequest, LeScanResult, LeSduSink,
+    LeStreamRequest, LeStreamStarted, LeStreamStats, LeStreamStatus, SingleMode,
 };
 pub use media::{MediaPacket, MediaSink};
 pub use rfcomm::{

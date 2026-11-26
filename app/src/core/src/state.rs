@@ -1389,8 +1389,9 @@ fn assistant_jobs(
     b.receivers
         .iter()
         .map(|r| {
-            bluecaster_core::auracast_assist::job_for(layout, &r.address, &r.name, &r.channels, b.code.clone())
-                .map_err(|why| bad_request("stream.bad_receiver", "stream.start_broadcast", format!("{}: {why}", r.address)))
+            bluecaster_core::auracast_assist::job_for(layout, &r.address, &r.name, &r.channels, b.code.clone()).map_err(
+                |why| bad_request("stream.bad_receiver", "stream.start_broadcast", format!("{}: {why}", r.address)),
+            )
         })
         .collect()
 }

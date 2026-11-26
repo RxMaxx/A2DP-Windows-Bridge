@@ -211,7 +211,8 @@ impl Assistants {
             .into_iter()
             .enumerate()
             .filter_map(|(i, job)| {
-                let (host, stop, turn, start, out) = (host.clone(), stop.clone(), turn.clone(), start.clone(), out.clone());
+                let (host, stop, turn, start, out) =
+                    (host.clone(), stop.clone(), turn.clone(), start.clone(), out.clone());
                 std::thread::Builder::new()
                     .name("le-assist".into())
                     .spawn(move || {
@@ -459,7 +460,9 @@ pub fn candidates(config_dir: &std::path::Path) -> Vec<Candidate> {
         None => 1,
         Some(false) => 2,
     };
-    list.sort_by(|a, b| rank(a.bass).cmp(&rank(b.bass)).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    list.sort_by(|a, b| {
+        rank(a.bass).cmp(&rank(b.bass)).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
     list
 }
 

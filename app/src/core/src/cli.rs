@@ -1949,11 +1949,8 @@ fn le_broadcast(a: &Args, service: &Service, rx: &mpsc::Receiver<ServiceEvent>, 
                     })
                     .collect();
                 let out: bluecaster_core::auracast_assist::Out = Arc::new(|line: &str| outln!("{line}"));
-                assistants = Some(bluecaster_core::auracast_assist::Assistants::start(
-                    move || Some(host.clone()),
-                    jobs,
-                    out,
-                ));
+                assistants =
+                    Some(bluecaster_core::auracast_assist::Assistants::start(move || Some(host.clone()), jobs, out));
             }
         }
     }
