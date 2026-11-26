@@ -35,8 +35,13 @@ use super::{ButtonKind, Choice, IconName, icon};
 use crate::app;
 use crate::theme::{self, ActivePalette as _};
 
-/// A codec card's smallest width (`.codec-grid`: minmax(9.5rem, 1fr))
-pub const CARD_MIN_W: f32 = 152.;
+/// The width a bar's label gets: the longest translation fits
+const BAR_LABEL_W: f32 = 108.;
+/// A bar's smallest width
+const BAR_MIN_W: f32 = 48.;
+/// A codec card's smallest width: its border and padding (13 px a side), a
+/// bar's label, the gap and the bar. Narrower, the bars reach past the card.
+pub const CARD_MIN_W: f32 = 26. + BAR_LABEL_W + 8. + BAR_MIN_W;
 
 /// What a card shows of its codec: the call codecs and LE Audio's LC3 have
 /// cards like the A2DP ones (issue #86)
@@ -93,7 +98,7 @@ fn bar(label: String, value: u8, on: bool, cx: &App) -> Div {
         .gap(theme::S2)
         .text_size(theme::FS_SMALL)
         .text_color(p.text_2)
-        .child(div().w(px(108.)).flex_none().truncate().child(label.clone()))
+        .child(div().w(px(BAR_LABEL_W)).flex_none().truncate().child(label.clone()))
         .child(
             div()
                 .id(SharedString::from(format!("cbar-{label}")))
@@ -103,7 +108,7 @@ fn bar(label: String, value: u8, on: bool, cx: &App) -> Div {
                 .aria_min_numeric_value(0.)
                 .aria_max_numeric_value(5.)
                 .flex_1()
-                .min_w(px(32.))
+                .min_w(px(BAR_MIN_W))
                 .h(px(4.))
                 .rounded(px(2.))
                 .bg(p.surface_3)
