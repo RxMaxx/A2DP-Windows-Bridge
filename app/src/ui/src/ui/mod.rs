@@ -39,9 +39,9 @@ use gpui_kit::component::{Disableable as _, Icon, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, ClickEvent, DispatchPhase, Div, ElementId, FontWeight, InputEvent as _, InteractiveElement as _,
-    IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement as _, Pixels, Point, RenderOnce, Role,
-    ScrollHandle, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Text, Toggled, Window, canvas,
-    div, point, px,
+    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point,
+    RenderOnce, Role, ScrollHandle, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Text,
+    Toggled, Window, canvas, div, point, px,
 };
 
 pub use icons::IconName;
@@ -165,9 +165,12 @@ fn select_named<T: Clone + PartialEq + 'static>(
         Some(name) => button.accessibility_label(name),
         None => button,
     };
-    button.dropdown_menu(move |menu, _, _| {
-        // Not a narrow strip under a wide button
-        let mut menu = menu.min_w(px(160.));
+    button.dropdown_menu(move |menu, window, _| {
+        // Not a narrow strip under a wide button. A list taller than the
+        // window scrolls (the menu scrolls by itself only past 20 entries):
+        // the flyout is short, and its device list long
+        let tall = window.viewport_size().height * 0.7;
+        let mut menu = menu.min_w(px(160.)).scrollable(true).max_h(tall.min(px(450.)));
         let mut group: Option<SharedString> = None;
         for c in &choices {
             if c.group != group {
@@ -566,20 +569,37 @@ impl RenderOnce for Page {
     }
 }
 
+thread_local! {
+    /// Where the pointer last moved to, in its window's coordinates
+    static POINTER_AT: Cell<Option<Point<Pixels>>> = const { Cell::new(None) };
+}
+
 /// Lets a press assistive technology makes on a control scrolled out of
 /// view reach it. Such a press arrives as a click at the control's centre,
-/// outside the window, where no pointer can be: the scrolling element
-/// (`scroll`'s, which this is put in) scrolls the control into view and the
-/// press goes to it there.
+/// outside the window: the scrolling element (`scroll`'s, which this is put
+/// in) scrolls the control into view and the press goes to it there.
+///
+/// The pointer can be outside the page too: on Windows a press on the title
+/// bar, its buttons or the window's edge comes as a press above or below
+/// the page. That one is the pointer's own, at the place it last moved to,
+/// and is left alone, or the window would not maximize or resize.
 pub fn reveal_presses(scroll: &ScrollHandle) -> impl IntoElement {
     let scroll = scroll.clone();
     canvas(
         |_, _, _| {},
         move |_, _, window, _| {
+            window.on_mouse_event(|e: &MouseMoveEvent, phase, _, _| {
+                if phase == DispatchPhase::Capture {
+                    POINTER_AT.set(Some(e.position));
+                }
+            });
             let swallow_up = Rc::new(Cell::new(false));
             let (down_scroll, up_swallow) = (scroll.clone(), swallow_up.clone());
             window.on_mouse_event(move |e: &MouseDownEvent, phase, window, cx| {
                 if phase != DispatchPhase::Capture || e.button != MouseButton::Left {
+                    return;
+                }
+                if POINTER_AT.get() == Some(e.position) {
                     return;
                 }
                 let Some(at) = revealed_at(&down_scroll, e.position, window) else { return };

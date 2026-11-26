@@ -567,8 +567,11 @@ impl DevicePicker {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // `go` updates this picker: once this update is over (as the paths
+        // below, which ask the core first), or the app stops on a picker
+        // updated twice
         if le_audio {
-            return go(window, cx);
+            return window.defer(cx, move |window, cx| go(window, cx));
         }
         let adapter = self.core.read(cx).snap().and_then(winusb_adapter);
         let through = adapter.map(|adapter| {
