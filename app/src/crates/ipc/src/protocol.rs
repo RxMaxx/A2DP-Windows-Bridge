@@ -704,6 +704,53 @@ pub struct AuracastMixPreset {
     pub builtin: bool,
 }
 
+/// A receiver an Auracast assistant tells to play a broadcast (BASS Add
+/// Source), stream.start_broadcast's `receivers`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct BroadcastReceiver {
+    /// "XX:XX:XX:XX:XX:XX"
+    pub address: String,
+    #[serde(default)]
+    pub name: String,
+    /// The outputs it plays, all in one broadcast of the layout: "FL",
+    /// "FR", "RL", "RR", or "M" (layout mono); "L" / "R" are FL / FR
+    pub channels: Vec<String>,
+}
+
+/// A saved LE Audio device an assistant can tell
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AuracastReceiverCandidate {
+    pub address: String,
+    pub name: String,
+    /// It has BASS (a connection found it), not (found none), or None:
+    /// not known yet (never connected)
+    pub bass: Option<bool>,
+}
+
+/// A receiver of the broadcast running (or of the last one) and what it
+/// does
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AuracastReceiverStatus {
+    pub address: String,
+    pub name: String,
+    /// The BIS asked for (1-based, in its broadcast)
+    pub asked: Vec<u8>,
+    /// "waiting", "looking", "connecting", "ready", "added", "synced",
+    /// "playing", "done", "not_found", "no_bass" or "failed"
+    pub phase: String,
+    /// The BIS it reports synchronized to
+    pub bis: Vec<u8>,
+    /// Why it failed, or what else it reports
+    pub detail: String,
+}
+
+/// auracast.receivers
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub struct AuracastReceivers {
+    pub candidates: Vec<AuracastReceiverCandidate>,
+    pub live: Vec<AuracastReceiverStatus>,
+}
+
 /// The mixer as the Auracast tab shows it
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
 pub struct AuracastMixState {
@@ -2054,6 +2101,14 @@ pub enum Method {
         #[ts(optional = nullable)]
         #[serde(default)]
         follow_volume: Option<bool>,
+        /// Receivers with BASS an Auracast assistant tells to play it, each
+        /// its channels (all in one broadcast of the layout), found and
+        /// connected in turn, then told together; taken off again at the
+        /// stop (auracast.receivers shows what each does). A channel the
+        /// layout has not: error stream.bad_receiver.
+        #[ts(optional = nullable)]
+        #[serde(default)]
+        receivers: Option<Vec<BroadcastReceiver>>,
     },
     /// AVRCP absolute volume 0..127; while broadcasting, the broadcast's
     /// level
@@ -2206,6 +2261,12 @@ pub enum Method {
     /// `follow_volume`), as kept for the next broadcast
     #[serde(rename = "auracast.follow_volume")]
     AuracastFollowVolume,
+    /// -> AuracastReceivers: the saved LE Audio devices an assistant can
+    /// tell (`bass` as their GATT services were kept at the last
+    /// connection), and what the receivers of the broadcast running (or of
+    /// the last one) do
+    #[serde(rename = "auracast.receivers")]
+    AuracastReceivers,
     /// For tools: the headset mode of the profile `name` (absent: the one
     /// streaming, else the active one), saved as the window's mode buttons
     /// save it: "off" mutes the microphone while the mode saved is Auto or
@@ -3093,6 +3154,9 @@ pub struct HidCode {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
+// A request lives from its line read to its answer: the size of its
+// largest method (stream.start_broadcast) costs nothing worth a box
+#[allow(clippy::large_enum_variant)]
 pub enum ClientMessage {
     Hello {
         protocol: u32,

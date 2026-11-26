@@ -199,5 +199,7 @@ mod tests {
         HidStatus::export_all(&cfg).unwrap();
         HidCode::export_all(&cfg).unwrap();
         AuracastMixState::export_all(&cfg).unwrap();
+        AuracastReceivers::export_all(&cfg).unwrap();
+        BroadcastReceiver::export_all(&cfg).unwrap();
     }
 }

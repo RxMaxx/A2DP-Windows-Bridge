@@ -15,12 +15,13 @@ use gpui_kit::{
     AnyElement, App, AppContext as _, AsyncApp, Context, Entity, EntityId, Global, IntoElement, ParentElement as _,
     Render, SharedString, Styled as _, Subscription, Task, WeakEntity, Window, div, px,
 };
-use ipc::{AudioDevice, Method, StreamStatus};
+use ipc::{AudioDevice, AuracastReceiverCandidate, AuracastReceiverStatus, AuracastReceivers, Method, StreamStatus};
 use ui_model::i18n::t;
 use ui_model::t;
 use ui_model::view::auracast::{
-    Channels, Choices, DeviceNames, MAX_BIGS, PairMode, Quality, SOURCE_SETTLE_MS, Session, Source, SourceParams,
-    auracast_adapter_choices, followable, settled_source, show_adapter, source_options, source_params,
+    Arrangement, Channels, Choices, DeviceNames, MAX_BIGS, PairMode, Quality, ReceiverPick, SOURCE_SETTLE_MS, Session,
+    SingleLayout, Source, SourceParams, arrangements, auracast_adapter_choices, followable, receiver_options,
+    receiver_status_text, settled_source, show_adapter, source_options, source_params,
 };
 
 use crate::app;
@@ -88,8 +89,16 @@ pub struct Auracast {
     inputs: Vec<AudioDevice>,
     audio_key: String,
     settle: Option<Task<()>>,
+    /// The saved LE Audio devices to choose receivers from, and what the
+    /// broadcast's receivers do (auracast.receivers, read every second)
+    candidates: Vec<AuracastReceiverCandidate>,
+    live_receivers: Vec<AuracastReceiverStatus>,
+    _poll: Task<()>,
     _subs: Vec<Subscription>,
 }
+
+/// How often the receivers are read again
+const RECEIVERS_POLL: Duration = Duration::from_secs(1);
 
 impl Auracast {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Auracast {
@@ -127,6 +136,29 @@ impl Auracast {
                 }
             }),
         ];
+        let poll = cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            loop {
+                let Ok(task) = this.update(cx, |_, cx| app::request::<AuracastReceivers>(Method::AuracastReceivers, cx))
+                else {
+                    return;
+                };
+                if let Ok(r) = task.await {
+                    let gone = this
+                        .update(cx, |this, cx| {
+                            if this.candidates != r.candidates || this.live_receivers != r.live {
+                                this.candidates = r.candidates;
+                                this.live_receivers = r.live;
+                                cx.notify();
+                            }
+                        })
+                        .is_err();
+                    if gone {
+                        return;
+                    }
+                }
+                cx.background_executor().timer(RECEIVERS_POLL).await;
+            }
+        });
         let mut this = Auracast {
             core,
             session,
@@ -138,6 +170,9 @@ impl Auracast {
             inputs: Vec::new(),
             audio_key,
             settle: None,
+            candidates: Vec::new(),
+            live_receivers: Vec::new(),
+            _poll: poll,
             _subs: subs,
         };
         this.sync_mixer(window, cx);
@@ -205,7 +240,8 @@ impl Auracast {
         let st = self.stream(cx);
         let s = self.session.read(cx);
         let live = s.s.live(&st);
-        let props = s.choices.matrix().then(|| (s.choices.rear != PairMode::Off, live && !s.s.asking));
+        let rear = !s.choices.matrix() || s.choices.rear != PairMode::Off;
+        let props = s.choices.mixed().then_some((rear, live && !s.s.asking));
         self.mixer.update(cx, |m, cx| m.set_props(props, window, cx));
         self.volume.update(cx, |v, cx| v.set_off(!live, cx));
         cx.notify();
@@ -339,7 +375,8 @@ fn pair_row(
         (PairMode::Subgroups, "ui.dev.auracast_pair_subgroups"),
         (PairMode::Off, "ui.dev.auracast_pair_off"),
     ];
-    let rates = [(Quality::Hq, "ui.dev.auracast_48"), (Quality::Sq, "ui.dev.auracast_24")];
+    let rates =
+        [(Quality::Hq, "ui.dev.auracast_48"), (Quality::Mq, "ui.dev.auracast_32"), (Quality::Sq, "ui.dev.auracast_24")];
     ui::row().child(div().child(label)).child(
         div()
             .flex()
@@ -469,7 +506,11 @@ impl Render for Auracast {
                 t("ui.dev.auracast_quality"),
                 &c.quality,
                 locked || c.matrix(),
-                vec![(Quality::Hq, t("ui.dev.auracast_hq")), (Quality::Sq, t("ui.dev.auracast_sq"))],
+                vec![
+                    (Quality::Hq, t("ui.dev.auracast_hq")),
+                    (Quality::Mq, t("ui.dev.auracast_mq")),
+                    (Quality::Sq, t("ui.dev.auracast_sq")),
+                ],
                 move |v: &Quality, _, cx| {
                     let v = *v;
                     set_q(Box::new(move |c| c.quality = v), cx);
@@ -485,12 +526,32 @@ impl Render for Auracast {
                     (Channels::Mono, t("ui.dev.auracast_mono")),
                     (Channels::Split, t("ui.dev.auracast_split")),
                     (Channels::Matrix, t("ui.dev.auracast_matrix")),
+                    (Channels::Single, t("ui.dev.auracast_single")),
                 ],
                 move |v: &Channels, _, cx| {
                     let v = *v;
                     set_ch(Box::new(move |c| c.channels = v), cx);
                 },
             ))
+            .when(c.channels == Channels::Single, |d| {
+                let set_single = set.clone();
+                d.child(ui::field(
+                    t("ui.dev.auracast_single_layout"),
+                    Some(t("ui.dev.auracast_single_layout_hint").into()),
+                    None,
+                    ui::select(
+                        "auracast-single",
+                        &c.single,
+                        SingleLayout::ALL.into_iter().map(|v| Choice::new(v, t(v.label_key()))).collect(),
+                        locked,
+                        move |v: &SingleLayout, _, cx| {
+                            let v = *v;
+                            set_single(Box::new(move |c| c.single = v), cx);
+                        },
+                    ),
+                    cx,
+                ))
+            })
             .child(ui::field(
                 t("receiver.source"),
                 None,
@@ -520,10 +581,12 @@ impl Render for Auracast {
             ))
             .children(status);
 
-        let mixer = c.matrix().then(|| {
+        let receivers = self.receivers_section(&c, locked, &set, cx);
+
+        let mixer = c.mixed().then(|| {
             let bigs = c.bigs();
             let (set_fm, set_fr, set_rm, set_rr) = (set.clone(), set.clone(), set.clone(), set.clone());
-            let children: Vec<AnyElement> = vec![
+            let pairs: Vec<AnyElement> = vec![
                 pair_row(
                     "auracast-front",
                     t("ui.dev.auracast_front"),
@@ -556,10 +619,10 @@ impl Render for Auracast {
                     },
                 )
                 .into_any_element(),
-                ui::hint(t("ui.dev.auracast_speakers_hint"), cx).into_any_element(),
             ];
-            let mut children = children;
-            if bigs == 0 {
+            let mut children = if c.matrix() { pairs } else { Vec::new() };
+            children.push(ui::hint(t("ui.dev.auracast_speakers_hint"), cx).into_any_element());
+            if c.matrix() && bigs == 0 {
                 children
                     .push(ui::hint(t("ui.dev.auracast_pairs_off_hint"), cx).text_color(p.bad_text).into_any_element());
             }
@@ -584,8 +647,79 @@ impl Render for Auracast {
             .gap(theme::S4)
             .child(ui::hint(t("ui.dev.auracast_intro"), cx))
             .child(form)
+            .child(receivers)
             .children(mixer.flatten())
             .into_any_element()
+    }
+}
+
+impl Auracast {
+    /// The receivers an Auracast assistant tells: who plays what, a saved
+    /// device for each place, and what each does while the broadcast runs
+    fn receivers_section(
+        &self,
+        c: &Choices,
+        locked: bool,
+        set: &std::rc::Rc<impl Fn(Box<dyn FnOnce(&mut Choices)>, &mut App) + 'static>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let p = *cx.palette();
+        let offered = arrangements(c.channels);
+        let mut section = ui::section(t("ui.dev.auracast_receivers"), None, cx)
+            .child(ui::hint(t("ui.dev.auracast_receivers_hint"), cx));
+        if offered.len() > 1 {
+            let set_a = set.clone();
+            section = section.child(choice(
+                "auracast-arrangement",
+                t("ui.dev.auracast_arrangement"),
+                &c.arrangement(),
+                locked,
+                offered.iter().map(|a| (*a, t(a.label_key()))).collect(),
+                move |v: &Arrangement, _, cx| {
+                    let v = *v;
+                    set_a(Box::new(move |c| c.arrangement = v), cx);
+                },
+            ));
+        }
+        let options = receiver_options(&self.candidates);
+        for slot in c.slots() {
+            let chosen = c.receiver_of(&slot).map(|r| r.address.clone()).unwrap_or_default();
+            let mut choices: Vec<Choice<String>> =
+                options.iter().map(|(v, l)| Choice::new(v.clone(), l.clone())).collect();
+            // One chosen before that is no longer listed (removed, no BASS)
+            if !chosen.is_empty() && !options.iter().any(|(v, _)| *v == chosen) {
+                let name = c.receiver_of(&slot).map(|r| r.name.clone()).unwrap_or_default();
+                choices.push(Choice::new(chosen.clone(), if name.is_empty() { chosen.clone() } else { name }));
+            }
+            let set_r = set.clone();
+            let names: Vec<(String, String)> =
+                self.candidates.iter().map(|c| (c.address.clone(), c.name.clone())).collect();
+            let key = slot.key;
+            section = section.child(ui::field(
+                t(slot.label_key),
+                None,
+                None,
+                ui::select(SharedString::from(format!("auracast-rx-{key}")), &chosen, choices, locked, move |v: &String, _, cx| {
+                    let pick = (!v.is_empty()).then(|| ReceiverPick {
+                        address: v.clone(),
+                        name: names.iter().find(|(a, _)| a == v).map(|(_, n)| n.clone()).unwrap_or_default(),
+                    });
+                    set_r(Box::new(move |c| c.set_receiver(key, pick)), cx);
+                }),
+                cx,
+            ));
+        }
+        if let Some(e) = c.receiver_error() {
+            section = section.child(ui::hint(e, cx).text_color(p.bad_text));
+        }
+        if !self.live_receivers.is_empty() {
+            let lines = self.live_receivers.iter().map(|r| {
+                let bad = matches!(r.phase.as_str(), "failed" | "not_found" | "no_bass");
+                div().when(bad, |d| d.text_color(p.bad_text)).child(receiver_status_text(r))
+            });
+            section = section.child(div().flex().flex_col().gap(theme::S1).text_size(theme::FS_SMALL).children(lines));
+        }
+        section.into_any_element()
     }
 }
 

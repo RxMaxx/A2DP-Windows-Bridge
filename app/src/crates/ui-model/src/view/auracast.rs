@@ -3,9 +3,12 @@
 //! broadcast counts as live, the length checks, the adapter list, and the
 //! mixer's fields.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
-use ipc::{AdapterInfo, AudioDevice, DriverKind, Method, SourceInfo, StreamState, StreamStatus};
+use ipc::{
+    AdapterInfo, AudioDevice, AuracastReceiverCandidate, AuracastReceiverStatus, BroadcastReceiver, DriverKind, Method,
+    SourceInfo, StreamState, StreamStatus,
+};
 
 use super::adapter::adapter_name;
 use crate::format::js_trim;
@@ -170,9 +173,11 @@ pub fn followable(s: &Source) -> bool {
     !matches!(s, Source::Tone | Source::Input(_))
 }
 
+/// The broadcast's rate: 48 kHz (high), 32 kHz, 24 kHz (standard)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Quality {
     Hq,
+    Mq,
     Sq,
 }
 
@@ -180,6 +185,7 @@ impl Quality {
     pub fn as_str(self) -> &'static str {
         match self {
             Quality::Hq => "hq",
+            Quality::Mq => "mq",
             Quality::Sq => "sq",
         }
     }
@@ -191,6 +197,140 @@ pub enum Channels {
     Mono,
     Split,
     Matrix,
+    /// The matrix mixer's four outputs in one BIG of four BIS
+    Single,
+}
+
+/// How [`Channels::Single`] lays out its four BIS (le_audio::broadcast::SingleMode)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SingleLayout {
+    /// FL FR, the rear without a location, one subgroup
+    RearMono,
+    /// FL FR BL BR, one subgroup
+    Located,
+    /// Two subgroups of FL FR
+    Pairs,
+    /// A subgroup per BIS, none located
+    PerBis,
+}
+
+impl SingleLayout {
+    pub const ALL: [SingleLayout; 4] =
+        [SingleLayout::RearMono, SingleLayout::Located, SingleLayout::Pairs, SingleLayout::PerBis];
+
+    /// The layout's name as stream.start_broadcast takes it
+    pub fn layout(self) -> &'static str {
+        match self {
+            SingleLayout::RearMono => "single",
+            SingleLayout::Located => "single_located",
+            SingleLayout::Pairs => "single_pairs",
+            SingleLayout::PerBis => "single_per_bis",
+        }
+    }
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            SingleLayout::RearMono => "ui.dev.auracast_single_rear_mono",
+            SingleLayout::Located => "ui.dev.auracast_single_located",
+            SingleLayout::Pairs => "ui.dev.auracast_single_pairs",
+            SingleLayout::PerBis => "ui.dev.auracast_single_per_bis",
+        }
+    }
+}
+
+/// Which receivers play which outputs (one or more each, as an Auracast
+/// assistant tells them)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Arrangement {
+    /// One receiver for all: stereo, or the mono one
+    One,
+    /// A left and a right receiver
+    LeftRight,
+    /// Four mono receivers: FL FR RL RR
+    FourMono,
+    /// A stereo front and two mono rears
+    StereoTwoMono,
+    /// A stereo front and a stereo rear
+    TwoStereo,
+}
+
+impl Arrangement {
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Arrangement::One => "ui.dev.auracast_rx_one",
+            Arrangement::LeftRight => "ui.dev.auracast_rx_left_right",
+            Arrangement::FourMono => "ui.dev.auracast_rx_four_mono",
+            Arrangement::StereoTwoMono => "ui.dev.auracast_rx_stereo_two_mono",
+            Arrangement::TwoStereo => "ui.dev.auracast_rx_two_stereo",
+        }
+    }
+}
+
+/// The arrangements a layout offers, the first its default
+pub fn arrangements(channels: Channels) -> &'static [Arrangement] {
+    match channels {
+        Channels::Stereo => &[Arrangement::One, Arrangement::LeftRight],
+        Channels::Mono => &[Arrangement::One],
+        Channels::Split => &[Arrangement::LeftRight],
+        Channels::Matrix | Channels::Single => {
+            &[Arrangement::FourMono, Arrangement::StereoTwoMono, Arrangement::TwoStereo]
+        }
+    }
+}
+
+/// A place for receivers: the outputs they play
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Slot {
+    /// Its key in [`Choices::receivers`] (kept from one arrangement to another)
+    pub key: &'static str,
+    /// The outputs, as stream.start_broadcast's receivers name them
+    pub channels: &'static [&'static str],
+    pub label_key: &'static str,
+}
+
+const FRONT: Slot = Slot { key: "FL+FR", channels: &["FL", "FR"], label_key: "ui.dev.auracast_slot_front" };
+const REAR: Slot = Slot { key: "RL+RR", channels: &["RL", "RR"], label_key: "ui.dev.auracast_slot_rear" };
+const STEREO: Slot = Slot { key: "FL+FR", channels: &["FL", "FR"], label_key: "ui.dev.auracast_slot_stereo" };
+const MONO: Slot = Slot { key: "M", channels: &["M"], label_key: "ui.dev.auracast_slot_mono" };
+const LEFT: Slot = Slot { key: "FL", channels: &["FL"], label_key: "ui.dev.auracast_slot_left" };
+const RIGHT: Slot = Slot { key: "FR", channels: &["FR"], label_key: "ui.dev.auracast_slot_right" };
+const FL: Slot = Slot { key: "FL", channels: &["FL"], label_key: "ui.dev.auracast_slot_fl" };
+const FR: Slot = Slot { key: "FR", channels: &["FR"], label_key: "ui.dev.auracast_slot_fr" };
+const RL: Slot = Slot { key: "RL", channels: &["RL"], label_key: "ui.dev.auracast_slot_rl" };
+const RR: Slot = Slot { key: "RR", channels: &["RR"], label_key: "ui.dev.auracast_slot_rr" };
+
+/// A receiver chosen for a slot
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReceiverPick {
+    pub address: String,
+    pub name: String,
+}
+
+/// Saved LE Audio devices to offer as receivers: those without BASS left
+/// out, those not known yet marked
+pub fn receiver_options(candidates: &[AuracastReceiverCandidate]) -> Vec<(String, String)> {
+    let mut v = vec![(String::new(), t("ui.dev.auracast_rx_none"))];
+    v.extend(candidates.iter().filter(|c| c.bass != Some(false)).map(|c| {
+        let name = if c.name.is_empty() { c.address.clone() } else { c.name.clone() };
+        let label = if c.bass.is_none() { t!("ui.dev.auracast_rx_unchecked", name) } else { name };
+        (c.address.clone(), label)
+    }));
+    v
+}
+
+/// A receiver's state as the list of the broadcast's receivers shows it
+pub fn receiver_status_text(r: &AuracastReceiverStatus) -> String {
+    let who = if r.name.is_empty() { r.address.clone() } else { r.name.clone() };
+    let bis = |v: &[u8]| v.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", ");
+    let phase = match r.phase.as_str() {
+        "playing" => t!("ui.dev.auracast_rx_playing", bis(&r.bis)),
+        p @ ("waiting" | "looking" | "connecting" | "ready" | "added" | "synced" | "done" | "not_found"
+        | "no_bass" | "failed") => t(&format!("ui.dev.auracast_rx_{p}")),
+        other => other.to_owned(),
+    };
+    let asked = if r.asked.is_empty() { String::new() } else { t!("ui.dev.auracast_rx_asked", bis(&r.asked)) };
+    let detail = if r.detail.is_empty() { String::new() } else { format!(" ({})", r.detail) };
+    format!("{who}: {phase}{detail}{asked}")
 }
 
 /// How a pair of matrix outputs is sent (le_audio::broadcast::PairMode)
@@ -244,6 +384,12 @@ pub struct Choices {
     pub rear: PairMode,
     pub front_quality: Quality,
     pub rear_quality: Quality,
+    /// [`Channels::Single`]: how its BIS are laid out
+    pub single: SingleLayout,
+    /// Who plays what (of [`arrangements`] for the channels)
+    pub arrangement: Arrangement,
+    /// The receivers of each slot by its key (one each for now)
+    pub receivers: BTreeMap<String, Vec<ReceiverPick>>,
     pub source: Source,
     /// The broadcast's volume follows the Windows volume
     pub follow: bool,
@@ -260,6 +406,9 @@ impl Default for Choices {
             rear: PairMode::Stereo,
             front_quality: Quality::Hq,
             rear_quality: Quality::Hq,
+            single: SingleLayout::RearMono,
+            arrangement: Arrangement::One,
+            receivers: BTreeMap::new(),
             source: Source::Tone,
             follow: false,
         }
@@ -273,6 +422,7 @@ pub fn layout_of(channels: Channels, front: PairMode, rear: PairMode) -> Option<
         Channels::Matrix => Some(format!("matrix_{}_{}", front.as_str(), rear.as_str())),
         Channels::Stereo => Some("stereo".to_owned()),
         Channels::Split => Some("split".to_owned()),
+        Channels::Single => Some("single".to_owned()),
     }
 }
 
@@ -290,6 +440,85 @@ impl Choices {
         self.channels == Channels::Matrix
     }
 
+    /// Fed by the matrix mixer: a matrix, or its outputs in one BIG
+    pub fn mixed(&self) -> bool {
+        matches!(self.channels, Channels::Matrix | Channels::Single)
+    }
+
+    /// The layout as stream.start_broadcast takes it
+    pub fn layout(&self) -> Option<String> {
+        match self.channels {
+            Channels::Single => Some(self.single.layout().to_owned()),
+            _ => layout_of(self.channels, self.front, self.rear),
+        }
+    }
+
+    /// The arrangement in force: the one chosen if the channels offer it,
+    /// else their first
+    pub fn arrangement(&self) -> Arrangement {
+        let offered = arrangements(self.channels);
+        if offered.contains(&self.arrangement) { self.arrangement } else { offered[0] }
+    }
+
+    /// The slots for receivers: of the arrangement, those whose outputs
+    /// the layout sends (a matrix pair off sends none)
+    pub fn slots(&self) -> Vec<Slot> {
+        let all: &[Slot] = match self.arrangement() {
+            Arrangement::One if self.channels == Channels::Mono => &[MONO],
+            Arrangement::One => &[STEREO],
+            Arrangement::LeftRight => &[LEFT, RIGHT],
+            Arrangement::FourMono => &[FL, FR, RL, RR],
+            Arrangement::StereoTwoMono => &[FRONT, RL, RR],
+            Arrangement::TwoStereo => &[FRONT, REAR],
+        };
+        let sent = |s: &Slot| {
+            !self.matrix()
+                || s.channels
+                    .iter()
+                    .all(|c| if c.starts_with('R') { self.rear != PairMode::Off } else { self.front != PairMode::Off })
+        };
+        all.iter().copied().filter(sent).collect()
+    }
+
+    /// The receiver chosen for a slot (its first)
+    pub fn receiver_of(&self, slot: &Slot) -> Option<&ReceiverPick> {
+        self.receivers.get(slot.key).and_then(|v| v.first())
+    }
+
+    /// Sets the one receiver of a slot (None: none)
+    pub fn set_receiver(&mut self, key: &str, pick: Option<ReceiverPick>) {
+        match pick {
+            Some(p) => {
+                self.receivers.insert(key.to_owned(), vec![p]);
+            }
+            None => {
+                self.receivers.remove(key);
+            }
+        }
+    }
+
+    /// The receivers to tell, of the slots in force
+    pub fn receivers_request(&self) -> Vec<BroadcastReceiver> {
+        self.slots()
+            .iter()
+            .flat_map(|s| {
+                self.receivers.get(s.key).into_iter().flatten().map(move |r| BroadcastReceiver {
+                    address: r.address.clone(),
+                    name: r.name.clone(),
+                    channels: s.channels.iter().map(|c| (*c).to_owned()).collect(),
+                })
+            })
+            .collect()
+    }
+
+    /// A receiver chosen for two slots: an error (it can be told one source)
+    pub fn receiver_error(&self) -> Option<String> {
+        let list = self.receivers_request();
+        let twice = list.iter().enumerate().find(|(i, r)| list[..*i].iter().any(|o| o.address == r.address))?;
+        let r = twice.1;
+        Some(t!("ui.dev.auracast_rx_twice", if r.name.is_empty() { r.address.clone() } else { r.name.clone() }))
+    }
+
     /// The BIGs a matrix takes (0 for the other layouts)
     pub fn bigs(&self) -> u32 {
         if self.matrix() { pair_bigs(self.front) + pair_bigs(self.rear) } else { 0 }
@@ -305,7 +534,11 @@ impl Choices {
 
     /// Start is off while a field is wrong or a matrix sends nothing
     pub fn start_disabled(&self, live: bool) -> bool {
-        !live && (self.name_error().is_some() || self.code_error().is_some() || (self.matrix() && self.bigs() == 0))
+        !live
+            && (self.name_error().is_some()
+                || self.code_error().is_some()
+                || self.receiver_error().is_some()
+                || (self.matrix() && self.bigs() == 0))
     }
 
     /// stream.start_broadcast with the source as `source` names it (see
@@ -320,12 +553,13 @@ impl Choices {
             rear_quality: matrix.then(|| self.rear_quality.as_str().to_owned()),
             mono: Some(self.channels == Channels::Mono),
             split: None,
-            layout: layout_of(self.channels, self.front, self.rear),
+            layout: self.layout(),
             source: source.source,
             source_id: source.source_id,
             source_name: source.source_name,
             volume: None,
             follow_volume: Some(self.follow),
+            receivers: Some(self.receivers_request()).filter(|v| !v.is_empty()),
         }
     }
 }
@@ -629,6 +863,7 @@ mod tests {
                 source_name: None,
                 volume: None,
                 follow_volume: Some(false),
+                receivers: None,
             }
         );
         // A matrix with both pairs off sends nothing

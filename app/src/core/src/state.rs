@@ -127,6 +127,8 @@ pub struct CoreState {
     /// The profile the last stream.start asked for: the session stopped for
     /// it reports Idle after it, which clears the snapshot's profile
     starting_profile: Mutex<Option<String>>,
+    /// The Auracast assistants of the broadcast running (its receivers)
+    assistants: Mutex<Option<bluecaster_core::auracast_assist::Assistants>>,
     /// The message a microphone note replaced (a codec's fallback reason),
     /// back once the note is out of date
     mic_note_over: Mutex<Option<Msg>>,
@@ -1273,6 +1275,8 @@ pub struct BroadcastStream {
     pub volume: Option<u8>,
     /// The level follows the Windows volume; None: as before
     pub follow_volume: Option<bool>,
+    /// Receivers an Auracast assistant tells to play it
+    pub receivers: Vec<ipc::BroadcastReceiver>,
 }
 
 /// The source of a broadcast (stream.start_broadcast, auracast.set_source):
@@ -1317,6 +1321,7 @@ pub fn broadcast_request(b: &BroadcastStream, legacy_max_media_payload: u16) -> 
     const METHOD: &str = "stream.start_broadcast";
     let preset_of = |q: &str| match q.trim().to_ascii_lowercase().as_str() {
         "" | "hq" => Ok(bluecaster_core::BROADCAST_PRESET_HQ),
+        "mq" => Ok(bluecaster_core::BROADCAST_PRESET_MQ),
         "sq" => Ok(bluecaster_core::BROADCAST_PRESET_SQ),
         other => Err(bad_request("stream.bad_quality", METHOD, format!("unknown quality \"{other}\""))),
     };
@@ -1367,6 +1372,49 @@ pub fn broadcast_request(b: &BroadcastStream, legacy_max_media_payload: u16) -> 
         ..bt_host::LeRequest::default()
     });
     Ok(req)
+}
+
+/// How long a stop waits for the receivers to be told (one still looking
+/// for its receiver goes on its own)
+const ASSISTANT_STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The assistants' jobs of stream.start_broadcast's receivers, for the
+/// layout `req` broadcasts; error stream.bad_receiver for a channel it has
+/// not (or channels in two of its broadcasts)
+fn assistant_jobs(
+    b: &BroadcastStream,
+    req: &StreamRequest,
+) -> Result<Vec<bluecaster_core::auracast_assist::Job>, ErrorInfo> {
+    let layout = req.le.as_ref().and_then(|l| l.broadcast.as_ref()).map(|b| b.layout).unwrap_or_default();
+    b.receivers
+        .iter()
+        .map(|r| {
+            bluecaster_core::auracast_assist::job_for(layout, &r.address, &r.name, &r.channels, b.code.clone())
+                .map_err(|why| bad_request("stream.bad_receiver", "stream.start_broadcast", format!("{}: {why}", r.address)))
+        })
+        .collect()
+}
+
+/// auracast.receivers
+fn auracast_receivers(config_dir: &Path) -> ipc::AuracastReceivers {
+    use bluecaster_core::auracast_assist as assist;
+    ipc::AuracastReceivers {
+        candidates: assist::candidates(config_dir)
+            .into_iter()
+            .map(|c| ipc::AuracastReceiverCandidate { address: c.address, name: c.name, bass: c.bass })
+            .collect(),
+        live: assist::receivers()
+            .into_iter()
+            .map(|r| ipc::AuracastReceiverStatus {
+                address: r.address,
+                name: r.name,
+                asked: r.asked,
+                phase: r.phase.as_str().to_string(),
+                bis: r.bis,
+                detail: r.detail,
+            })
+            .collect(),
+    }
 }
 
 /// What to stream for stream.start_custom: built as a profile is (same
@@ -2285,6 +2333,7 @@ impl CoreState {
             started: Instant::now(),
             rates: Mutex::new(None),
             starting_profile: Mutex::new(None),
+            assistants: Mutex::new(None),
             mic_note_over: Mutex::new(None),
             battery_warned: AtomicBool::new(false),
             connect_announce: AtomicBool::new(false),
@@ -3222,6 +3271,7 @@ impl CoreState {
         self.developer_only()?;
         let settings = self.service.settings();
         let mut req = broadcast_request(b, settings.legacy_max_media_payload())?;
+        let jobs = assistant_jobs(b, &req)?;
         req.mute_output = settings.mutes_output();
         if let Some(level) = b.volume {
             bluecaster_core::broadcast_volume::set_level(level);
@@ -3231,7 +3281,24 @@ impl CoreState {
         }
         tracing::info!("broadcast \"{}\": quality {}, source {}", b.name, b.quality, req.source);
         self.begin_stream(req, None);
+        self.start_assistants(jobs);
         Ok(())
+    }
+
+    /// The assistants of a new broadcast (none: the receivers listed are
+    /// cleared); those of one before are told to stop
+    fn start_assistants(&self, jobs: Vec<bluecaster_core::auracast_assist::Job>) {
+        use bluecaster_core::auracast_assist::Assistants;
+        let mut slot = self.assistants.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(old) = slot.take() {
+            old.signal_stop();
+        }
+        if !jobs.is_empty() {
+            tracing::info!("Auracast assistant: {} receiver(s)", jobs.len());
+        }
+        let service = self.service.clone();
+        let out: bluecaster_core::auracast_assist::Out = Arc::new(|line: &str| tracing::info!("{line}"));
+        *slot = Some(Assistants::start(move || service.host(), jobs, out));
     }
 
     /// The stream running goes on under its profile's new name (a save that
@@ -3514,7 +3581,14 @@ impl CoreState {
     pub fn stop(&self) {
         let service = self.service.clone();
         let ticket = service.ticket();
-        std::thread::spawn(move || service.disconnect_for(ticket));
+        // The receivers are told first, while the broadcast is still up
+        let assistants = self.assistants.lock().unwrap_or_else(|e| e.into_inner()).take();
+        std::thread::spawn(move || {
+            if let Some(a) = assistants {
+                a.stop_within(ASSISTANT_STOP_WAIT);
+            }
+            service.disconnect_for(ticket);
+        });
     }
 
     /// Settings > the flyout above Quick Settings
@@ -3909,6 +3983,7 @@ impl CoreState {
                 source_name,
                 volume,
                 follow_volume,
+                receivers,
             } => {
                 let b = BroadcastStream {
                     name,
@@ -3923,6 +3998,7 @@ impl CoreState {
                     source_name,
                     volume,
                     follow_volume,
+                    receivers: receivers.unwrap_or_default(),
                 };
                 self.start_broadcast(&b).map(|()| Value::Null)
             }
@@ -4071,6 +4147,10 @@ impl CoreState {
             Method::AuracastFollowVolume => {
                 self.developer_only()?;
                 Ok(Value::Bool(bluecaster_core::broadcast_volume::follows()))
+            }
+            Method::AuracastReceivers => {
+                self.developer_only()?;
+                Ok(json(&auracast_receivers(&self.config_dir())))
             }
             Method::AuracastMixGet { channels, rear } => {
                 self.developer_only()?;

@@ -778,6 +778,7 @@ dependencies = [
  "hci-transport",
  "input-helper",
  "ipc",
+ "le-audio",
  "serde",
  "serde_json",
  "session-host",
