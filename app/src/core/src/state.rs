@@ -129,6 +129,8 @@ pub struct CoreState {
     starting_profile: Mutex<Option<String>>,
     /// The broadcast's name of the session starting (StreamStatus.broadcast)
     starting_broadcast: Mutex<Option<String>>,
+    /// auracast.receivers' devices as read last, and when
+    receiver_candidates: Mutex<Option<(Instant, Vec<ipc::AuracastReceiverCandidate>)>>,
     /// The Auracast assistants of the broadcast running (its receivers)
     assistants: Mutex<Option<bluecaster_core::auracast_assist::Assistants>>,
     /// The message a microphone note replaced (a codec's fallback reason),
@@ -1407,14 +1409,44 @@ fn assistant_jobs(
     Ok(jobs)
 }
 
-/// auracast.receivers
-fn auracast_receivers(config_dir: &Path) -> ipc::AuracastReceivers {
+/// A line of an Auracast assistant for the log: each receiver's address
+/// (`receivers`, in their order) as its number ("#1"), and no other address
+/// (the broadcast's own in a Broadcast Receive State)
+fn assistant_log_line(line: &str, receivers: &[String]) -> String {
+    let mut line = line.to_string();
+    for (n, address) in receivers.iter().enumerate() {
+        line = line.replace(address.as_str(), &format!("#{}", n + 1));
+    }
+    let b = line.as_bytes();
+    let address_at = |i: usize| {
+        b.get(i..i + 17).is_some_and(|a| {
+            a.iter().enumerate().all(|(k, c)| if k % 3 == 2 { *c == b':' } else { c.is_ascii_hexdigit() })
+        }) && (i == 0 || !b[i - 1].is_ascii_hexdigit())
+            && b.get(i + 17).is_none_or(|c| !c.is_ascii_hexdigit())
+    };
+    let mut out = String::with_capacity(line.len());
+    let mut i = 0;
+    while let Some(c) = line[i..].chars().next() {
+        if address_at(i) {
+            out.push_str("(address)");
+            i += 17;
+        } else {
+            out.push(c);
+            i += c.len_utf8();
+        }
+    }
+    out
+}
+
+/// How long auracast.receivers answers with the devices it read last: the
+/// Auracast tab asks every second, and they come from two files
+const RECEIVER_CANDIDATES_KEPT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// auracast.receivers; `candidates` as read from the saved devices
+fn auracast_receivers(candidates: Vec<ipc::AuracastReceiverCandidate>) -> ipc::AuracastReceivers {
     use bluecaster_core::auracast_assist as assist;
     ipc::AuracastReceivers {
-        candidates: assist::candidates(config_dir)
-            .into_iter()
-            .map(|c| ipc::AuracastReceiverCandidate { address: c.address, name: c.name, bass: c.bass })
-            .collect(),
+        candidates,
         live: assist::receivers()
             .into_iter()
             .map(|r| ipc::AuracastReceiverStatus {
@@ -2346,6 +2378,7 @@ impl CoreState {
             rates: Mutex::new(None),
             starting_profile: Mutex::new(None),
             starting_broadcast: Mutex::new(None),
+            receiver_candidates: Mutex::new(None),
             assistants: Mutex::new(None),
             mic_note_over: Mutex::new(None),
             battery_warned: AtomicBool::new(false),
@@ -3300,6 +3333,23 @@ impl CoreState {
         Ok(())
     }
 
+    /// The saved LE Audio devices an assistant can tell, read again once
+    /// those read last are [`RECEIVER_CANDIDATES_KEPT`] old
+    fn receiver_candidates(&self) -> Vec<ipc::AuracastReceiverCandidate> {
+        let mut kept = self.receiver_candidates.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, list)) = kept.as_ref()
+            && at.elapsed() < RECEIVER_CANDIDATES_KEPT
+        {
+            return list.clone();
+        }
+        let list: Vec<_> = bluecaster_core::auracast_assist::candidates(&self.config_dir())
+            .into_iter()
+            .map(|c| ipc::AuracastReceiverCandidate { address: c.address, name: c.name, bass: c.bass })
+            .collect();
+        *kept = Some((Instant::now(), list.clone()));
+        list
+    }
+
     /// The assistants of a new broadcast (none: the receivers listed are
     /// cleared); those of one before are told to stop
     fn start_assistants(&self, jobs: Vec<bluecaster_core::auracast_assist::Job>) {
@@ -3312,7 +3362,10 @@ impl CoreState {
             tracing::info!("Auracast assistant: {} receiver(s)", jobs.len());
         }
         let service = self.service.clone();
-        let out: bluecaster_core::auracast_assist::Out = Arc::new(|line: &str| tracing::info!("{line}"));
+        // The log names the receivers by number, not by address
+        let addresses: Vec<String> = jobs.iter().map(|j| j.address.clone()).collect();
+        let out: bluecaster_core::auracast_assist::Out =
+            Arc::new(move |line: &str| tracing::info!("{}", assistant_log_line(line, &addresses)));
         *slot = Some(Assistants::start(move || service.host(), jobs, out));
     }
 
@@ -4174,7 +4227,7 @@ impl CoreState {
             }
             Method::AuracastReceivers => {
                 self.developer_only()?;
-                Ok(json(&auracast_receivers(&self.config_dir())))
+                Ok(json(&auracast_receivers(self.receiver_candidates())))
             }
             Method::AuracastMixGet { channels, rear } => {
                 self.developer_only()?;
@@ -5000,6 +5053,25 @@ fn local_stamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_assistants_log_line_has_no_address() {
+        let receivers = ["AA:BB:CC:DD:EE:FF".to_string(), "11:22:33:44:55:66".to_string()];
+        assert_eq!(
+            assistant_log_line("Assistant 11:22:33:44:55:66: looking for it...", &receivers),
+            "Assistant #2: looking for it..."
+        );
+        assert_eq!(
+            assistant_log_line(
+                "Receiver AA:BB:CC:DD:EE:FF 0x0021: source 1: Broadcast_ID 0x123456 at C1:22:33:44:55:66 (random)",
+                &receivers
+            ),
+            "Receiver #1 0x0021: source 1: Broadcast_ID 0x123456 at (address) (random)"
+        );
+        // Not an address: BIS_Sync masks, a time, text past ASCII
+        let plain = "Assistant #1: Add Source “Café” (BIS_Sync [00000003]) at 12:34:56";
+        assert_eq!(assistant_log_line(plain, &receivers), plain);
+    }
 
     fn custom(source: &str) -> CustomStream {
         CustomStream {

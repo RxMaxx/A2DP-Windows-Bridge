@@ -531,7 +531,7 @@ impl Render for Auracast {
                 ],
                 move |v: &Channels, _, cx| {
                     let v = *v;
-                    set_ch(Box::new(move |c| c.channels = v), cx);
+                    set_ch(Box::new(move |c| c.set_channels(v)), cx);
                 },
             ))
             .when(c.channels == Channels::Single, |d| {

@@ -440,6 +440,16 @@ impl Choices {
         self.channels == Channels::Matrix
     }
 
+    /// Chooses the channels. One BIG of four BIS goes from high quality to
+    /// medium: at 48 kHz its four BIS lost most of their audio on the
+    /// adapter tried (an ASUS BT600), at 32 kHz none. High stays choosable.
+    pub fn set_channels(&mut self, channels: Channels) {
+        if channels == Channels::Single && self.channels != Channels::Single && self.quality == Quality::Hq {
+            self.quality = Quality::Mq;
+        }
+        self.channels = channels;
+    }
+
     /// Fed by the matrix mixer: a matrix, or its outputs in one BIG
     pub fn mixed(&self) -> bool {
         matches!(self.channels, Channels::Matrix | Channels::Single)
@@ -880,6 +890,23 @@ mod tests {
         // A matrix with both pairs off sends nothing
         let off = Choices { channels: Channels::Matrix, front: PairMode::Off, rear: PairMode::Off, ..c };
         assert!(off.start_disabled(false));
+    }
+
+    #[test]
+    fn one_big_of_four_bis_starts_at_medium_quality() {
+        let mut c = Choices::default();
+        assert_eq!(c.quality, Quality::Hq);
+        c.set_channels(Channels::Matrix);
+        assert_eq!(c.quality, Quality::Hq);
+        c.set_channels(Channels::Single);
+        assert_eq!((c.channels, c.quality), (Channels::Single, Quality::Mq));
+        // High chosen for it stays, and so does standard
+        c.quality = Quality::Hq;
+        c.set_channels(Channels::Single);
+        assert_eq!(c.quality, Quality::Hq);
+        let mut c = Choices { quality: Quality::Sq, ..Choices::default() };
+        c.set_channels(Channels::Single);
+        assert_eq!(c.quality, Quality::Sq);
     }
 
     #[test]

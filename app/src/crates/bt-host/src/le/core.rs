@@ -1298,7 +1298,7 @@ impl<'a> LeCtx<'a> {
         }
         self.each_module_for(dev, |m, ctx| m.on_connected(ctx, dev));
         if self.core.connect.as_ref().is_some_and(|c| c.device == dev && c.open) {
-            tracing::info!("LE Audio: {}: not secured (asked so), discovering the services", addr);
+            tracing::info!("LE Audio: device {}: not secured (asked so), discovering the services", dev.0);
             if let Some(d) = self.device_mut(dev) {
                 d.secured = true;
             }
