@@ -69,7 +69,8 @@ pub fn tag(
     };
     let d = div()
         .id(id)
-        .flex_none()
+        // A long one (Russian) wraps inside its box, not out of it
+        .max_w_full()
         .flex()
         .items_center()
         .px(theme::S2)
@@ -80,7 +81,6 @@ pub fn tag(
         .text_size(theme::FS_SMALL)
         .font_weight(FontWeight::NORMAL)
         .text_color(fg)
-        .whitespace_nowrap()
         .child(text.into());
     match title.filter(|t| !t.is_empty()) {
         Some(title) => d.tooltip(move |window, cx| Tooltip::new(title.clone()).build(window, cx)).into_any_element(),
@@ -99,7 +99,6 @@ fn status_line(tone: Tone, cx: &App) -> Div {
     };
     div()
         .flex()
-        .flex_wrap()
         .items_center()
         .gap(theme::S2)
         .min_w_0()
@@ -402,7 +401,7 @@ impl Adapter {
             text.push_str(" · ");
             text.push_str(&t!("ui.adapter.active_line", name));
         }
-        status_line(status_tone(adapter.status), cx).child(text)
+        status_line(status_tone(adapter.status), cx).child(div().flex_1().min_w_0().child(text))
     }
 
     fn adapter_card(
@@ -432,6 +431,8 @@ impl Adapter {
             .font_family(theme::FONT_DISPLAY)
             .text_size(theme::FS_LARGE)
             .font_weight(FontWeight::SEMIBOLD)
+            .min_w_0()
+            .max_w_full()
             .child(adapter_name(a))
             .when(!device_name.is_empty(), |d| {
                 d.tooltip(move |window, cx| Tooltip::new(device_name.clone()).build(window, cx))
@@ -670,7 +671,7 @@ impl Adapter {
     /// LE Audio for the whole stack, as Windows has it (issue #86)
     fn le_audio_toggle(snap: &Snapshot, cx: &App) -> Option<Div> {
         le_audio_toggle_shown(&snap.adapter, snap.settings.developer_mode).then(|| {
-            ui::card(cx).child(ui::toggle(
+            ui::card(cx).child(ui::first_row(ui::toggle(
                 "le-audio",
                 t("ui.adapter.le_audio"),
                 None,
@@ -681,7 +682,7 @@ impl Adapter {
                     app::save_settings(move |s| s.le_audio_experimental = v, cx);
                 },
                 cx,
-            ))
+            )))
         })
     }
 
@@ -828,7 +829,7 @@ fn box_heading(label: String) -> Div {
         .gap(theme::S1)
         .text_size(theme::FS_BODY)
         .font_weight(FontWeight::SEMIBOLD)
-        .child(format!("{label}:"))
+        .child(ui_model::i18n::with_colon(&label))
 }
 
 /// Another vendor's adapter (issue #86): what to do about its firmware, and
@@ -1014,9 +1015,28 @@ impl Render for Adapter {
             // how it ended: "ready" and its steps in developer mode only
             .when_some(loader_line(adapter.loader.as_ref(), developer), |d, l| {
                 let p = *cx.palette();
-                d.child(status_line(l.tone, cx).child(l.text).when_some(l.step, |d, step| {
-                    d.child(div().font_family(theme::FONT_MONO).text_color(p.text_2).child(format!("({step})")))
-                }))
+                // One text that wraps as a whole, the step after the words
+                d.child(
+                    status_line(l.tone, cx).child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_wrap()
+                            .gap_x(theme::S2)
+                            .child(div().min_w_0().max_w_full().child(l.text))
+                            .when_some(l.step, |d, step| {
+                                d.child(
+                                    div()
+                                        .min_w_0()
+                                        .max_w_full()
+                                        .font_family(theme::FONT_MONO)
+                                        .text_color(p.text_2)
+                                        .child(format!("({step})")),
+                                )
+                            }),
+                    ),
+                )
             })
             .children(adapter_hung(cx))
             .when_some(

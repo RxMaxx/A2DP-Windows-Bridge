@@ -41,6 +41,7 @@ pub use remote::{
 };
 pub use tone::RIGHT_HZ as TEST_TONE_RIGHT_HZ;
 pub use tone::{AMPLITUDE as TEST_TONE_AMPLITUDE, LEFT_HZ as TEST_TONE_LEFT_HZ};
+pub use tone::{QUAD_HZ as TEST_TONE_QUAD_HZ, set_quad as set_test_tone_quad};
 pub use win_sys::audio_policy::EndpointRole;
 
 /// Where the audio comes from (v1 CaptureMode, plus the test tone)
@@ -284,7 +285,8 @@ impl Capture {
             Source::TestTone => {
                 let rate = options.preferred_rate.filter(|&r| r >= 100).unwrap_or(DEFAULT_RATE);
                 tracing::debug!("audio source: test tone, requested {:?}, using {rate} Hz", options.preferred_rate);
-                (tone::format(rate), loopback::STEREO_MASK, Backend::Tone)
+                let mask = if tone::quad() { tone::QUAD_MASK } else { loopback::STEREO_MASK };
+                (tone::format(rate), mask, Backend::Tone)
             }
         };
         Ok(Capture { format, channel_mask, backend: Some(backend) })

@@ -87,7 +87,8 @@ pub fn access(m: &Method) -> Access {
         | Method::TwsMixPresetDelete { .. }
         | Method::AuracastSetSource { .. }
         | Method::AuracastSetFollowVolume { .. }
-        | Method::AuracastFollowVolume => Open,
+        | Method::AuracastFollowVolume
+        | Method::AuracastReceivers => Open,
         // Developer mode and what it sets, the chip and firmware settings
         Method::SettingsSet { .. } => Depends,
         Method::AdapterList

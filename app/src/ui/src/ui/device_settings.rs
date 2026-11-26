@@ -262,7 +262,7 @@ fn capture_format_box(c: &CaptureFormat, cx: &App) -> impl IntoElement + use<> {
         .flex()
         .flex_none()
         .items_center()
-        .min_h(px(32.))
+        .h(gpui_kit::rems(2.))
         .border_1()
         .border_color(line)
         .rounded(theme::RADIUS)
@@ -380,7 +380,7 @@ impl Render for DeviceSettings {
                 },
             )
             // A line that opens a dialog reaches past the text on both sides (`.nav-row`)
-            .child(div().mx(-theme::S2).child(eq))
+            .child(eq)
             .children(super::le_channels::le_channels(&self.device, cx))
             .child(self.input_source.clone())
     }

@@ -604,7 +604,7 @@ X% (reported Y%)"). Emulator option `--bas L[,L2]`, `--bas-change S:L`.
 BlueCaster can also broadcast instead of streaming to a device: any LE Audio
 receiver nearby (earbuds, a speaker, a phone acting as an assistant) can
 pick it up. It is started from the Developer screen's Auracast tab (name,
-password, high / standard quality, stereo / mono, the source and the
+password, high / medium / standard quality, the channels, the source and the
 volume; `stream.start_broadcast`, refused with `developer.off` unless
 developer mode is on) or with `--cli --auracast <name> [--auracast-code
 <code>] [--auracast-mono | --auracast-split] [--le-preset 24_2_2]`, which
@@ -714,6 +714,32 @@ it.
   puts the front in subgroups too (mono BIS, "Front left" / "Front right").
   It runs, but the receiver always takes the left (first) subgroup. Left
   as it is for now: other receivers may let one pick.
+- One BIG of four BIS (layout `single`, the Auracast tab's "1 BIG, 4 BIS"):
+  the matrix mixer's four outputs in one broadcast, for controllers that
+  run few BIGs (the BT600 runs two, and two BIGs drop about a quarter of
+  the SDUs at 48 kHz, one BIG none). `le_audio::broadcast::SingleMode`
+  marks the BIS for receivers that pick by location: `single` FL FR and
+  the rear without a location (a speaker set to FL|FR refuses BL / BR,
+  as the HomeBuddy did), `single_located` FL FR BL BR, `single_pairs` two
+  subgroups of FL FR ("Front" / "Rear"), `single_per_bis` a subgroup per
+  mono BIS. Four BIS at 48_2_2 dropped about 60 % on the BT600, at 32_2_2
+  (the tab's "Medium (32 kHz)", `quality` "mq") and 24_2_2 none.
+- Receivers (`stream.start_broadcast`'s `receivers`: address, name, the
+  channels each plays; the Auracast tab's **Receivers**): as an Auracast
+  assistant (`core::auracast_assist`) BlueCaster connects to each saved
+  LE Audio device with BASS (0x184F), waits until all are connected, then
+  tells each the broadcast and its BIS (Add Source, BIS_Sync per
+  subgroup), sends the Broadcast_Code when asked, and at the stop takes
+  the source off again (Modify, Remove). `auracast.receivers` lists the
+  devices to choose (BASS from the GATT cache: yes, no or not yet known)
+  and what each receiver does (waiting, looking, connecting, ready,
+  added, synced, playing, done, not found, no BASS, failed). The tab
+  offers per channel choice: stereo one receiver or left + right; split
+  left + right; the matrix and one BIG 4 mono, 1 stereo + 2 mono or 2
+  stereo. One receiver per place for now; `receivers` already lets
+  several play the same channels. Earbuds pick their BIS by their own
+  location and ignore BIS_Sync for the rear; a coordinated set is told
+  only at its saved address.
 - Adapter (`Settings::auracast_adapter_id`, the Auracast tab's **Adapter**,
   shown once two adapters have WinUSB): the adapter broadcasts go on.
   Adapters differ here: some cannot broadcast (on the Intel AX211 the
@@ -923,8 +949,9 @@ LE keys of classic devices (issue #86):
   source preset is fixed by the plan (no renegotiation when the headset
   changes its available contexts); the mix of two earbuds' microphones
   aligns them by arrival, not by time stamp.
-- Broadcast works only as a source (developer mode, see above); no BASS, no CAP
-  procedures beyond what BAP needs.
+- Broadcast works only as a source (developer mode, see above); BASS only
+  as the assistant of its own broadcast, no CAP procedures beyond what BAP
+  needs.
 - SDUs without time stamps; no LE Read ISO TX Sync; a simple jitter buffer
   (the prefill only grows). Without time stamps the controller puts an SDU
   in the next event of its CIS, so a CIS whose first SDUs (or those after an

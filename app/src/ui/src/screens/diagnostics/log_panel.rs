@@ -469,8 +469,9 @@ impl Render for LogPanel {
                 )
             });
 
-        // Grows with the window: the rest of the screen above it is ~19rem
-        let height = (window.viewport_size().height - px(304.)).max(px(256.));
+        // Grows with the window: the heading, the report card, the capture
+        // line, the tabs and the tools above it take about this much
+        let height = (window.viewport_size().height - px(660.)).max(px(256.));
         let count = self.shown.len();
         let list: gpui_kit::AnyElement = if count == 0 {
             div().p(theme::S3).text_color(p.text_2).child(SharedString::from(t("ui.diag.no_log"))).into_any_element()

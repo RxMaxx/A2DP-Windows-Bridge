@@ -9,7 +9,7 @@ use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, Context, MouseButton, Render, TestAppContext};
 
 use super::*;
-use crate::testing::{Harness, press_at, release_at, snapshot};
+use crate::testing::{Harness, move_to, press_at, release_at, snapshot};
 
 struct Tall {
     pressed: Rc<Cell<u32>>,
@@ -57,4 +57,30 @@ fn a_press_below_the_window_scrolls_the_control_into_view_and_presses_it(cx: &mu
     });
     assert_eq!(h.on(cx, w, |window, _| window.find("far").bounds().center()), before);
     assert_eq!(pressed.get(), 1);
+}
+
+#[gpui_kit::test]
+fn a_press_on_the_title_bar_or_the_edge_is_left_to_the_window(cx: &mut TestAppContext) {
+    let mut h = Harness::start(cx, snapshot());
+    let pressed = Rc::new(Cell::new(0));
+    let p = pressed.clone();
+    let (w, _) = h.open_sized(cx, (800., 600.), move |_, cx| cx.new(|_| Tall { pressed: p }));
+    let before = h.on(cx, w, |window, _| window.find("far").bounds().center());
+    // Windows sends a press on the title bar's maximize button, or on the
+    // bottom edge, as one outside the page, where the pointer moved to
+    for at in [point(px(700.), px(-16.)), point(px(400.), px(604.))] {
+        h.on(cx, w, |window, cx| {
+            move_to(window, at, false, cx);
+            press_at(window, at, MouseButton::Left, 1, cx);
+            release_at(window, at, MouseButton::Left, 1, cx);
+        });
+        for _ in 0..2 {
+            h.on(cx, w, |window, cx| {
+                window.simulate_next_frame(cx);
+                window.render_frame(cx);
+            });
+        }
+        assert_eq!(h.on(cx, w, |window, _| window.find("far").bounds().center()), before, "not scrolled for {at:?}");
+    }
+    assert_eq!(pressed.get(), 0);
 }

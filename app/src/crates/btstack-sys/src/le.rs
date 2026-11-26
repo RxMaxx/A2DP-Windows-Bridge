@@ -79,7 +79,7 @@ pub struct BigParams {
     /// Also the broadcast slot (0..[`BROADCAST_SLOTS`]) whose advertising
     /// set the BIG goes on
     pub big_handle: u8,
-    /// 1..=2 (MAX_NR_BIS)
+    /// 1..=4 (MAX_NR_BIS)
     pub num_bis: u8,
     pub sdu_interval_us: u32,
     pub max_sdu: u16,

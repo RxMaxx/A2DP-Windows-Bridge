@@ -147,7 +147,7 @@ pub struct LeRequest {
     pub mic_rate: Option<u32>,
 }
 
-pub use le_audio::broadcast::BroadcastLayout;
+pub use le_audio::broadcast::{BroadcastLayout, SingleMode};
 
 /// What a broadcast was asked for (`stream.start_broadcast`, `--auracast`)
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

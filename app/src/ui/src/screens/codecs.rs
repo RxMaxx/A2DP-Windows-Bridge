@@ -375,11 +375,8 @@ impl Render for Codecs {
             return div().into_any_element();
         };
         let hide = hide();
-        let options = div()
-            .flex()
-            .flex_col()
-            .gap(theme::S1)
-            .child(ui::toggle(
+        let options = ui::card(cx)
+            .child(ui::first_row(ui::toggle(
                 "auto-select",
                 t("ui.codecs.auto_select"),
                 None,
@@ -390,7 +387,7 @@ impl Render for Codecs {
                     app::save_settings(move |s| s.auto_codec = v, cx);
                 },
                 cx,
-            ))
+            )))
             .child(ui::toggle(
                 "codecs-hide",
                 t("ui.profile.codecs_hide"),
@@ -932,7 +929,12 @@ impl DeviceCodecs {
             .child(div().flex_none().text_color(p.text_2).child(icon(IconName::Headphones).size(px(24.))))
             .child(
                 div().flex().flex_col().flex_1().min_w_0().child(
-                    div().text_size(theme::FS_LARGE).font_weight(FontWeight::SEMIBOLD).line_clamp(2).child(name),
+                    div()
+                        .text_size(theme::FS_LARGE)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .line_clamp(2)
+                        .text_ellipsis()
+                        .child(name),
                 ),
             )
             // No "Paired": that is the Audio Devices page's (issue #86); LE

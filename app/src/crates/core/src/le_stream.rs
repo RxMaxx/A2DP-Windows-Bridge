@@ -86,7 +86,9 @@ const JUST_LEFT: Duration = Duration::from_secs(5);
 const SWAP_FIND: Duration = Duration::from_secs(3);
 /// Broadcast presets of stream.start_broadcast's qualities: high (48 kHz)
 /// and standard (24 kHz)
-pub use le_audio::broadcast::{DEFAULT_PRESET as BROADCAST_PRESET_HQ, STANDARD_PRESET as BROADCAST_PRESET_SQ};
+pub use le_audio::broadcast::{
+    DEFAULT_PRESET as BROADCAST_PRESET_HQ, MID_PRESET as BROADCAST_PRESET_MQ, STANDARD_PRESET as BROADCAST_PRESET_SQ,
+};
 /// The codec name the UI shows (v1)
 pub const CODEC_NAME: &str = "LC3 (LE Audio)";
 

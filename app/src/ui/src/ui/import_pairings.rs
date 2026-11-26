@@ -9,10 +9,11 @@
 use gpui_kit::component::Disableable as _;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AsyncApp, AsyncWindowContext, Context, Entity, FontWeight, IntoElement, ParentElement as _, Render, Styled as _,
-    WeakEntity, Window, div,
+    AsyncApp, AsyncWindowContext, Context, Entity, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, Styled as _, WeakEntity, Window, div, px,
 };
 use ipc::{Method, WindowsImport, WindowsPairedDevice};
 use ui_model::i18n::t;
@@ -133,9 +134,13 @@ impl ImportPairings {
                 let list = unsaved_windows(&s.windows, &devices);
                 let busy = s.busy;
                 div()
+                    // Many devices scroll: the buttons stay in reach
+                    .id("import-list")
                     .flex()
                     .flex_col()
                     .gap(theme::S2)
+                    .max_h(px(320.))
+                    .overflow_y_scrollbar()
                     .children(list.into_iter().enumerate().map(|(i, d)| {
                         let address = d.address.clone();
                         let weak = this.downgrade();
@@ -166,7 +171,13 @@ impl ImportPairings {
                                     .flex()
                                     .flex_col()
                                     .min_w_0()
-                                    .child(div().font_weight(FontWeight::SEMIBOLD).line_clamp(2).child(name))
+                                    .child(
+                                        div()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .line_clamp(2)
+                                            .text_ellipsis()
+                                            .child(name),
+                                    )
                                     .when(!d.name.is_empty(), |x| {
                                         x.child(
                                             div()
