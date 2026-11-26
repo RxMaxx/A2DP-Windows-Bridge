@@ -248,12 +248,24 @@ class EmuController(Controller):
         # gets LE Connection Update Complete with its own values. ASHA asks
         # for a 20 ms interval before it streams.
         print(f'le connection update interval={command.connection_interval_max} '
-              f'latency={command.max_latency} timeout={command.supervision_timeout}', flush=True)
+              f'latency={command.max_latency} timeout={command.supervision_timeout} '
+              f'ce={command.min_ce_length}', flush=True)
         self._send_hci_command_status(hci.HCI_COMMAND_STATUS_PENDING, command.op_code)
         self.send_hci_packet(hci.HCI_LE_Connection_Update_Complete_Event(
             status=hci.HCI_ErrorCode.SUCCESS, connection_handle=command.connection_handle,
             connection_interval=command.connection_interval_max, peripheral_latency=command.max_latency,
             supervision_timeout=command.supervision_timeout))
+        return None
+
+    def on_hci_le_set_phy_command(self, command):
+        # Taken as asked too (Bumble's controller has no such command and,
+        # as it expects Command Status from a handler, would not answer at
+        # all: BTstack then sends no further command). ASHA asks for 2M.
+        print(f'le set phy tx={int(command.tx_phys)} rx={int(command.rx_phys)}', flush=True)
+        self._send_hci_command_status(hci.HCI_COMMAND_STATUS_PENDING, command.op_code)
+        phy = 2 if int(command.tx_phys) & 2 else 1
+        self.send_hci_packet(hci.HCI_LE_PHY_Update_Complete_Event(
+            status=hci.HCI_ErrorCode.SUCCESS, connection_handle=command.connection_handle, tx_phy=phy, rx_phy=phy))
         return None
 
     # Called for the first Create Connection, which is refused with ACL
