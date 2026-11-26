@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 pub mod adapter;
+pub mod asha;
 pub mod auracast_assist;
 pub mod auracast_mix;
 pub mod broadcast_volume;

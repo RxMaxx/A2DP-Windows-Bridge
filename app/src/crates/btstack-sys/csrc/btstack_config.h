@@ -80,6 +80,9 @@
 #define ENABLE_LE_SECURE_CONNECTIONS
 #define ENABLE_MICRO_ECC_P256              /* software P-256 (3rd-party/micro-ecc) */
 #define ENABLE_LE_DATA_LENGTH_EXTENSION
+/* LE credit based channels: the audio of ASHA hearing aids (bt-host's
+ * le/asha.rs opens one per hearing aid; nothing listens for incoming ones) */
+#define ENABLE_L2CAP_LE_CREDIT_BASED_FLOW_CONTROL_MODE
 #define ENABLE_LE_EXTENDED_ADVERTISING     /* extended scanning when the controller has it */
 #define ENABLE_LE_ISOCHRONOUS_STREAMS      /* CIG / CIS as central, BIG, HCI ISO data */
 #define ENABLE_LE_PERIODIC_ADVERTISING     /* the BASE of a broadcast (Auracast source) */

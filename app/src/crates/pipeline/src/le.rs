@@ -380,12 +380,12 @@ const EQ_BLOCK: usize = 512;
 
 /// Float to 16-bit as v1 (clamped, lrintf: rounded to nearest, ties even)
 #[inline]
-fn to_i16(x: f32) -> i16 {
+pub(crate) fn to_i16(x: f32) -> i16 {
     (x.clamp(-1.0, 1.0) * 32767.0).round_ties_even() as i16
 }
 
 #[inline]
-fn input_sample(raw: &[u8], i: usize, t: SampleType) -> f32 {
+pub(crate) fn input_sample(raw: &[u8], i: usize, t: SampleType) -> f32 {
     match t {
         SampleType::F32 => f32::from_le_bytes([raw[i * 4], raw[i * 4 + 1], raw[i * 4 + 2], raw[i * 4 + 3]]),
         SampleType::I16 => f32::from(i16::from_le_bytes([raw[i * 2], raw[i * 2 + 1]])) / 32768.0,

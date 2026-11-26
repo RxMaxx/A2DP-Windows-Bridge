@@ -186,7 +186,7 @@ pub struct LeAudioPath {
 impl LeAudioPath {
     /// The capture source for `source` (application capture is not
     /// supported with LE Audio: error.le_audio_capture before this)
-    fn capture_source(source: &SourceRequest) -> Result<Source, String> {
+    pub(crate) fn capture_source(source: &SourceRequest) -> Result<Source, String> {
         match source {
             SourceRequest::TestTone => Ok(Source::TestTone),
             SourceRequest::SystemLoopback => Ok(Source::SystemLoopback),

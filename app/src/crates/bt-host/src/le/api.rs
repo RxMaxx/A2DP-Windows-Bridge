@@ -622,6 +622,21 @@ impl BtHost {
         }
     }
 
+    /// Writes a characteristic value of a connected device without asking
+    /// for an answer (Write Command). Err: BTstack's status, or
+    /// [`LE_NO_ANSWER`] when the device is gone.
+    pub fn le_write_command(&self, device: LeDeviceId, value_handle: u16, value: Vec<u8>) -> Result<(), u8> {
+        let status = self.le_run(RUN_TIMEOUT, move |ctx| {
+            let con = ctx.device(device).filter(|d| d.connected()).map(|d| d.acl)?;
+            Some(ctx.stack().gatt_write_without_response(con, value_handle, &value))
+        });
+        match status.flatten() {
+            Some(0) => Ok(()),
+            Some(status) => Err(status),
+            None => Err(LE_NO_ANSWER),
+        }
+    }
+
     /// Turns on notifications of a characteristic of a connected device
     /// (one of [`BtHost::le_services`]): each value comes on the receiver,
     /// until the link goes. Err: the ATT error, [`LE_NO_ANSWER`], or 0x0A
