@@ -171,7 +171,14 @@ fn timeout_for(method: &str, params: &Value) -> Duration {
         // Up to two files, each fetched with a 30 s limit, then the
         // adapters are listed again
         "adapter.download_firmware" => Duration::from_secs(90),
+        // Up to 10 s for the stack with keyboards and mice, then up to
+        // 10 s for the self-test through Windows
+        "hid.enable" => Duration::from_secs(45),
         "stream.start"
+        // May start or restart the stack first
+        | "hid.disable"
+        | "hid.add"
+        | "hid.connect"
         | "stream.start_custom"
         | "adapter.restart"
         | "adapter.list"
@@ -759,6 +766,9 @@ mod tests {
         // Discovery waits 1.5 s; connecting ends an older connection first
         assert!(timeout_for("receiver.discover", &Value::Null) >= Duration::from_secs(10));
         assert!(timeout_for("receiver.connect", &Value::Null) >= Duration::from_secs(10));
+        // The core waits up to 10 s for the stack and 10 s for the self-test
+        assert!(timeout_for("hid.enable", &Value::Null) > Duration::from_secs(20));
+        assert!(timeout_for("hid.add", &Value::Null) >= Duration::from_secs(30));
     }
 
     /// Without a connection, a request answers "not connected" on its
