@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use bluecaster_core::default_input::{DefaultInput, Want as InputWant};
 use bluecaster_core::diag::AudioRates;
+use bluecaster_core::matrix_mix::{self, Target};
 use bluecaster_core::media_eq::{self, MediaEq};
 use bluecaster_core::paths;
 use bluecaster_core::profiles::{self, Profile as CoreProfile};
@@ -213,6 +214,8 @@ fn to_ipc_profile(p: &CoreProfile, legacy: u16) -> Profile {
         max_media_payload: p.max_media_payload.unwrap_or(legacy),
         le_audio: p.le_audio,
         le_low_latency: p.le_low_latency,
+        le_swap_channels: p.le_swap_channels,
+        le_alone_channel: p.le_alone_channel.clone(),
         headset_mic: p.headset_mic.clone(),
         mic_device_id: p.mic_device_id.clone(),
         mic_device_name: p.mic_device_name.clone(),
@@ -311,6 +314,8 @@ fn merge_profile(base: Option<&CoreProfile>, p: &Profile) -> CoreProfile {
     c.max_media_payload = Some(bt_host::media::clamp_media_payload_limit(p.max_media_payload as u32));
     c.le_audio = p.le_audio;
     c.le_low_latency = p.le_low_latency;
+    c.le_swap_channels = p.le_swap_channels;
+    c.le_alone_channel = bluecaster_core::le_channels::saved_key(&p.le_alone_channel);
     // Normalized: anything but "on" / "auto" is "off"
     c.headset_mic = HeadsetMic::parse(&p.headset_mic).as_str().into();
     c.mic_device_id = p.mic_device_id.clone();
@@ -436,6 +441,8 @@ fn to_ipc_settings(s: &CoreSettings) -> Settings {
             le_rtn_c_to_p: s.dev_debug.le_rtn_c_to_p,
             le_rtn_p_to_c: s.dev_debug.le_rtn_p_to_c,
             le_interleaved: s.dev_debug.le_interleaved,
+            le_buffer_margin: s.dev_debug.le_buffer_margin,
+            le_realign_off: s.dev_debug.le_realign_off,
             le_mic_preset: s.dev_debug.le_mic_preset.clone(),
             le_mic_retry_same_link: s.dev_debug.le_mic_retry_same_link,
         },
@@ -578,6 +585,8 @@ fn merge_settings(base: &CoreSettings, s: &Settings) -> CoreSettings {
         le_rtn_c_to_p: s.dev_debug.le_rtn_c_to_p.map(|r| r.min(15)),
         le_rtn_p_to_c: s.dev_debug.le_rtn_p_to_c.map(|r| r.min(15)),
         le_interleaved: s.dev_debug.le_interleaved,
+        le_buffer_margin: s.dev_debug.le_buffer_margin.map(|m| m.min(7)),
+        le_realign_off: s.dev_debug.le_realign_off,
         le_mic_preset: s.dev_debug.le_mic_preset.trim().to_string(),
         le_mic_retry_same_link: s.dev_debug.le_mic_retry_same_link,
     };
@@ -1119,6 +1128,8 @@ fn to_ipc_le_stream(d: &LeStreamDetails) -> LeStreamInfo {
         devices: d.devices,
         low_latency: d.low_latency,
         summary: d.summary.clone(),
+        presentation_delay_us: d.presentation_delay_us,
+        codec_delay_us: d.codec_delay_us,
     }
 }
 
@@ -3389,12 +3400,12 @@ impl CoreState {
         if let Some(old) = self.assistants.lock().unwrap_or_else(|e| e.into_inner()).take() {
             old.signal_stop();
         }
-        // The profile's playback EQ (none for a stream without one)
-        let eq = profile
-            .as_deref()
-            .and_then(|name| profiles::load(&self.config_dir()).into_iter().find(|p| p.name == name))
-            .map(|p| p.media_eq);
-        media_eq::apply(eq.as_ref());
+        // The profile's playback EQ and LE Audio channels (none for a
+        // stream without one)
+        let saved =
+            profile.as_deref().and_then(|name| profiles::load(&self.config_dir()).into_iter().find(|p| p.name == name));
+        media_eq::apply(saved.as_ref().map(|p| &p.media_eq));
+        bluecaster_core::le_channels::apply(saved.as_ref().map(CoreProfile::le_channels).unwrap_or_default());
         self.publish(Event::Stream(StreamStatus {
             state: StreamState::Connecting,
             message: Msg::new("status.initializing"),
@@ -3519,6 +3530,7 @@ impl CoreState {
         // on (also when it starts again below)
         if restart_after_save(&s.stream, &key) {
             media_eq::apply(Some(&in_order.media_eq));
+            bluecaster_core::le_channels::apply(in_order.le_channels());
         }
         // The profile in use starts again with what was saved (v1),
         // but for another source, which needs nothing of the link
@@ -4231,34 +4243,67 @@ impl CoreState {
             }
             Method::AuracastMixGet { channels, rear } => {
                 self.developer_only()?;
-                Ok(json(&bluecaster_core::auracast_mix::state(&self.config_dir(), channels, rear)))
+                Ok(json(&matrix_mix::state(Target::Auracast, &self.config_dir(), channels, rear)))
             }
             Method::AuracastMixSet { mix, channels, rear } => {
                 self.developer_only()?;
                 let dir = self.config_dir();
-                bluecaster_core::auracast_mix::set(&dir, &mix).map_err(|e| {
+                matrix_mix::set(Target::Auracast, &dir, &mix).map_err(|e| {
                     tracing::warn!("Auracast mixer: not saved: {e}");
                     err("auracast.mix_save_failed", "error.settings_save")
                 })?;
-                Ok(json(&bluecaster_core::auracast_mix::state(&dir, channels, rear)))
+                Ok(json(&matrix_mix::state(Target::Auracast, &dir, channels, rear)))
             }
             Method::AuracastMixPresetSave { name, mix } => {
                 self.developer_only()?;
                 let dir = self.config_dir();
-                bluecaster_core::auracast_mix::save_preset(&dir, &name, &mix).map_err(|e| {
+                matrix_mix::save_preset(Target::Auracast, &dir, &name, &mix).map_err(|e| {
                     tracing::warn!("Auracast mixer: preset not saved: {e}");
                     err("auracast.mix_save_failed", "error.settings_save")
                 })?;
-                Ok(json(&bluecaster_core::auracast_mix::state(&dir, None, None)))
+                Ok(json(&matrix_mix::state(Target::Auracast, &dir, None, None)))
             }
             Method::AuracastMixPresetDelete { name } => {
                 self.developer_only()?;
                 let dir = self.config_dir();
-                bluecaster_core::auracast_mix::delete_preset(&dir, &name).map_err(|e| {
+                matrix_mix::delete_preset(Target::Auracast, &dir, &name).map_err(|e| {
                     tracing::warn!("Auracast mixer: preset not deleted: {e}");
                     err("auracast.mix_save_failed", "error.settings_save")
                 })?;
-                Ok(json(&bluecaster_core::auracast_mix::state(&dir, None, None)))
+                Ok(json(&matrix_mix::state(Target::Auracast, &dir, None, None)))
+            }
+            Method::TwsMixGet { channels } => {
+                self.developer_only()?;
+                Ok(json(&matrix_mix::state(Target::Tws, &self.config_dir(), channels, None)))
+            }
+            Method::TwsMixSet { mix, enabled, channels } => {
+                self.developer_only()?;
+                let dir = self.config_dir();
+                let saved = matrix_mix::set(Target::Tws, &dir, &mix)
+                    .and_then(|()| enabled.map_or(Ok(()), |on| matrix_mix::set_tws_enabled(&dir, on)));
+                saved.map_err(|e| {
+                    tracing::warn!("TWS mixer: not saved: {e}");
+                    err("tws.mix_save_failed", "error.settings_save")
+                })?;
+                Ok(json(&matrix_mix::state(Target::Tws, &dir, channels, None)))
+            }
+            Method::TwsMixPresetSave { name, mix } => {
+                self.developer_only()?;
+                let dir = self.config_dir();
+                matrix_mix::save_preset(Target::Tws, &dir, &name, &mix).map_err(|e| {
+                    tracing::warn!("TWS mixer: preset not saved: {e}");
+                    err("tws.mix_save_failed", "error.settings_save")
+                })?;
+                Ok(json(&matrix_mix::state(Target::Tws, &dir, None, None)))
+            }
+            Method::TwsMixPresetDelete { name } => {
+                self.developer_only()?;
+                let dir = self.config_dir();
+                matrix_mix::delete_preset(Target::Tws, &dir, &name).map_err(|e| {
+                    tracing::warn!("TWS mixer: preset not deleted: {e}");
+                    err("tws.mix_save_failed", "error.settings_save")
+                })?;
+                Ok(json(&matrix_mix::state(Target::Tws, &dir, None, None)))
             }
             Method::MediaEqPreview { name, eq } => {
                 let (_, s) = self.snapshot();
@@ -7287,8 +7332,11 @@ mod tests {
             devices: 2,
             low_latency: true,
             summary: "LC3 48 kHz 7.5 ms 75 octets (80 kbps/ch), 2 ch over 2 CIS, 48_3_gr".into(),
+            presentation_delay_us: 10000,
+            codec_delay_us: 11500,
         };
         let le = to_ipc_le_stream(&d);
+        assert_eq!((le.presentation_delay_us, le.codec_delay_us), (10000, 11500));
         assert_eq!((le.preset.as_str(), le.frame_us, le.octets, le.cis, le.devices), ("48_3_gr", 7500, 75, 2, 2));
         assert!(le.low_latency);
         assert_eq!(le.summary, d.summary);

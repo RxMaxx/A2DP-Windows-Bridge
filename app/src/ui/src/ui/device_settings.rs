@@ -381,6 +381,7 @@ impl Render for DeviceSettings {
             )
             // A line that opens a dialog reaches past the text on both sides (`.nav-row`)
             .child(eq)
+            .children(super::le_channels::le_channels(&self.device, cx))
             .child(self.input_source.clone())
     }
 }

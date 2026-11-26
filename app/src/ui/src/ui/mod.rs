@@ -16,6 +16,7 @@ pub mod dialog;
 pub mod icons;
 pub mod import_pairings;
 pub mod input_source;
+pub mod le_channels;
 pub mod media_eq;
 pub mod mic_processing;
 pub mod mixer;

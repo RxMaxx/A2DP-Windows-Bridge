@@ -60,6 +60,17 @@ le_audio: boolean,
  */
 le_low_latency: boolean, 
 /**
+ * LE Audio: left and right swapped; a change takes effect while it
+ * streams
+ */
+le_swap_channels: boolean, 
+/**
+ * LE Audio: what an earbud alone plays while the other one of its set
+ * is gone: "auto" (its own side) | "left" | "right" | "mono" ("" =
+ * mono); a change takes effect while it streams
+ */
+le_alone_channel: string, 
+/**
  * Headset mode: the headphones' microphone is
  * rendered to mic_device_id. "off" (the default) | "on" | "auto";
  * anything else reads as off. "on": classic devices switch playback to

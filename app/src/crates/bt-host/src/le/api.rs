@@ -375,10 +375,11 @@ impl BtHost {
             "LE Audio: jitter buffer for {sending} CIS, controller queue depth {}",
             queue_depth(iso_count, sending).max(1)
         );
-        queue
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .configure(queue_depth(iso_count, sending).max(1), silence(&plan));
+        {
+            let mut q = queue.lock().unwrap_or_else(|e| e.into_inner());
+            q.set_prefill_extra(super::bap::buffer_margin());
+            q.configure(queue_depth(iso_count, sending).max(1), silence(&plan));
+        }
         // Those the plan streams to (one gone meanwhile is left out)
         devices.retain(|d| plan.cis.iter().any(|c| c.device_id == d.0));
         let status = LeStreamStatus { active: false, plan: plan.clone(), devices, summary: plan.describe() };
@@ -487,7 +488,11 @@ impl BtHost {
         let summary = le_audio::broadcast::describe(&plan);
         let depth = queue_depth(iso_count, plan.cis.len()).max(1);
         let queue = Arc::new(Mutex::new(SduQueue::new()));
-        queue.lock().unwrap_or_else(|e| e.into_inner()).configure(depth, silence(&plan));
+        {
+            let mut q = queue.lock().unwrap_or_else(|e| e.into_inner());
+            q.set_prefill_extra(super::bap::buffer_margin());
+            q.configure(depth, silence(&plan));
+        }
         let status =
             LeStreamStatus { active: false, plan: plan.clone(), devices: Vec::new(), summary: summary.clone() };
         let why = Arc::new(Mutex::new(String::new()));

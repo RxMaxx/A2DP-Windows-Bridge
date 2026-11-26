@@ -1,6 +1,7 @@
 //! Stream tab: what goes out and how long it waits. Bitrate, packets, the
 //! send queue (depth and the oldest packet's wait), packets dropped before
-//! the radio; the codec and its details, an LE Audio stream's ISO counters,
+//! the radio; the codec and its details, an LE Audio stream's ISO counters
+//! and its estimated latency,
 //! the losses, and the backlog the Bluetooth adapter holds after the send
 //! queue, and the playout delay the device reports. In developer mode the
 //! encoder's load: its time per time of audio, and per frame. While a
@@ -16,7 +17,7 @@ use gpui_kit::{Context, Entity, IntoElement, ParentElement as _, Render, Styled 
 use ipc::LinkSample;
 use ui_model::format::kbps;
 use ui_model::i18n::t;
-use ui_model::linkstats::{drops_per_sample, percent};
+use ui_model::linkstats::{drops_per_sample, le_latency, ms_fine, percent};
 use ui_model::t;
 use ui_model::view::charts::Status;
 use ui_model::view::diagnostics::{
@@ -254,6 +255,20 @@ impl Render for StreamPanel {
         let iso = link.last().and_then(|s| s.iso);
         if link.le().is_some() || iso.is_some() {
             let warn = |n: Option<u64>, st: Status| (n.unwrap_or(0) > 0).then_some(st);
+            let latency = le_latency(link.le(), iso.as_ref());
+            let latency_parts = latency.map(|l| {
+                crate::ui::hint(
+                    t!(
+                        "ui.diag.iso_latency_parts",
+                        ms_fine(l.codec),
+                        ms_fine(l.buffer),
+                        l.radio.map_or(DASH.into(), ms_fine),
+                        ms_fine(l.device)
+                    ),
+                    cx,
+                )
+                .into_any_element()
+            });
             cards.push(
                 group(cx)
                     .child(heading(t("ui.diag.iso_title")))
@@ -295,8 +310,16 @@ impl Render for StreamPanel {
                             None,
                             cx,
                         ),
+                        row(
+                            t("ui.diag.iso_latency"),
+                            latency.map_or(DASH.into(), |l| t!("ui.diag.iso_latency_value", l.total.round() as i64)),
+                            None,
+                            latency_parts,
+                            cx,
+                        ),
                     ]))
-                    .child(crate::ui::hint(t("ui.diag.iso_help"), cx)),
+                    .child(crate::ui::hint(t("ui.diag.iso_help"), cx))
+                    .when(latency.is_some(), |d| d.child(crate::ui::hint(t("ui.diag.iso_latency_hint"), cx))),
             );
         }
         let last_dropped = link.last().map(|s| s.dropped);

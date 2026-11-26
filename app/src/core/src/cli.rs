@@ -2150,7 +2150,7 @@ fn le_source(a: &Args) -> SourceRequest {
         // Each channel to its own output: the auto matrix, not the one
         // saved in the app (a manual matrix may fold the back into the
         // front, so a speaker would hear two channels' beeps)
-        bluecaster_core::auracast_mix::handle().set(Default::default());
+        bluecaster_core::matrix_mix::handle(bluecaster_core::matrix_mix::Target::Auracast).set(Default::default());
         println!("Auracast mixer: auto (for --test-tone-quad; the saved one is left as it is)");
     }
     if a.test_tone {
@@ -2342,6 +2342,7 @@ fn le_run(a: &Args, service: &Service, running: &Arc<AtomicBool>) -> i32 {
         host.stats().clone(),
         None,
         None,
+        None,
     ) {
         Ok(path) => {
             let rate = path.rate();
@@ -2428,7 +2429,7 @@ fn le_run(a: &Args, service: &Service, running: &Arc<AtomicBool>) -> i32 {
             if shown_dropped > 0 && playing > 0 {
                 outln!("\n*** LE Audio: {shown_dropped} device(s) left the stream, {playing} play on ***");
                 if let Some(p) = audio.as_ref() {
-                    p.set_mono(playing <= 1);
+                    p.set_alone(playing <= 1);
                 }
                 rejoin_at = Some(Instant::now() + LE_REJOIN_FIRST);
             }

@@ -104,6 +104,10 @@ LATE_US = 30000      # the same tolerance in time for shorter SDU intervals
 HOST_LATE_MS = 2.0
 HEARTBEAT_S = 0.002
 STALL_S = 0.003      # heartbeat later than this: the event loop stalled (timer jitter is ~1.5 ms)
+# The first SDU interval begins this long after the first SDU, so the first
+# SDUs of every CIS or BIS, which the host sends together, share it (as on a
+# controller, whose CIG and BIG events do not begin with the host's SDUs)
+ISO_LEAD_S = 0.002
 LATE_LOG_MAX = 20    # late SDU lines per CIS (then every 100th)
 # Names of the controllers that report no ISO buffers (--no-iso-buffers)
 NO_ISO_BUFFERS = set()
@@ -400,7 +404,7 @@ class LeEmuController(EmuController):
         interval = interval_us / 1e6
         now = loop.time()
         if self.iso_t0 is None:
-            self.iso_t0 = now
+            self.iso_t0 = now + ISO_LEAD_S
         if self.heartbeat is None:
             self.heartbeat_due = now + HEARTBEAT_S
             self.heartbeat = loop.call_at(self.heartbeat_due, self._heartbeat, self.heartbeat_due)

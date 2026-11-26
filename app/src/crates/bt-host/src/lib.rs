@@ -57,7 +57,7 @@ pub use capture::HciCapture;
 pub use events::{addr_str, parse_addr};
 pub use hid::{HidConfig, HidCounters, HidEvent, Passkey};
 pub use le::api::{LE_NO_ANSWER, LE_NO_LINK};
-pub use le::bap::{CigOverrides, set_cig_overrides};
+pub use le::bap::{CigOverrides, set_buffer_margin, set_cig_overrides, set_realign_off};
 pub use le::gatt_cache as le_gatt_cache;
 pub use le::gatt_client::{GattChar as LeGattChar, GattService as LeGattService};
 pub use le::iso_recv::{

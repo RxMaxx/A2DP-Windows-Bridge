@@ -25,4 +25,9 @@ rear: boolean,
 /**
  * The matrix that plays (auto computed), 4 rows of 8
  */
-effective: Array<Array<number>>, };
+effective: Array<Array<number>>, 
+/**
+ * The mixer is used: Auracast always; TWS once turned on, from the
+ * next connection
+ */
+enabled: boolean, };

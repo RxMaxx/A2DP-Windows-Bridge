@@ -503,6 +503,14 @@ pub struct LeStreamInfo {
     /// English, v1's StreamPlan::describe ("LC3 48 kHz 10 ms 120 octets (96
     /// kbps/ch), 2 ch over 2 CIS, 48_4_2")
     pub summary: String,
+    /// The presentation delay set up: the device's time from receiving an
+    /// SDU to playing it, decoding included, us; 0 from an older core
+    #[serde(default)]
+    pub presentation_delay_us: u32,
+    /// LC3's algorithmic delay (a frame and its look-ahead), us; 0 from an
+    /// older core
+    #[serde(default)]
+    pub codec_delay_us: u32,
 }
 
 /// The audio source of a stream
@@ -771,6 +779,10 @@ pub struct AuracastMixState {
     pub rear: bool,
     /// The matrix that plays (auto computed), 4 rows of 8
     pub effective: Vec<Vec<f32>>,
+    /// The mixer is used: Auracast always; TWS once turned on, from the
+    /// next connection
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 /// A connection profile, as in profiles.json
@@ -825,6 +837,15 @@ pub struct Profile {
     /// by default: LC3); other headsets get the media configuration either way
     #[serde(default)]
     pub le_low_latency: bool,
+    /// LE Audio: left and right swapped; a change takes effect while it
+    /// streams
+    #[serde(default)]
+    pub le_swap_channels: bool,
+    /// LE Audio: what an earbud alone plays while the other one of its set
+    /// is gone: "auto" (its own side) | "left" | "right" | "mono" ("" =
+    /// mono); a change takes effect while it streams
+    #[serde(default)]
+    pub le_alone_channel: String,
     /// Headset mode: the headphones' microphone is
     /// rendered to mic_device_id. "off" (the default) | "on" | "auto";
     /// anything else reads as off. "on": classic devices switch playback to
@@ -1133,6 +1154,15 @@ pub struct DevDebug {
     pub le_rtn_p_to_c: Option<u8>,
     /// LE Audio CIG: interleaved packing
     pub le_interleaved: bool,
+    /// LE Audio jitter buffer: frames over the controller queue at the
+    /// start (0..=7); None: the default (3)
+    #[ts(optional = nullable)]
+    #[serde(default)]
+    pub le_buffer_margin: Option<u8>,
+    /// LE Audio: a CIS that plays a frame behind the others is not
+    /// realigned
+    #[serde(default)]
+    pub le_realign_off: bool,
     /// The LE Audio microphone's preset, taken as it is; empty: as planned
     pub le_mic_preset: String,
     /// A stream with the microphone that failed is retried without it on
@@ -1796,6 +1826,11 @@ pub struct IsoCounters {
     /// The jitter buffer's prefill (frames buffered before sending starts;
     /// 3, growing to 7 after underruns)
     pub prefill: u32,
+    /// The largest transport latency of the stream's CIS (to the device),
+    /// us; None while not known, for a broadcast and from an older core
+    #[ts(optional = nullable)]
+    #[serde(default)]
+    pub transport_latency_us: Option<u32>,
 }
 
 /// An ACL packet type and the slots one media packet takes in it
@@ -2242,6 +2277,35 @@ pub enum Method {
     /// -> AuracastMixState
     #[serde(rename = "auracast.mix_preset_delete")]
     AuracastMixPresetDelete { name: String },
+    /// The tws.* methods: the matrix mixer of an LE Audio stream to a
+    /// device (outputs FL FR; developer.off while developer mode is off).
+    /// -> AuracastMixState: for the stream running with it, else a source
+    /// of `channels` (default 8)
+    #[serde(rename = "tws.mix")]
+    TwsMixGet {
+        #[ts(optional = nullable)]
+        #[serde(default)]
+        channels: Option<u32>,
+    },
+    /// -> AuracastMixState: saved, and heard at once while a stream runs
+    /// with it; `enabled` turns it on or off from the next connection
+    #[serde(rename = "tws.mix_set")]
+    TwsMixSet {
+        mix: AuracastMix,
+        #[ts(optional = nullable)]
+        #[serde(default)]
+        enabled: Option<bool>,
+        #[ts(optional = nullable)]
+        #[serde(default)]
+        channels: Option<u32>,
+    },
+    /// -> AuracastMixState; a built-in preset's name is refused
+    /// (tws.mix_save_failed)
+    #[serde(rename = "tws.mix_preset_save")]
+    TwsMixPresetSave { name: String, mix: AuracastMix },
+    /// -> AuracastMixState
+    #[serde(rename = "tws.mix_preset_delete")]
+    TwsMixPresetDelete { name: String },
     /// -> bool: the running broadcast takes the source in place (`source`,
     /// `source_id`, `source_name` as for stream.start_broadcast), its
     /// broadcasts staying up; false: none runs. Error stream.bad_source.
@@ -3458,6 +3522,8 @@ mod tests {
                 devices: 1,
                 low_latency: false,
                 summary: "LC3 48 kHz 10 ms 120 octets (96 kbps/ch), 2 ch over 2 CIS, 48_4_2".into(),
+                presentation_delay_us: 40000,
+                codec_delay_us: 12500,
             }),
             ..info
         };
@@ -3470,7 +3536,15 @@ mod tests {
         .unwrap();
         assert!(sample.iso.is_none());
         let iso = LinkSample {
-            iso: Some(IsoCounters { cis: 2, sdu_sets: 1000, silence: 3, underruns: 1, dropped: 0, prefill: 4 }),
+            iso: Some(IsoCounters {
+                cis: 2,
+                sdu_sets: 1000,
+                silence: 3,
+                underruns: 1,
+                dropped: 0,
+                prefill: 4,
+                transport_latency_us: Some(4200),
+            }),
             ..sample
         };
         assert_eq!(serde_json::from_value::<LinkSample>(serde_json::to_value(&iso).unwrap()).unwrap(), iso);

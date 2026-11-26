@@ -250,6 +250,8 @@ pub(crate) mod mock {
             max_media_payload: 1023,
             le_audio: false,
             le_low_latency: false,
+            le_swap_channels: false,
+            le_alone_channel: String::new(),
             headset_mic: "off".into(),
             mic_device_id: String::new(),
             mic_device_name: String::new(),
