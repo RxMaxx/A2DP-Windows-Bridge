@@ -15,7 +15,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, BoxShadow, Context, Div, Entity, FocusHandle, FontWeight,
     InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Pixels, Render, Role, SharedString,
-    Stateful, StatefulInteractiveElement as _, Styled as _, Toggled, Window, div, point, px, relative,
+    Stateful, StatefulInteractiveElement as _, Styled as _, TextRun, Toggled, Window, div, point, px, relative,
 };
 use ipc::{Method, Profile};
 use ui_model::codecs::{Bars, CodecCaps, CodecChoice, CodecSupport};
@@ -35,8 +35,43 @@ use super::{ButtonKind, Choice, IconName, icon};
 use crate::app;
 use crate::theme::{self, ActivePalette as _};
 
-/// A codec card's smallest width (`.codec-grid`: minmax(9.5rem, 1fr))
-pub const CARD_MIN_W: f32 = 152.;
+/// The widest a bar's label gets; a longer one is cut short
+const BAR_LABEL_MAX_W: f32 = 108.;
+/// A bar's smallest width
+const BAR_MIN_W: f32 = 48.;
+/// A bar's row: the label's line
+const BAR_ROW_H: f32 = 20.;
+/// A codec card's smallest width whatever its labels: the codec's name beside
+/// the settings button (`.codec-grid`: minmax(9.5rem, 1fr))
+const CARD_FLOOR_W: f32 = 152.;
+
+fn bar_labels() -> [String; 3] {
+    [t("ui.codec.bar_quality"), t("ui.codec.bar_latency"), t("ui.codec.bar_stability")]
+}
+
+/// A codec card's smallest width in the language shown: its border and
+/// padding (13 px a side), the widest bar label, the gap and the bar. Narrower,
+/// the bars would reach past the card; with a width fixed for the longest
+/// translation, short labels (Japanese) left the cards mostly empty.
+pub fn card_min_w(window: &Window) -> f32 {
+    let font = gpui_kit::font(theme::FONT);
+    let widest = bar_labels()
+        .into_iter()
+        .map(|label| {
+            let run = TextRun {
+                len: label.len(),
+                font: font.clone(),
+                color: gpui_kit::Hsla::default(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let line = window.text_system().layout_line(SharedString::from(label), theme::FS_SMALL, &[run], None);
+            f32::from(line.width)
+        })
+        .fold(0., f32::max);
+    (26. + widest.ceil().min(BAR_LABEL_MAX_W) + 8. + BAR_MIN_W).max(CARD_FLOOR_W)
+}
 
 /// What a card shows of its codec: the call codecs and LE Audio's LC3 have
 /// cards like the A2DP ones (issue #86)
@@ -84,36 +119,46 @@ pub struct CardActions {
     pub on_move: Option<MoveAct>,
 }
 
-/// The three comparison bars (`.cbar`)
-fn bar(label: String, value: u8, on: bool, cx: &App) -> Div {
+/// The three comparison bars (`.cbar`): the labels in a column as wide as
+/// the widest of them, the bars beside it in the rest of the card
+fn bars(b: Bars, on: bool, cx: &App) -> Div {
     let p = cx.palette();
+    let labels = bar_labels();
+    let values = [b.quality, b.latency, b.stability];
+    let column = || div().flex().flex_col().gap(theme::S2);
     div()
         .flex()
-        .items_center()
         .gap(theme::S2)
         .text_size(theme::FS_SMALL)
         .text_color(p.text_2)
-        .child(div().w(px(108.)).flex_none().truncate().child(label.clone()))
         .child(
-            div()
-                .id(SharedString::from(format!("cbar-{label}")))
-                .role(Role::Meter)
-                .aria_label(label)
-                .aria_numeric_value(f64::from(value))
-                .aria_min_numeric_value(0.)
-                .aria_max_numeric_value(5.)
-                .flex_1()
-                .min_w(px(32.))
-                .h(px(4.))
-                .rounded(px(2.))
-                .bg(p.surface_3)
-                .overflow_hidden()
-                .child(div().h_full().w(relative(f32::from(value) * 0.2)).bg(if on {
-                    p.accent_fill
-                } else {
-                    p.text_2
-                })),
+            column().flex_shrink(1.).min_w_0().max_w(px(BAR_LABEL_MAX_W)).children(
+                labels
+                    .iter()
+                    .map(|label| div().h(px(BAR_ROW_H)).line_height(px(BAR_ROW_H)).truncate().child(label.clone())),
+            ),
         )
+        .child(column().flex_1().min_w(px(BAR_MIN_W)).children(labels.into_iter().zip(values).map(|(label, value)| {
+            div().flex().items_center().h(px(BAR_ROW_H)).child(
+                div()
+                    .id(SharedString::from(format!("cbar-{label}")))
+                    .role(Role::Meter)
+                    .aria_label(label)
+                    .aria_numeric_value(f64::from(value))
+                    .aria_min_numeric_value(0.)
+                    .aria_max_numeric_value(5.)
+                    .w_full()
+                    .h(px(4.))
+                    .rounded(px(2.))
+                    .bg(p.surface_3)
+                    .overflow_hidden()
+                    .child(div().h_full().w(relative(f32::from(value) * 0.2)).bg(if on {
+                        p.accent_fill
+                    } else {
+                        p.text_2
+                    })),
+            )
+        })))
 }
 
 /// The card's tag: unknown until the device's first connection, else
@@ -159,11 +204,7 @@ pub fn card_face(spec: &CardSpec, state: CardState, cx: &App) -> Div {
         // Room for the settings button in the corner
         .child(div().pr(px(28.)).font_weight(FontWeight::SEMIBOLD).child(spec.name.clone()))
         .when_some(state.support, |d, s| d.child(div().flex().flex_wrap().gap(theme::S1).child(support_tag(s, cx))))
-        .when_some(spec.bars, |d, b| {
-            d.child(bar(t("ui.codec.bar_quality"), b.quality, state.selected, cx))
-                .child(bar(t("ui.codec.bar_latency"), b.latency, state.selected, cx))
-                .child(bar(t("ui.codec.bar_stability"), b.stability, state.selected, cx))
-        })
+        .when_some(spec.bars, |d, b| d.child(bars(b, state.selected, cx)))
 }
 
 /// One codec choice with its three comparison bars, and "..." for its
