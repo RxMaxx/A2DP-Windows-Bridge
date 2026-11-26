@@ -95,7 +95,8 @@ impl Transport for Demo {
         let answer = match method.as_str() {
             "state.snapshot" => Ok(self.snapshot.clone()),
             "diag.subscribe" => Ok(Value::Null),
-            "diag.recent_logs" => Ok(Value::Array(Vec::new())),
+            // No lines unless the file gives some
+            "diag.recent_logs" => Ok(self.answers.get("diag.recent_logs").cloned().unwrap_or(Value::Array(Vec::new()))),
             other => match self.answers.get(other) {
                 Some(answer) => Ok(answer.clone()),
                 None => Err(ErrorInfo { code: "demo".into(), message: Msg::new("") }),

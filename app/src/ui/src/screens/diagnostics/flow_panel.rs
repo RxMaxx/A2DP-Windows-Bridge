@@ -60,7 +60,7 @@ fn columns(cells: [Div; 7]) -> Div {
         .px(theme::S4)
         .py(theme::S2)
         .child(i.w(px(24.)).flex_none().flex().justify_center())
-        .child(step.w(px(192.)).flex_none().min_w_0())
+        .child(step.w(px(160.)).flex_none().min_w_0())
         .child(status.w(px(72.)).flex_none())
         .child(time.w(px(104.)).flex_none().whitespace_nowrap())
         .child(elapsed.w(px(80.)).flex_none())
@@ -163,7 +163,8 @@ impl Render for FlowPanel {
             let status = x.map_or("pending", |x| x.status.as_str()).to_owned();
             let seq = x.and_then(|x| x.seq);
             let color = status_color(&status, &p);
-            let d = detail(x, cx);
+            // One line: a detail's line breaks and tabs are spaces here
+            let d = detail(x, cx).replace(['\r', '\n', '\t'], " ");
             let small = |d: Div| d.text_size(theme::FS_SMALL).text_color(p.text_2);
             let icon_cell = match status_icon(&status) {
                 Some(i) => div().text_color(color).child(icon(i)),

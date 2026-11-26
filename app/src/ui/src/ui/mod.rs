@@ -171,6 +171,8 @@ fn select_named<T: Clone + PartialEq + 'static>(
         // the flyout is short, and its device list long
         let tall = window.viewport_size().height * 0.7;
         let mut menu = menu.min_w(px(160.)).scrollable(true).max_h(tall.min(px(450.)));
+        // Nor wider than a long name (an audio device's) leaves readable
+        menu = menu.max_w(px(480.));
         let mut group: Option<SharedString> = None;
         for c in &choices {
             if c.group != group {
@@ -216,6 +218,9 @@ pub fn menu_choice(label: SharedString, chosen: bool, disabled: bool) -> PopupMe
             .aria_toggled(if chosen { Toggled::True } else { Toggled::False })
             .when(disabled, |d| d.a11y_synthetic_children(|b| b.parent_node().set_disabled()))
             .flex_1()
+            // The entry does not shrink with its menu: a width of its own
+            .max_w(px(420.))
+            .truncate()
             .child(label.clone())
     })
     .checked(chosen)
@@ -358,6 +363,18 @@ pub fn row() -> Div {
     div().flex().items_center().justify_between().gap(theme::S4).min_h(px(40.))
 }
 
+/// A setting's line in a card: a [`row`] with a hairline above it from edge
+/// to edge of the card, as the lines of Windows' Settings
+pub fn setting_row(cx: &App) -> Div {
+    row().mx(-theme::S4).px(theme::S4).pt(theme::S3).min_h(px(52.)).border_t_1().border_color(cx.palette().border)
+}
+
+/// A setting's line that is the first thing in its card (a card without a
+/// heading): without the hairline, which would double the card's edge
+pub fn first_row(line: Div) -> Div {
+    line.border_t_0().pt_0().min_h(px(40.))
+}
+
 /// A line's label and hint; `read`: the label is read out too (a switch
 /// carries its label itself, other controls may not)
 fn row_text(label: SharedString, hint_text: Option<SharedString>, read: bool, cx: &App) -> Div {
@@ -384,7 +401,7 @@ pub fn toggle(
     cx: &App,
 ) -> Div {
     let label = label.into();
-    row()
+    setting_row(cx)
         .child(row_text(label.clone(), hint_text, false, cx))
         .child(Switch::new(id).checked(checked).disabled(disabled).accessibility_label(label).on_change(on_change))
 }
@@ -414,7 +431,7 @@ pub fn field(
         .flex()
         .flex_col()
         .gap(theme::S1)
-        .child(row().child(row_text(label.into(), hint_text, true, cx)).child(control))
+        .child(setting_row(cx).child(row_text(label.into(), hint_text, true, cx)).child(control))
         .when_some(error, |d, e| d.child(field_error(e, cx)))
 }
 
@@ -471,11 +488,12 @@ pub fn nav_row(
 ) -> impl IntoElement {
     let p = *cx.palette();
     let (label, value): (SharedString, SharedString) = (label.into(), value.into());
-    row()
+    let line = row()
         .id(id)
         // A button for assistive technology, named "<label>: <value>"
         .role(gpui_kit::Role::Button)
         .aria_label(SharedString::from(format!("{label}: {value}")))
+        .flex_1()
         .px(theme::S2)
         .rounded(theme::RADIUS)
         .when(!disabled, |d| d.cursor_pointer().hover(|s| s.bg(p.surface_2)).on_click(on_click))
@@ -489,7 +507,8 @@ pub fn nav_row(
                 .text_color(if disabled { p.disabled_text } else { p.text_2 })
                 .child(value)
                 .child(icon(IconName::ChevronRight).small()),
-        )
+        );
+    div().flex().mx(-theme::S4).px(theme::S2).pt(theme::S3).border_t_1().border_color(p.border).child(line)
 }
 
 /// A card (`.card`): children one below the other
@@ -514,7 +533,14 @@ pub fn section(title: impl Into<SharedString>, actions: Option<AnyElement>, cx: 
             .items_center()
             .justify_between()
             .gap(theme::S3)
-            .child(div().text_size(theme::FS_LARGE).font_weight(FontWeight::SEMIBOLD).child(title.into()))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(theme::FS_LARGE)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(title.into()),
+            )
             .when_some(actions, |d, a| d.child(a)),
     )
 }

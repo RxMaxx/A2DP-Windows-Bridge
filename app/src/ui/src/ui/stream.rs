@@ -518,7 +518,9 @@ pub fn codec_badge(opts: CodecBadge, cx: &App) -> Option<AnyElement> {
         .max_w_full()
         .text_size(theme::FS_SMALL)
         .text_color(p.text_2)
-        .when(opts.stretch, |d| d.flex_1())
+        // As wide as its words first: what is beside it goes below it before
+        // the words wrap (German, Korean)
+        .when(opts.stretch, |d| d.flex_grow(1.))
         .when(!opts.pill, |d| {
             d.min_h(px(24.))
                 .px(theme::S2)

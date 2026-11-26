@@ -222,7 +222,7 @@ impl Render for ServiceRow {
         let (first, remove) = service_buttons(k);
         let p = cx.palette();
         let setup = self.setup.clone();
-        ui::row()
+        ui::setting_row(cx)
             .child(
                 div()
                     .flex()

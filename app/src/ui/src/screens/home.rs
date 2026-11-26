@@ -79,13 +79,23 @@ fn firmware_missing(snap: &Snapshot, cx: &App) -> Option<AnyElement> {
                             .flex_wrap()
                             .gap_x(theme::S1)
                             .child(t("firmware.required_files"))
-                            .child(ui::mono(a.firmware_files.join(", "))),
-                    };
+                            .child(ui::mono(a.firmware_files.join(", ")).min_w_0().max_w_full()),
+                    }
+                    .min_w_0()
+                    .max_w_full();
+                    // Long names and file lists wrap inside the card
                     div()
                         .flex()
                         .flex_wrap()
                         .gap_x(theme::S1)
-                        .child(div().font_weight(FontWeight::SEMIBOLD).child(a.display_name.clone()))
+                        .min_w_0()
+                        .child(
+                            div()
+                                .min_w_0()
+                                .max_w_full()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(a.display_name.clone()),
+                        )
                         .child(div().text_color(p.text_2).child("·"))
                         .child(what)
                 }))
@@ -421,6 +431,7 @@ impl Render for DeviceCard {
             .font_weight(FontWeight::SEMIBOLD)
             .line_height(relative(1.2))
             .line_clamp(2)
+            .text_ellipsis()
             .min_w_0()
             .child(card.name.clone())
             // The whole name on hover when two lines cut it
