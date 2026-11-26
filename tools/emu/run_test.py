@@ -2153,7 +2153,7 @@ def run_voice_case(args, case, port):
             failures.append(f'sink: what BlueCaster sent is not right ({tone})')
     if 'dropped an incoming HCI packet' in bc_log:
         failures.append('bluecaster.log: incoming HCI packets dropped')
-    if gain and f'microphone processing: gain {gain} dB' not in bc_log:
+    if gain and f'microphone processing: on, gain {gain} dB' not in bc_log:
         failures.append(f"bluecaster.log: the microphone's gain of {gain} dB never applied")
     if auto and 'voice: auto: an application records' not in bc_log:
         failures.append('bluecaster.log: Auto never saw the WAV output as recorded from')

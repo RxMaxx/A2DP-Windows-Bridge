@@ -61,35 +61,14 @@ from bumble.snoop import Snooper
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from emu_sink import EmuController  # noqa: E402  (classic HCI additions, ACL buffers)
+from emu_timing import precise_event_loop_timing  # noqa: E402
 
 log = logging.getLogger('emu_le_audio')
 
 
-def _precise_event_loop_timing():
-    """On Windows, asyncio's clock is time.monotonic() = GetTickCount64(),
-    which moves in 15.6 ms steps, and a timer fires when it is due within
-    that resolution: SDU deliveries (and their Number Of Completed Packets)
-    came up to ~16 ms early or late, in bursts. Use the performance counter
-    for the loop's clock and 1 ms system timer resolution for its waits, so
-    the emulated controller keeps its SDU intervals to about a millisecond.
-    Called on import, before emu_le_audio_sink.py starts its event loop."""
-    if sys.platform != 'win32':
-        return
-    import ctypes
-    asyncio.BaseEventLoop.time = lambda self: time.perf_counter()
-    original_init = asyncio.BaseEventLoop.__init__
-
-    def init(self, *args, **kwargs):
-        original_init(self, *args, **kwargs)
-        self._clock_resolution = 1e-4
-    asyncio.BaseEventLoop.__init__ = init
-    try:
-        ctypes.windll.winmm.timeBeginPeriod(1)
-    except OSError:
-        pass
-
-
-_precise_event_loop_timing()
+# SDU intervals kept to about a millisecond (emu_timing.py); on import,
+# before emu_le_audio_sink.py starts its event loop
+precise_event_loop_timing()
 
 # CIG parameters set by the central, by (cig_id, cis_id): the peripheral's
 # controller reports them in its LE CIS Established too (one central here)

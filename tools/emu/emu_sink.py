@@ -711,7 +711,7 @@ async def main(args):
     }
     if args.hfp:
         from hfp_audio import HfSide
-        HfSide(device, args.hfp)
+        HfSide(device, args.hfp, sink_controller)
     if args.avrcp_keys:
         AvrcpKeys(device, args.avrcp_keys, args.avrcp_key)
     huawei = None
@@ -1081,4 +1081,10 @@ if __name__ == '__main__':
     parser.add_argument('--check-link-key', action='store_true',
                         help='authenticate a classic link only with the link key the sink has for BlueCaster')
     bumble.logging.setup_basic_logging(parser.parse_known_args()[0].log_level)
-    asyncio.run(main(parser.parse_args()))
+    args = parser.parse_args()
+    if args.hfp or args.le_link_key or args.asha:
+        # SCO and LE timing to about a millisecond, set before the event loop
+        # exists (le_audio/controller.py would do it on import, inside main)
+        from emu_timing import precise_event_loop_timing
+        precise_event_loop_timing()
+    asyncio.run(main(args))
