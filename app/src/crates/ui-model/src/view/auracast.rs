@@ -6,8 +6,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use ipc::{
-    AdapterInfo, AudioDevice, AuracastReceiverCandidate, AuracastReceiverStatus, BroadcastReceiver, DriverKind, Method,
-    SourceInfo, StreamState, StreamStatus,
+    AdapterInfo, AudioDevice, AuracastReceiverCandidate, AuracastReceiverStatus, AuracastSub, BroadcastReceiver,
+    DriverKind, Method, SourceInfo, StreamState, StreamStatus,
 };
 
 use super::adapter::adapter_name;
@@ -212,11 +212,25 @@ pub enum SingleLayout {
     Pairs,
     /// A subgroup per BIS, none located
     PerBis,
+    /// 2.1: the subwoofer's FL FR subgroup first (for receivers left to
+    /// themselves), then the main pair's
+    Sub,
+    /// 2.1 with one mono subwoofer BIS first, then FL FR (three BIS)
+    SubMono,
+    /// 3.1: a mono subwoofer BIS first, then FL FR and the centre
+    Center,
 }
 
 impl SingleLayout {
-    pub const ALL: [SingleLayout; 4] =
-        [SingleLayout::RearMono, SingleLayout::Located, SingleLayout::Pairs, SingleLayout::PerBis];
+    pub const ALL: [SingleLayout; 7] = [
+        SingleLayout::RearMono,
+        SingleLayout::Located,
+        SingleLayout::Pairs,
+        SingleLayout::PerBis,
+        SingleLayout::Sub,
+        SingleLayout::SubMono,
+        SingleLayout::Center,
+    ];
 
     /// The layout's name as stream.start_broadcast takes it
     pub fn layout(self) -> &'static str {
@@ -225,6 +239,9 @@ impl SingleLayout {
             SingleLayout::Located => "single_located",
             SingleLayout::Pairs => "single_pairs",
             SingleLayout::PerBis => "single_per_bis",
+            SingleLayout::Sub => "single_2_1",
+            SingleLayout::SubMono => "single_2_1_mono",
+            SingleLayout::Center => "single_3_1",
         }
     }
 
@@ -234,6 +251,9 @@ impl SingleLayout {
             SingleLayout::Located => "ui.dev.auracast_single_located",
             SingleLayout::Pairs => "ui.dev.auracast_single_pairs",
             SingleLayout::PerBis => "ui.dev.auracast_single_per_bis",
+            SingleLayout::Sub => "ui.dev.auracast_single_sub",
+            SingleLayout::SubMono => "ui.dev.auracast_single_sub_mono",
+            SingleLayout::Center => "ui.dev.auracast_single_3_1",
         }
     }
 }
@@ -252,6 +272,10 @@ pub enum Arrangement {
     StereoTwoMono,
     /// A stereo front and a stereo rear
     TwoStereo,
+    /// 3.1: a left, a right and a centre receiver
+    ThreeMono,
+    /// 3.1: a stereo front and a centre receiver
+    StereoCenter,
 }
 
 impl Arrangement {
@@ -262,16 +286,24 @@ impl Arrangement {
             Arrangement::FourMono => "ui.dev.auracast_rx_four_mono",
             Arrangement::StereoTwoMono => "ui.dev.auracast_rx_stereo_two_mono",
             Arrangement::TwoStereo => "ui.dev.auracast_rx_two_stereo",
+            Arrangement::ThreeMono => "ui.dev.auracast_rx_three_mono",
+            Arrangement::StereoCenter => "ui.dev.auracast_rx_stereo_center",
         }
     }
 }
 
-/// The arrangements a layout offers, the first its default
-pub fn arrangements(channels: Channels) -> &'static [Arrangement] {
+/// The arrangements a layout offers, the first its default. A 2.1
+/// broadcast's are for the main pair: the subwoofer is a receiver left to
+/// itself (it takes the first subgroup).
+pub fn arrangements(channels: Channels, single: SingleLayout) -> &'static [Arrangement] {
     match channels {
         Channels::Stereo => &[Arrangement::One, Arrangement::LeftRight],
         Channels::Mono => &[Arrangement::One],
         Channels::Split => &[Arrangement::LeftRight],
+        Channels::Single if matches!(single, SingleLayout::Sub | SingleLayout::SubMono) => {
+            &[Arrangement::LeftRight, Arrangement::One]
+        }
+        Channels::Single if single == SingleLayout::Center => &[Arrangement::ThreeMono, Arrangement::StereoCenter],
         Channels::Matrix | Channels::Single => {
             &[Arrangement::FourMono, Arrangement::StereoTwoMono, Arrangement::TwoStereo]
         }
@@ -298,6 +330,7 @@ const FL: Slot = Slot { key: "FL", channels: &["FL"], label_key: "ui.dev.auracas
 const FR: Slot = Slot { key: "FR", channels: &["FR"], label_key: "ui.dev.auracast_slot_fr" };
 const RL: Slot = Slot { key: "RL", channels: &["RL"], label_key: "ui.dev.auracast_slot_rl" };
 const RR: Slot = Slot { key: "RR", channels: &["RR"], label_key: "ui.dev.auracast_slot_rr" };
+const CENTER: Slot = Slot { key: "C", channels: &["C"], label_key: "ui.dev.auracast_slot_c" };
 
 /// A receiver chosen for a slot
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -393,6 +426,8 @@ pub struct Choices {
     pub source: Source,
     /// The broadcast's volume follows the Windows volume
     pub follow: bool,
+    /// The assistant closes its link to each receiver once it plays
+    pub leave_receivers: bool,
 }
 
 impl Default for Choices {
@@ -411,6 +446,7 @@ impl Default for Choices {
             receivers: BTreeMap::new(),
             source: Source::Tone,
             follow: false,
+            leave_receivers: false,
         }
     }
 }
@@ -466,8 +502,22 @@ impl Choices {
     /// The arrangement in force: the one chosen if the channels offer it,
     /// else their first
     pub fn arrangement(&self) -> Arrangement {
-        let offered = arrangements(self.channels);
+        let offered = arrangements(self.channels, self.single);
         if offered.contains(&self.arrangement) { self.arrangement } else { offered[0] }
+    }
+
+    /// The subwoofer of the layout: what the mixer's third and fourth
+    /// outputs are
+    pub fn sub(&self) -> AuracastSub {
+        if self.channels != Channels::Single {
+            return AuracastSub::None;
+        }
+        match self.single {
+            SingleLayout::Sub => AuracastSub::Stereo,
+            SingleLayout::SubMono => AuracastSub::Mono,
+            SingleLayout::Center => AuracastSub::Center,
+            _ => AuracastSub::None,
+        }
     }
 
     /// The slots for receivers: of the arrangement, those whose outputs
@@ -482,6 +532,8 @@ impl Choices {
             Arrangement::FourMono => &[FL, FR, RL, RR],
             Arrangement::StereoTwoMono => &[FRONT, RL, RR],
             Arrangement::TwoStereo => &[FRONT, REAR],
+            Arrangement::ThreeMono => &[FL, FR, CENTER],
+            Arrangement::StereoCenter => &[FRONT, CENTER],
         };
         let sent = |s: &Slot| {
             !self.matrix()
@@ -581,6 +633,7 @@ impl Choices {
             volume: None,
             follow_volume: Some(self.follow),
             receivers: Some(self.receivers_request()).filter(|v| !v.is_empty()),
+            leave_receivers: self.leave_receivers.then_some(true),
         }
     }
 }
@@ -707,6 +760,30 @@ pub fn show_adapter(list: &[AdapterInfo], chosen: &str) -> bool {
 
 pub const INPUT_NAMES: [&str; 8] = ["FL", "FR", "FC", "LFE", "BL", "BR", "SL", "SR"];
 pub const OUTPUT_NAMES: [&str; 4] = ["FL", "FR", "RL", "RR"];
+/// The outputs' names for a broadcast's subwoofer
+pub fn output_names(sub: AuracastSub) -> [&'static str; 4] {
+    match sub {
+        AuracastSub::None => OUTPUT_NAMES,
+        AuracastSub::Stereo => ["FL", "FR", "Sub L", "Sub R"],
+        AuracastSub::Mono => ["FL", "FR", "—", "Sub"],
+        AuracastSub::Center => ["FL", "FR", "C", "Sub"],
+    }
+}
+/// The crossover of a 2.1 broadcast (Hz): the choices, the default
+pub const CROSSOVER_CHOICES: [u32; 11] = [40, 60, 80, 100, 120, 150, 200, 250, 300, 400, 500];
+pub const CROSSOVER_DEFAULT: u32 = 80;
+
+/// The crossover a mixer setting holds, as one of [`CROSSOVER_CHOICES`]
+/// (the nearest; 0 or missing: the default)
+pub fn crossover_choice(hz: f32) -> u32 {
+    if hz.is_nan() || hz <= 0.0 {
+        return CROSSOVER_DEFAULT;
+    }
+    CROSSOVER_CHOICES
+        .into_iter()
+        .min_by(|a, b| (*a as f32 - hz).abs().total_cmp(&(*b as f32 - hz).abs()))
+        .unwrap_or(CROSSOVER_DEFAULT)
+}
 /// Sound in air at about 20 °C: metres per millisecond
 pub const M_PER_MS: f64 = 0.343;
 pub const MAX_DELAY_MS: f64 = 500.;
@@ -885,6 +962,7 @@ mod tests {
                 volume: None,
                 follow_volume: Some(false),
                 receivers: None,
+                leave_receivers: None,
             }
         );
         // A matrix with both pairs off sends nothing

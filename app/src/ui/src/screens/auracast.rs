@@ -242,7 +242,7 @@ impl Auracast {
         let s = self.session.read(cx);
         let live = s.s.live(&st);
         let rear = !s.choices.matrix() || s.choices.rear != PairMode::Off;
-        let props = s.choices.mixed().then_some((rear, live && !s.s.asking));
+        let props = s.choices.mixed().then_some((rear, s.choices.sub(), live && !s.s.asking));
         self.mixer.update(cx, |m, cx| m.set_props(props, window, cx));
         self.volume.update(cx, |v, cx| v.set_off(!live, cx));
         cx.notify();
@@ -665,7 +665,7 @@ impl Auracast {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let p = *cx.palette();
-        let offered = arrangements(c.channels);
+        let offered = arrangements(c.channels, c.single);
         let mut section = ui::section(t("ui.dev.auracast_receivers"), None, cx)
             .child(ui::hint(t("ui.dev.auracast_receivers_hint"), cx));
         if offered.len() > 1 {
@@ -719,6 +719,19 @@ impl Auracast {
         if let Some(e) = c.receiver_error() {
             section = section.child(ui::hint(e, cx).text_color(p.bad_text));
         }
+        let set_l = set.clone();
+        section = section.child(ui::toggle(
+            "auracast-leave-receivers",
+            t("ui.dev.auracast_leave_receivers"),
+            Some(t("ui.dev.auracast_leave_receivers_hint").into()),
+            c.leave_receivers,
+            locked,
+            move |v: &bool, _, cx| {
+                let v = *v;
+                set_l(Box::new(move |c| c.leave_receivers = v), cx);
+            },
+            cx,
+        ));
         if !self.live_receivers.is_empty() {
             let lines = self.live_receivers.iter().map(|r| {
                 let bad = matches!(r.phase.as_str(), "failed" | "not_found" | "no_bass");

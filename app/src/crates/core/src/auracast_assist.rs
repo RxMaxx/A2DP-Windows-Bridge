@@ -49,16 +49,29 @@ pub struct Job {
     /// BIS indexes (1-based) in that broadcast's BIG; empty: the receiver picks
     pub bis: Vec<u8>,
     pub code: Option<String>,
+    /// Close the link once the receiver plays (it keeps the broadcast; the
+    /// source is not taken off at the stop): no LE connection beside the
+    /// BIG while it runs
+    pub leave: bool,
 }
 
+/// With [`Job::leave`]: how long a receiver plays before its link closes
+const LEAVE_AFTER: Duration = Duration::from_secs(3);
+
 /// An output of a layout by the name the API gives it: "FL" (also "L"),
-/// "FR" ("R"), "RL", "RR", "M"
+/// "FR" ("R"), "RL", "RR", "SUBL" / "SUBR" (a 2.1 broadcast's subwoofer),
+/// "SUB" (a mono subwoofer), "C" (a 3.1 broadcast's centre),
+/// "M"
 pub fn channel_source(name: &str) -> Option<ChannelSource> {
     Some(match name.trim().to_ascii_uppercase().as_str() {
         "FL" | "L" => ChannelSource::Left,
         "FR" | "R" => ChannelSource::Right,
         "RL" | "BL" => ChannelSource::RearLeft,
         "RR" | "BR" => ChannelSource::RearRight,
+        "SUBL" => ChannelSource::SubLeft,
+        "SUBR" => ChannelSource::SubRight,
+        "SUB" | "LFE" => ChannelSource::SubMono,
+        "C" | "FC" => ChannelSource::Center,
         "M" | "MONO" => ChannelSource::Mono,
         _ => return None,
     })
@@ -96,7 +109,7 @@ pub fn job_for(
     }
     let Some(broadcast) = broadcast else { return Err("no channel".into()) };
     bis.sort_unstable();
-    Ok(Job { address: address.trim().to_ascii_uppercase(), name: name.to_string(), broadcast, bis, code })
+    Ok(Job { address: address.trim().to_ascii_uppercase(), name: name.to_string(), broadcast, bis, code, leave: false })
 }
 
 /// What a receiver does now
@@ -561,6 +574,7 @@ fn assist(
     let mut source_id = None;
     let mut code_sent = false;
     let mut seen_groups = false;
+    let mut playing_since: Option<Instant> = None;
     while !stopped() {
         let mut idle = true;
         for (h, rx) in &link.watches {
@@ -583,6 +597,11 @@ fn assist(
                 } else {
                     (Phase::Added, "")
                 };
+                if phase != Phase::Playing {
+                    playing_since = None;
+                } else if playing_since.is_none() {
+                    playing_since = Some(Instant::now());
+                }
                 set_bis(i, bis);
                 set_phase(i, phase, detail);
                 if s.big_encryption == 1 && !code_sent {
@@ -600,6 +619,12 @@ fn assist(
                     }
                 }
             }
+        }
+        if job.leave && playing_since.is_some_and(|t| t.elapsed() >= LEAVE_AFTER) {
+            out(&format!("Assistant {who}: it plays; closing the link (the receiver keeps the broadcast)"));
+            set_phase(i, Phase::Playing, "link closed");
+            host.le_disconnect(id);
+            return;
         }
         // The broadcast gone (stopped elsewhere): nothing left to play
         let up = !host.le_broadcast_groups().is_empty();

@@ -20,4 +20,13 @@ delay_ms: Array<number>,
 /**
  * Per output: polarity inverted
  */
-invert: Array<boolean>, };
+invert: Array<boolean>, 
+/**
+ * 2.1 broadcast: the crossover between the fronts and the subwoofer
+ * (Hz, 40 to 500; 0 or missing: 80)
+ */
+crossover_hz: number, 
+/**
+ * 2.1 broadcast: the fronts play the full range (no high pass)
+ */
+mains_full_range: boolean, };

@@ -15,11 +15,11 @@ use gpui_kit::{
     ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled, Subscription, Task, WeakEntity, Window,
     div, px,
 };
-use ipc::{AuracastMix, AuracastMixState, Method};
+use ipc::{AuracastMix, AuracastMixState, AuracastSub, Method};
 use ui_model::i18n::t;
 use ui_model::view::auracast::{
-    INPUT_NAMES, MAX_GAIN, MIX_SEND_MS, OUTPUT_NAMES, Unit, can_save_preset, delay_from, delay_in, gain_text, num,
-    preset_label,
+    CROSSOVER_CHOICES, INPUT_NAMES, MAX_GAIN, MIX_SEND_MS, Unit, can_save_preset, crossover_choice, delay_from,
+    delay_in, gain_text, num, output_names, preset_label,
 };
 
 use crate::app;
@@ -43,8 +43,9 @@ pub struct AuracastMixer {
     preset_name: Entity<InputState>,
     /// The grid's gains (4 rows of 8), each output's delay, the three levels
     fields: Vec<(MixField, Entity<InputState>)>,
-    /// The broadcast's rear and whether it is on air (None: not shown)
-    props: Option<(bool, bool)>,
+    /// The broadcast's rear, whether it is 2.1 and whether it is on air
+    /// (None: not shown)
+    props: Option<(bool, AuracastSub, bool)>,
     /// Changes go out after a short pause (typing, dragging); an answer is
     /// taken only when nothing changed since it was asked
     edits: u64,
@@ -66,8 +67,8 @@ impl AuracastMixer {
         })];
         let mut fields = Vec::new();
         let mut kinds: Vec<MixField> =
-            (0..OUTPUT_NAMES.len()).flat_map(|r| (0..INPUT_NAMES.len()).map(move |c| MixField::Cell(r, c))).collect();
-        kinds.extend((0..OUTPUT_NAMES.len()).map(MixField::Delay));
+            (0..4).flat_map(|r| (0..INPUT_NAMES.len()).map(move |c| MixField::Cell(r, c))).collect();
+        kinds.extend((0..4).map(MixField::Delay));
         kinds.extend([MixField::Center, MixField::Lfe, MixField::Surround]);
         for kind in kinds {
             let input = new_input(window, cx);
@@ -92,9 +93,9 @@ impl AuracastMixer {
         }
     }
 
-    /// The broadcast's rear and live (None: the mixer is not shown, its
-    /// state goes); a change reads the mixer again
-    pub fn set_props(&mut self, props: Option<(bool, bool)>, window: &mut Window, cx: &mut Context<Self>) {
+    /// The broadcast's rear, 2.1 and live (None: the mixer is not shown,
+    /// its state goes); a change reads the mixer again
+    pub fn set_props(&mut self, props: Option<(bool, AuracastSub, bool)>, window: &mut Window, cx: &mut Context<Self>) {
         if self.props == props {
             return;
         }
@@ -105,17 +106,21 @@ impl AuracastMixer {
                 self.preset.clear();
                 self.timer = None;
             }
-            Some((rear, _)) => self.load(rear, window, cx),
+            Some((rear, sub, _)) => self.load(rear, sub, window, cx),
         }
         cx.notify();
     }
 
-    fn rear(&self) -> Option<bool> {
-        self.props.map(|(rear, _)| rear)
+    /// The broadcast's rear and 2.1
+    fn outputs(&self) -> Option<(bool, AuracastSub)> {
+        self.props.map(|(rear, sub, _)| (rear, sub))
     }
 
-    fn load(&mut self, rear: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let task = app::request::<AuracastMixState>(Method::AuracastMixGet { channels: None, rear: Some(rear) }, cx);
+    fn load(&mut self, rear: bool, sub: AuracastSub, window: &mut Window, cx: &mut Context<Self>) {
+        let task = app::request::<AuracastMixState>(
+            Method::AuracastMixGet { channels: None, rear: Some(rear), sub: Some(sub) },
+            cx,
+        );
         cx.spawn_in(window, async move |this: WeakEntity<Self>, cx: &mut AsyncWindowContext| {
             let Ok(st) = task.await else { return };
             let _ = this.update_in(cx, |this, window, cx| this.take(st, window, cx));
@@ -220,8 +225,8 @@ impl AuracastMixer {
     }
 
     fn change(&mut self, mix: AuracastMix, window: &mut Window, cx: &mut Context<Self>) {
-        let rear = self.rear();
-        let (Some(st), Some(rear)) = (self.state.as_mut(), rear) else { return };
+        let outputs = self.outputs();
+        let (Some(st), Some((rear, sub))) = (self.state.as_mut(), outputs) else { return };
         st.mix = mix.clone();
         self.edits += 1;
         let n = self.edits;
@@ -232,7 +237,7 @@ impl AuracastMixer {
             let Ok(task) = this.update(cx, |_, cx| {
                 app::run(
                     app::request::<AuracastMixState>(
-                        Method::AuracastMixSet { mix, channels: None, rear: Some(rear) },
+                        Method::AuracastMixSet { mix, channels: None, rear: Some(rear), sub: Some(sub) },
                         cx,
                     ),
                     cx,
@@ -301,6 +306,59 @@ impl AuracastMixer {
         .detach();
     }
 
+    /// 2.1: the crossover's frequency, and the main pair's full range
+    fn crossover_rows(&self, mix: &AuracastMix, cx: &mut Context<Self>) -> Div {
+        let this = cx.entity().downgrade();
+        let hz = crossover_choice(mix.crossover_hz);
+        let freq = ui::select_labelled(
+            "mix-crossover",
+            t("ui.dev.auracast_mix_crossover"),
+            &hz,
+            CROSSOVER_CHOICES.iter().map(|hz| Choice::new(*hz, format!("{hz} Hz"))).collect(),
+            false,
+            move |hz: &u32, window, cx| {
+                let hz = *hz as f32;
+                let _ = this.update(cx, |m, cx| {
+                    if let Some(mix) = m.mix().cloned() {
+                        m.change(AuracastMix { crossover_hz: hz, ..mix }, window, cx);
+                    }
+                });
+            },
+        );
+        let full_range = ui::toggle(
+            "mix-mains-full-range",
+            t("ui.dev.auracast_mix_mains_full_range"),
+            Some(t("ui.dev.auracast_mix_mains_full_range_hint").into()),
+            mix.mains_full_range,
+            false,
+            cx.listener(|this, v: &bool, window, cx| {
+                if let Some(mix) = this.mix().cloned() {
+                    this.change(AuracastMix { mains_full_range: *v, ..mix }, window, cx);
+                }
+            }),
+            cx,
+        );
+        div()
+            .flex()
+            .flex_col()
+            .gap(theme::S2)
+            .child(
+                ui::row()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(px(2.))
+                            .child(t("ui.dev.auracast_mix_crossover"))
+                            .child(ui::hint(t("ui.dev.auracast_mix_crossover_hint"), cx)),
+                    )
+                    .child(freq),
+            )
+            .child(full_range)
+    }
+
     fn input(&self, kind: MixField) -> Entity<InputState> {
         self.fields.iter().find(|(k, _)| *k == kind).map(|(_, i)| i.clone()).expect("every field has an input")
     }
@@ -358,6 +416,7 @@ impl AuracastMixer {
             d.w(px(64.)).flex_none()
         }
         let head_cell = |text: SharedString| gain_col(div()).text_center().text_color(p.text_2).child(text);
+        let output_names = output_names(st.sub);
         let grid = div()
             .flex()
             .flex_col()
@@ -388,7 +447,7 @@ impl AuracastMixer {
                             .child(t("ui.dev.auracast_mix_invert")),
                     ),
             )
-            .children(OUTPUT_NAMES.iter().enumerate().map(|(r, out)| {
+            .children(output_names.iter().enumerate().map(|(r, out)| {
                 let row_on = r < 2 || st.rear;
                 let cells = INPUT_NAMES.iter().enumerate().map(|(c, inp)| {
                     let on = self.cell(r, c) != 0.;
@@ -520,6 +579,7 @@ impl AuracastMixer {
                 )
             })
             .child(div().id("mix-scroll").overflow_x_scroll().py(theme::S2).child(grid))
+            .when(st.sub != AuracastSub::None, |d| d.child(self.crossover_rows(mix, cx)))
             .when(!st.rear, |d| d.child(ui::hint(t("ui.dev.auracast_mix_no_rear"), cx)))
             .child(
                 ui::row()

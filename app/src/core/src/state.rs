@@ -1281,6 +1281,8 @@ pub struct BroadcastStream {
     pub follow_volume: Option<bool>,
     /// Receivers an Auracast assistant tells to play it
     pub receivers: Vec<ipc::BroadcastReceiver>,
+    /// The assistant closes its link to each once it plays
+    pub leave_receivers: bool,
 }
 
 /// The source of a broadcast (stream.start_broadcast, auracast.set_source):
@@ -1401,6 +1403,7 @@ fn assistant_jobs(
         }
         let job = bluecaster_core::auracast_assist::job_for(layout, &r.address, &r.name, &r.channels, b.code.clone())
             .map_err(|why| bad(r, &why))?;
+        let job = bluecaster_core::auracast_assist::Job { leave: b.leave_receivers, ..job };
         if jobs.iter().any(|j| j.address == job.address) {
             return Err(bad(r, "listed twice"));
         }
@@ -4061,6 +4064,7 @@ impl CoreState {
                 volume,
                 follow_volume,
                 receivers,
+                leave_receivers,
             } => {
                 let b = BroadcastStream {
                     name,
@@ -4076,6 +4080,7 @@ impl CoreState {
                     volume,
                     follow_volume,
                     receivers: receivers.unwrap_or_default(),
+                    leave_receivers: leave_receivers.unwrap_or(false),
                 };
                 self.start_broadcast(&b).map(|()| Value::Null)
             }
@@ -4229,18 +4234,18 @@ impl CoreState {
                 self.developer_only()?;
                 Ok(json(&auracast_receivers(self.receiver_candidates())))
             }
-            Method::AuracastMixGet { channels, rear } => {
+            Method::AuracastMixGet { channels, rear, sub } => {
                 self.developer_only()?;
-                Ok(json(&bluecaster_core::auracast_mix::state(&self.config_dir(), channels, rear)))
+                Ok(json(&bluecaster_core::auracast_mix::state(&self.config_dir(), channels, rear, sub)))
             }
-            Method::AuracastMixSet { mix, channels, rear } => {
+            Method::AuracastMixSet { mix, channels, rear, sub } => {
                 self.developer_only()?;
                 let dir = self.config_dir();
                 bluecaster_core::auracast_mix::set(&dir, &mix).map_err(|e| {
                     tracing::warn!("Auracast mixer: not saved: {e}");
                     err("auracast.mix_save_failed", "error.settings_save")
                 })?;
-                Ok(json(&bluecaster_core::auracast_mix::state(&dir, channels, rear)))
+                Ok(json(&bluecaster_core::auracast_mix::state(&dir, channels, rear, sub)))
             }
             Method::AuracastMixPresetSave { name, mix } => {
                 self.developer_only()?;
@@ -4249,7 +4254,7 @@ impl CoreState {
                     tracing::warn!("Auracast mixer: preset not saved: {e}");
                     err("auracast.mix_save_failed", "error.settings_save")
                 })?;
-                Ok(json(&bluecaster_core::auracast_mix::state(&dir, None, None)))
+                Ok(json(&bluecaster_core::auracast_mix::state(&dir, None, None, None)))
             }
             Method::AuracastMixPresetDelete { name } => {
                 self.developer_only()?;
@@ -4258,7 +4263,7 @@ impl CoreState {
                     tracing::warn!("Auracast mixer: preset not deleted: {e}");
                     err("auracast.mix_save_failed", "error.settings_save")
                 })?;
-                Ok(json(&bluecaster_core::auracast_mix::state(&dir, None, None)))
+                Ok(json(&bluecaster_core::auracast_mix::state(&dir, None, None, None)))
             }
             Method::MediaEqPreview { name, eq } => {
                 let (_, s) = self.snapshot();

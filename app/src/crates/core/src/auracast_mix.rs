@@ -7,8 +7,10 @@
 use std::path::Path;
 use std::sync::{LazyLock, Mutex};
 
-use ipc::{AuracastMix, AuracastMixPreset, AuracastMixState};
-use pipeline::mix::{INPUTS, MixHandle, MixSettings, auto_matrix, effective_matrix, present_columns};
+use ipc::{AuracastMix, AuracastMixPreset, AuracastMixState, AuracastSub};
+use pipeline::mix::{
+    CROSSOVER_DEFAULT_HZ, INPUTS, MixHandle, MixSettings, Outputs, auto_matrix, effective_matrix, present_columns,
+};
 use serde::{Deserialize, Serialize};
 
 const OUTPUTS: usize = 4;
@@ -27,6 +29,30 @@ pub struct Live {
     pub channels: usize,
     pub mask: u32,
     pub rear: bool,
+    /// A subwoofer layout: what the third and fourth outputs are
+    pub sub: AuracastSub,
+}
+
+/// The mixer's outputs for a broadcast with or without rear outputs, and
+/// its subwoofer
+fn outputs(rear: bool, sub: AuracastSub) -> Outputs {
+    match (rear, sub) {
+        (false, _) => Outputs::Front,
+        (true, AuracastSub::None) => Outputs::Rear,
+        (true, AuracastSub::Stereo) => Outputs::Sub,
+        (true, AuracastSub::Mono) => Outputs::SubMono,
+        (true, AuracastSub::Center) => Outputs::Center,
+    }
+}
+
+/// The subwoofer of the mixer's outputs, as the API names it
+pub fn sub_of(outputs: Outputs) -> AuracastSub {
+    match outputs {
+        Outputs::Front | Outputs::Rear => AuracastSub::None,
+        Outputs::Sub => AuracastSub::Stereo,
+        Outputs::SubMono => AuracastSub::Mono,
+        Outputs::Center => AuracastSub::Center,
+    }
 }
 
 static HANDLE: LazyLock<MixHandle> = LazyLock::new(|| {
@@ -110,6 +136,8 @@ pub fn settings(m: &AuracastMix) -> MixSettings {
         matrix,
         delay_ms,
         invert,
+        crossover_hz: if m.crossover_hz > 0.0 { m.crossover_hz } else { CROSSOVER_DEFAULT_HZ },
+        mains_full_range: m.mains_full_range,
     }
     .held()
 }
@@ -125,6 +153,8 @@ pub fn to_ipc(s: &MixSettings) -> AuracastMix {
         matrix: rows(&s.matrix),
         delay_ms: s.delay_ms.to_vec(),
         invert: s.invert.to_vec(),
+        crossover_hz: s.crossover_hz,
+        mains_full_range: s.mains_full_range,
     }
 }
 
@@ -137,8 +167,8 @@ pub fn builtin_presets() -> Vec<AuracastMixPreset> {
     let all = [true; INPUTS];
     let standard = MixSettings::default();
     let manual = |matrix| MixSettings { auto: false, matrix, ..standard };
-    let rear = auto_matrix(&all, false, true, &standard);
-    let fold = auto_matrix(&all, false, false, &standard);
+    let rear = auto_matrix(&all, false, Outputs::Rear, &standard);
+    let fold = auto_matrix(&all, false, Outputs::Front, &standard);
     let zero = [0.0f32; INPUTS];
     let list = [
         ("standard", standard),
@@ -154,15 +184,19 @@ pub fn builtin_presets() -> Vec<AuracastMixPreset> {
 }
 
 /// The state for the broadcast running, else for a source of `channels`
-/// (default 8, the usual speakers) with or without rear outputs
-pub fn state(dir: &Path, channels: Option<u32>, rear: Option<bool>) -> AuracastMixState {
+/// (default 8, the usual speakers) with or without rear outputs, 2.1 or not
+pub fn state(dir: &Path, channels: Option<u32>, rear: Option<bool>, sub: Option<AuracastSub>) -> AuracastMixState {
     let file = load(dir);
     let s = HANDLE.get();
     let live = live();
-    let (channels, mask, rear) = match live {
-        Some(l) => (l.channels, l.mask, l.rear),
-        None => (channels.map_or(8, |c| c.clamp(1, 8) as usize), 0, rear.unwrap_or(true)),
+    let (channels, mask, rear, sub) = match live {
+        Some(l) => (l.channels, l.mask, l.rear, l.sub),
+        None => {
+            let sub = sub.unwrap_or_default();
+            (channels.map_or(8, |c| c.clamp(1, 8) as usize), 0, rear.unwrap_or(true) || sub != AuracastSub::None, sub)
+        }
     };
+    let sub = if rear { sub } else { AuracastSub::None };
     let mut presets = builtin_presets();
     presets.extend(file.presets.into_iter().map(|p| AuracastMixPreset { builtin: false, ..p }));
     AuracastMixState {
@@ -172,7 +206,8 @@ pub fn state(dir: &Path, channels: Option<u32>, rear: Option<bool>) -> AuracastM
         channels: channels as u32,
         present: present_columns(channels, mask).to_vec(),
         rear,
-        effective: rows(&effective_matrix(channels, mask, rear, &s)),
+        sub,
+        effective: rows(&effective_matrix(channels, mask, outputs(rear, sub), &s)),
     }
 }
 
@@ -242,17 +277,24 @@ mod tests {
         let mut m2 = m.clone();
         m2.delay_ms[0] = 3.0;
         save_preset(&dir, "Room", &m2).unwrap();
-        let st = state(&dir, Some(6), Some(false));
+        let st = state(&dir, Some(6), Some(false), None);
         let user: Vec<_> = st.presets.iter().filter(|p| !p.builtin).collect();
         assert_eq!(user.len(), 1);
         assert_eq!(user[0].mix.delay_ms[0], 3.0);
         assert_eq!(st.present, [true, true, true, true, true, true, false, false]);
         assert!(!st.rear);
+        // 2.1: four outputs, the rear two the subwoofer's, fed as the fronts
+        let st = state(&dir, Some(6), Some(false), Some(AuracastSub::Stereo));
+        assert!(st.rear && st.sub == AuracastSub::Stereo);
+        assert_eq!((&st.effective[2], &st.effective[3]), (&st.effective[0], &st.effective[1]));
+        // 3.1: the centre on the third output
+        let st = state(&dir, Some(6), Some(false), Some(AuracastSub::Center));
+        assert_eq!((st.effective[2][2], st.effective[0][2]), (1.0, 0.0));
         delete_preset(&dir, "Room").unwrap();
-        assert!(state(&dir, None, None).presets.iter().all(|p| p.builtin));
+        assert!(state(&dir, None, None, None).presets.iter().all(|p| p.builtin));
         // Not under a built-in preset's name
         assert!(save_preset(&dir, "standard", &m).is_err());
-        assert!(state(&dir, None, None).presets.iter().all(|p| p.builtin));
+        assert!(state(&dir, None, None, None).presets.iter().all(|p| p.builtin));
         // A file that cannot be read is kept aside, not written over
         save_preset(&dir, "Room", &m).unwrap();
         let path = crate::paths::auracast_mix_file(&dir);
@@ -262,7 +304,7 @@ mod tests {
         let aside = std::fs::read_to_string(path.with_extension("json.bad")).unwrap();
         assert_eq!(aside, saved[..saved.len() / 2]);
         let names: Vec<_> =
-            state(&dir, None, None).presets.into_iter().filter(|p| !p.builtin).map(|p| p.name).collect();
+            state(&dir, None, None, None).presets.into_iter().filter(|p| !p.builtin).map(|p| p.name).collect();
         assert_eq!(names, ["Other"]);
         std::fs::remove_dir_all(&dir).ok();
     }
