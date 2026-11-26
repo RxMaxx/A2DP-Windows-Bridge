@@ -45,14 +45,19 @@
 //! side. Every [`ALIGN_WINDOW_MS`] the low completion delay (the
 //! [`ALIGN_PERCENTILE`]th percentile: SDUs through at the first try, so
 //! retransmissions, which move the median by up to an interval, do not
-//! count) of each CIS is compared; a CIS more than [`ALIGN_THRESHOLD_PCT`] %
-//! of a frame later than the earliest one in [`ALIGN_CONFIRM`] windows in a
-//! row gets one SDU left out (it holds one more in the controller than the
-//! others), which brings it back in line. A CIS whose events come later in
-//! the CIG event completes later while in line, by up to the difference of
-//! the two CIS's places in it (CIG_Sync_Delay - CIS_Sync_Delay of LE CIS
-//! Established): that much of the gap does not count. Developer > Debug
-//! turns the realignment off. A skew only comes from a start or
+//! count) of each CIS is compared. In line, a CIS completes later than
+//! another by the difference of their places in the CIG event
+//! (CIG_Sync_Delay - CIS_Sync_Delay of LE CIS Established; seen on a
+//! WF-1000XM6: 3.1 ms, and the CIS that comes first a frame behind
+//! completing 7 ms after the other), so each low is taken from its place
+//! first. A CIS then more than [`ALIGN_THRESHOLD_PCT`] % of a frame later
+//! than the earliest one in [`ALIGN_CONFIRM`] windows in a row gets one SDU
+//! left out for every frame it is behind (it holds that many more in the
+//! controller than the others; [`ALIGN_FRAMES_MAX`] at most), which brings
+//! it back in line. Completions less than the rest of a frame apart are
+//! left alone whatever the places say: a controller that reports all CIS
+//! together shows no gap while in line. Developer > Debug turns the
+//! realignment off. A skew only comes from a start or
 //! an underrun, so only those arm the check: the first window after one is
 //! left out (the stream settling), and a realignment disarms it until the
 //! next. At most [`ALIGN_MAX`] times a stream.
@@ -175,6 +180,8 @@ const ALIGN_THRESHOLD_PCT: u32 = 80;
 const ALIGN_CONFIRM: u8 = 3;
 /// Realignments a stream gets at most
 const ALIGN_MAX: u32 = 4;
+/// SDUs one realignment leaves out at most (frames a CIS is behind)
+const ALIGN_FRAMES_MAX: u8 = 3;
 
 /// LE CIS Established parameters kept (the latest per handle)
 const LINKS_MAX: usize = 8;
@@ -357,8 +364,8 @@ struct CisOut {
     delays_ms: Vec<u32>,
     /// Completion delays of the alignment window
     align_ms: Vec<u32>,
-    /// The next SDU is left out to bring the CIS back in line
-    skip_next: bool,
+    /// The next SDUs left out to bring the CIS back in line
+    skip: u8,
 }
 
 impl CisOut {
@@ -379,7 +386,7 @@ impl CisOut {
             window_peak: 0,
             delays_ms: Vec::with_capacity(256),
             align_ms: Vec::with_capacity(512),
-            skip_next: false,
+            skip: 0,
         }
     }
 
@@ -454,7 +461,7 @@ impl CisOut {
     fn down(&mut self) {
         self.alive = false;
         self.stalled = false;
-        self.skip_next = false;
+        self.skip = 0;
         self.align_ms.clear();
         self.in_flight.clear();
         while let Some(p) = self.pending.pop_front() {
@@ -1171,9 +1178,9 @@ impl IsoSender {
         if set.len() == self.cis.len() {
             let max = self.pending_max;
             for (c, sdu) in self.cis.iter_mut().zip(&set) {
-                if c.skip_next {
+                if c.skip > 0 {
                     // Left out: the CIS holds one SDU less from now on
-                    c.skip_next = false;
+                    c.skip -= 1;
                     continue;
                 }
                 if c.alive {
@@ -1323,34 +1330,37 @@ impl IsoSender {
             self.align_settle -= 1;
             return;
         }
-        let Some(&(early, earliest)) = lows.iter().min_by_key(|&&(_, m)| m) else { return };
-        let Some(&(late, latest)) = lows.iter().max_by_key(|&&(_, m)| m) else { return };
-        let threshold_ms = (self.frame_us * ALIGN_THRESHOLD_PCT / 100 / 1000).max(1);
+        // In line, a CIS completes later than another by the difference of
+        // their places in the CIG event: each low is taken from its place
+        let frame_us = i64::from(self.frame_us);
+        let in_line: Vec<(usize, u32, i64)> = lows
+            .iter()
+            .map(|&(i, ms)| (i, ms, i64::from(ms) * 1000 - i64::from(self.anchor_offset_us(self.cis[i].handle))))
+            .collect();
+        let Some(&(_, earliest, first)) = in_line.iter().min_by_key(|&&(_, _, us)| us) else { return };
+        let Some(&(late, latest, last)) = in_line.iter().max_by_key(|&&(_, _, us)| us) else { return };
+        let threshold_us = (frame_us * i64::from(ALIGN_THRESHOLD_PCT) / 100).max(1000);
         let handle = self.cis[late].handle;
-        // Its events come this much later in the CIG event than the
-        // earliest CIS's: a gap of that size is its place, not a frame
-        let place_ms =
-            self.anchor_offset_us(handle).saturating_sub(self.anchor_offset_us(self.cis[early].handle)).div_ceil(1000);
-        let gap_ms = latest.saturating_sub(earliest);
-        if gap_ms.saturating_sub(place_ms) < threshold_ms {
-            if gap_ms >= threshold_ms {
-                tracing::trace!(
-                    "LE Audio: CIS 0x{handle:04X} completes {gap_ms} ms later than the earliest CIS, {place_ms} ms of \
-                     it by its place in the CIG event: left as it is"
-                );
-            }
+        let skew_us = last - first;
+        // A controller that reports the completions of all CIS together
+        // shows no gap while in line, whatever their places: completions
+        // that close together are left alone
+        let together = i64::from(latest.abs_diff(earliest)) * 1000 < frame_us - threshold_us;
+        if skew_us < threshold_us || together {
             self.align_suspect = None;
             return;
         }
+        // Whole frames behind (a CIS may hold more than one SDU too many)
+        let frames = ((skew_us + frame_us / 2) / frame_us).clamp(1, i64::from(ALIGN_FRAMES_MAX)) as u8;
         let windows = match self.align_suspect {
             Some((h, n)) if h == handle => n + 1,
             _ => 1,
         };
         if windows < ALIGN_CONFIRM {
             tracing::debug!(
-                "LE Audio: CIS 0x{handle:04X} completes {} ms later than the earliest CIS ({latest} vs {earliest} ms, \
-                 p{ALIGN_PERCENTILE}, window {windows} of {ALIGN_CONFIRM})",
-                latest - earliest
+                "LE Audio: CIS 0x{handle:04X} completes {:.1} ms later than in line with the earliest CIS ({latest} \
+                 vs {earliest} ms, p{ALIGN_PERCENTILE}, window {windows} of {ALIGN_CONFIRM})",
+                skew_us as f64 / 1000.0
             );
             self.align_suspect = Some((handle, windows));
             return;
@@ -1358,10 +1368,12 @@ impl IsoSender {
         self.align_suspect = None;
         self.align_armed = false;
         self.realigns += 1;
-        self.cis[late].skip_next = true;
+        self.cis[late].skip = frames;
         tracing::info!(
-            "LE Audio: CIS 0x{handle:04X} plays a frame behind the others (completion {latest} vs {earliest} ms, \
-             p{ALIGN_PERCENTILE}): one SDU left out to bring it in line ({} of {ALIGN_MAX})",
+            "LE Audio: CIS 0x{handle:04X} plays {frames} frame(s) behind the others (completion {latest} vs \
+             {earliest} ms, p{ALIGN_PERCENTILE}, {:.1} ms later than in line): {frames} SDU(s) left out to bring it \
+             in line ({} of {ALIGN_MAX})",
+            skew_us as f64 / 1000.0,
             self.realigns
         );
         if self.realigns == ALIGN_MAX {
@@ -1841,27 +1853,8 @@ mod tests {
     /// interval later than the first's (its stream a frame behind). The
     /// sender, the fake, the second CIS's sequence numbers.
     fn run_skewed(until_ms: u32) -> (IsoSender, Fake, Vec<u16>) {
-        run_skewed_after(until_ms, &[])
-    }
-
-    /// LE CIS Established of `handle` with its sync delays (us)
-    fn established(handle: u8, cig_sync_delay: u32, cis_sync_delay: u32) -> Vec<u8> {
-        let mut ev = vec![0x3E, 29, 0x19, 0x00, handle, 0x00];
-        ev.extend_from_slice(&cig_sync_delay.to_le_bytes()[..3]);
-        ev.extend_from_slice(&cis_sync_delay.to_le_bytes()[..3]);
-        ev.extend_from_slice(&[0x10, 0x27, 0x00, 0x10, 0x27, 0x00]); // 10 ms both ways
-        // BN 0: the queue depth stays the one given to start
-        ev.extend_from_slice(&[2, 2, 2, 0, 0, 1, 1, 155, 0, 0, 0, 8, 0]);
-        ev
-    }
-
-    /// [`run_skewed`] after the HCI events `before` (LE CIS Established)
-    fn run_skewed_after(until_ms: u32, before: &[Vec<u8>]) -> (IsoSender, Fake, Vec<u16>) {
         let out = Fake::default();
         let mut s = IsoSender::new(Arc::default());
-        for ev in before {
-            s.on_hci_event(&out, ev);
-        }
         s.start(&out, &[0x60, 0x61], queue(2), 10_000, 8, 100);
         out.take();
         let mut right = Vec::new();
@@ -1884,6 +1877,65 @@ mod tests {
         (s, out, right)
     }
 
+    /// LE CIS Established of `handle` with its sync delays (us)
+    fn established(handle: u8, cig_sync_delay: u32, cis_sync_delay: u32) -> Vec<u8> {
+        let mut ev = vec![0x3E, 29, 0x19, 0x00, handle, 0x00];
+        ev.extend_from_slice(&cig_sync_delay.to_le_bytes()[..3]);
+        ev.extend_from_slice(&cis_sync_delay.to_le_bytes()[..3]);
+        ev.extend_from_slice(&[0x10, 0x27, 0x00, 0x10, 0x27, 0x00]); // 10 ms both ways
+        // BN 0: the queue depth stays the one given to start
+        ev.extend_from_slice(&[2, 2, 2, 0, 0, 1, 1, 155, 0, 0, 0, 8, 0]);
+        ev
+    }
+
+    /// 10 s of two CIS (0x60, 0x61) on a controller with a CIG event every
+    /// 10 ms, from when the host sends: the events of each CIS begin
+    /// `place_us` into it, and each event takes the oldest SDU the
+    /// controller holds for its CIS. A CIS `behind` by n frames had its
+    /// first n events without an SDU, so it holds n more from then on.
+    /// `together`: the controller reports the completions of both CIS at
+    /// the end of the CIG event instead of at each CIS's own events. The
+    /// sender and the SDUs left out of each CIS.
+    fn run_placed(place_us: [u32; 2], behind: [u32; 2], together: bool) -> (IsoSender, [usize; 2]) {
+        const HANDLES: [u8; 2] = [0x60, 0x61];
+        let cig_sync_delay = 10_000;
+        let out = Fake::default();
+        let mut s = IsoSender::new(Arc::default());
+        for (h, place) in HANDLES.iter().zip(place_us) {
+            s.on_hci_event(&out, &established(*h, cig_sync_delay, cig_sync_delay - place));
+        }
+        s.start(&out, &[0x60, 0x61], queue(2), 10_000, 8, 100);
+        out.take();
+        let mut held = [0u32; 2];
+        let mut last: [Option<u16>; 2] = [None; 2];
+        let mut left_out = [0usize; 2];
+        for t in 10..=10_000u32 {
+            if t.is_multiple_of(10) {
+                at(&mut s, &out, t);
+                for l in out.sends() {
+                    for (i, h) in HANDLES.iter().enumerate() {
+                        let Some(rest) = l.strip_prefix(&format!("send {h:x} #")) else { continue };
+                        let seq: u16 = rest.split(' ').next().unwrap().parse().unwrap();
+                        // Sequence numbers skipped are SDUs left out
+                        left_out[i] += last[i].map_or(0, |n| usize::from(seq - n - 1));
+                        last[i] = Some(seq);
+                        held[i] += 1;
+                    }
+                }
+            }
+            for i in 0..2 {
+                let event_ms = if together { 9 } else { place_us[i] / 1000 };
+                let first = 10 + 10 * behind[i] + event_ms;
+                if t >= first && (t - event_ms).is_multiple_of(10) && held[i] > 0 {
+                    held[i] -= 1;
+                    out.now.set(t);
+                    s.on_hci_event(&out, &completed(u16::from(HANDLES[i]), 1));
+                }
+            }
+        }
+        (s, left_out)
+    }
+
     #[test]
     fn a_cis_a_frame_behind_is_brought_in_line_once() {
         let (s, _, right) = run_skewed(10_000);
@@ -1896,21 +1948,40 @@ mod tests {
     }
 
     #[test]
-    fn a_later_place_in_the_cig_event_is_not_a_frame_behind() {
-        // The second CIS's events begin 9 ms into the CIG event (sync delays
-        // 10 ms and 1 ms): its SDUs completing an interval later may be its
-        // place alone, so nothing is left out
-        let (s, _, right) =
-            run_skewed_after(10_000, &[established(0x60, 10_000, 10_000), established(0x61, 10_000, 1000)]);
-        assert_eq!(s.realigns, 0);
-        assert!(right.windows(2).all(|w| w[1] == w[0] + 1));
-        // 2 ms into it: the rest of the gap is still a frame
-        let (s, _, _) = run_skewed_after(10_000, &[established(0x60, 4000, 4000), established(0x61, 4000, 2000)]);
-        assert_eq!(s.realigns, 1);
-        // The CIS that is late is the one whose events come first: its
-        // place explains nothing
-        let (s, _, _) = run_skewed_after(10_000, &[established(0x60, 10_000, 1000), established(0x61, 10_000, 10_000)]);
-        assert_eq!(s.realigns, 1);
+    fn cis_are_compared_from_their_places_in_the_cig_event() {
+        // As measured with a WF-1000XM6: the second CIS's events begin
+        // 3.1 ms after the first one's. In line: it completes 3 ms later
+        let place = [0, 3147];
+        let (s, left_out) = run_placed(place, [0, 0], false);
+        assert_eq!((s.realigns, left_out), (0, [0, 0]));
+        // The CIS that comes first a frame behind completes only 7 ms after
+        // the other one, under 80 % of a frame, and is a frame from its
+        // place all the same
+        let (s, left_out) = run_placed(place, [1, 0], false);
+        assert_eq!((s.realigns, left_out), (1, [1, 0]));
+        // The one that comes later a frame behind: 13 ms after
+        let (s, left_out) = run_placed(place, [0, 1], false);
+        assert_eq!((s.realigns, left_out), (1, [0, 1]));
+        // A place of most of a frame is not a frame behind
+        let (s, left_out) = run_placed([0, 9000], [0, 0], false);
+        assert_eq!((s.realigns, left_out), (0, [0, 0]));
+    }
+
+    #[test]
+    fn a_cis_two_frames_behind_gets_two_sdus_left_out_at_once() {
+        let (s, left_out) = run_placed([0, 3147], [2, 0], false);
+        assert_eq!((s.realigns, left_out), (1, [2, 0]));
+    }
+
+    #[test]
+    fn completions_reported_together_are_not_taken_from_their_places() {
+        // Both CIS complete at the end of the CIG event, whatever their
+        // places: no gap, so nothing is behind, even with places most of a
+        // frame apart
+        let (s, left_out) = run_placed([0, 9000], [0, 0], true);
+        assert_eq!((s.realigns, left_out), (0, [0, 0]));
+        let (s, left_out) = run_placed([0, 3147], [0, 0], true);
+        assert_eq!((s.realigns, left_out), (0, [0, 0]));
     }
 
     #[test]

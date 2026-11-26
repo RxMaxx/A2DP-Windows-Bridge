@@ -933,15 +933,20 @@ LE keys of classic devices (issue #86):
   margin of 0-1). `iso_send.rs` compares the CIS's low (10th percentile)
   completion delays every 2 s; the median is no use, as retransmissions
   (FT 2 on 48_6_2) move it by up to an interval, and realigning on it made
-  the sound wander. A start or an underrun arms the check; the first window
-  after one is left out, and a CIS later by 80 % of a frame or more in three
-  windows in a row gets one SDU left out ("plays a frame behind the others
-  ... one SDU left out"), which disarms it until the next underrun; at most
-  4 times a stream. A CIS whose events come later in the CIG event completes
-  later while in line, so that much of the gap does not count: the
-  difference of the two CIS's `CIG_Sync_Delay - CIS_Sync_Delay` (LE CIS
-  Established). Developer > Debug's "Realign a CIS that plays a frame
-  behind" turns it off (`bt_host::set_realign_off`), at once.
+  the sound wander. In line, a CIS completes later than another by the
+  difference of their places in the CIG event (`CIG_Sync_Delay -
+  CIS_Sync_Delay` of LE CIS Established), so each delay is taken from its
+  place first. Measured with WF-1000XM6 on a BT600: places 0 and 3.1 ms, and
+  the CIS that comes first, a frame behind, completes only 7 ms after the
+  other one. A start or an underrun arms the check; the first window after
+  one is left out, and a CIS later than in line by 80 % of a frame or more
+  in three windows in a row gets one SDU left out for every frame it is
+  behind, 3 at most ("plays N frame(s) behind the others ... N SDU(s) left
+  out"), which disarms it until the next underrun; at most 4 times a
+  stream. Completions less than 20 % of a frame apart are left alone
+  whatever the places say, for a controller that reports all CIS together.
+  Developer > Debug's "Realign a CIS that plays a frame behind" turns it
+  off (`bt_host::set_realign_off`), at once.
 - LE Audio does not support application capture (it does support system
   loopback, virtual devices and the test tone).
 - Not verified with real LE Audio headphones or a real controller's CIS
