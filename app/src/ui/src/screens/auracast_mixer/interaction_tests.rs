@@ -119,3 +119,46 @@ fn a_field_being_typed_into_keeps_its_text_when_the_state_comes_again(cx: &mut T
     let mixes = sent(&mut h, cx);
     assert_eq!(mixes.last().map(|m| m["center_db"].clone()), Some(json!(-1.0)));
 }
+
+/// The earbuds' mixer (Developer > TWS), off until turned on
+fn open_tws(cx: &mut TestAppContext) -> (Harness, AnyWindowHandle, Entity<AuracastMixer>) {
+    let mut h = Harness::start(cx, snapshot());
+    let mut st = mix_state(true, -3.0);
+    st["rear"] = json!(false);
+    st["enabled"] = json!(false);
+    h.answer("tws.mix", Answer::Ok(st.clone()));
+    st["enabled"] = json!(true);
+    h.answer("tws.mix_set", Answer::Ok(st));
+    let (w, host) = h.open_sized(cx, (1200., 900.), |window, cx| {
+        let mixer = cx.new(|cx| AuracastMixer::new_for(MixTarget::Tws, window, cx));
+        cx.new(|_| Host { mixer })
+    });
+    let mixer = cx.read(|cx| host.read(cx).mixer.clone());
+    h.on(cx, w, |window, cx| {
+        mixer.update(cx, |m, cx| m.set_props(Some((false, AuracastSub::None, false)), window, cx))
+    });
+    (h, w, mixer)
+}
+
+#[gpui_kit::test]
+fn the_earbuds_mixer_reads_and_saves_through_tws_and_turns_on_from_its_switch(cx: &mut TestAppContext) {
+    let (mut h, w, mixer) = open_tws(cx);
+    assert!(h.methods().iter().any(|m| m == "tws.mix"));
+    assert!(!h.methods().iter().any(|m| m.starts_with("auracast.")));
+    assert_eq!(cx.read(|cx| mixer.read(cx).output_names(AuracastSub::None).len()), 2);
+    h.on(cx, w, |window, cx| mixer.update(cx, |m, cx| m.set_enabled(true, window, cx)));
+    h.settle(cx);
+    let calls = h.calls("tws.mix_set");
+    assert_eq!(calls.last().map(|p| p["enabled"].clone()), Some(json!(true)));
+    assert_eq!(cx.read(|cx| mixer.read(cx).state.as_ref().map(|s| s.enabled)), Some(true));
+    // A level typed goes out through tws.mix_set too, without turning it on or off
+    let center = field(&mixer, cx, MixField::Center);
+    type_into(&mut h, cx, w, &center, "-6");
+    h.key(cx, w, "enter");
+    cx.executor().advance_clock(Duration::from_millis(MIX_SEND_MS + 10));
+    h.settle(cx);
+    let last = h.calls("tws.mix_set").last().cloned().unwrap();
+    assert_eq!(last["mix"]["center_db"], json!(-6.0));
+    assert_eq!(last["enabled"], Value::Null);
+    assert!(h.calls("auracast.mix_set").is_empty());
+}

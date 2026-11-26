@@ -380,12 +380,12 @@ const EQ_BLOCK: usize = 512;
 
 /// Float to 16-bit as v1 (clamped, lrintf: rounded to nearest, ties even)
 #[inline]
-fn to_i16(x: f32) -> i16 {
+pub(crate) fn to_i16(x: f32) -> i16 {
     (x.clamp(-1.0, 1.0) * 32767.0).round_ties_even() as i16
 }
 
 #[inline]
-fn input_sample(raw: &[u8], i: usize, t: SampleType) -> f32 {
+pub(crate) fn input_sample(raw: &[u8], i: usize, t: SampleType) -> f32 {
     match t {
         SampleType::F32 => f32::from_le_bytes([raw[i * 4], raw[i * 4 + 1], raw[i * 4 + 2], raw[i * 4 + 3]]),
         SampleType::I16 => f32::from(i16::from_le_bytes([raw[i * 2], raw[i * 2 + 1]])) / 32768.0,
@@ -473,9 +473,11 @@ struct FrameEncoder {
     sets: u64,
     errors: u64,
     clock: crate::EncodeClock,
-    /// Every channel gets the mono mix (an earbud left alone while the
-    /// other one is gone), whatever its plan says
-    all_mono: Arc<AtomicBool>,
+    /// An earbud is left alone while the other one of its set is gone:
+    /// it plays what `channels` says for that
+    alone: Arc<AtomicBool>,
+    /// The device's channel settings (swapped, an earbud alone)
+    channels: crate::channels::ChannelsHandle,
 }
 
 impl FrameEncoder {
@@ -498,11 +500,12 @@ impl FrameEncoder {
         };
         let started = Instant::now();
         let ns = self.layout.frame_samples;
-        let all_mono = self.all_mono.load(Ordering::Relaxed);
+        let alone = self.alone.load(Ordering::Relaxed);
+        let channels = self.channels.get();
         let Self { layout, encoders, rates, lanes, mono, pcm16, errors, .. } = self;
         for ((slot, enc), rate) in layout.channels.iter().zip(encoders.iter_mut()).zip(rates.iter_mut()) {
             let [l, r, rl, rr] = &*lanes;
-            let source = if all_mono { ChannelSource::Mono } else { slot.source };
+            let source = channels.source(slot.source, alone);
             let lane: &[f32] = match source {
                 ChannelSource::Left => l,
                 ChannelSource::Right => r,
@@ -655,7 +658,8 @@ impl LeEncoder {
                 sets: 0,
                 errors: 0,
                 clock: crate::EncodeClock::default(),
-                all_mono: Arc::new(AtomicBool::new(false)),
+                alone: Arc::new(AtomicBool::new(false)),
+                channels: crate::channels::ChannelsHandle::default(),
             },
             eq: None,
             eq_buf: Vec::new(),
@@ -682,16 +686,17 @@ impl LeEncoder {
         self
     }
 
-    /// The broadcast mixer of `handle` instead of the fixed downmix /
-    /// speaker matrix: its matrix, delays and polarity, followed while the
-    /// stream runs. After [`LeEncoder::with_channel_mask`].
+    /// The matrix mixer of `handle` (the broadcast's, the earbuds') instead
+    /// of the fixed downmix / speaker matrix: its matrix, delays and
+    /// polarity, followed while the stream runs. After
+    /// [`LeEncoder::with_channel_mask`].
     pub fn with_mixer(mut self, handle: crate::mix::MixHandle) -> LeEncoder {
         use crate::mix::Outputs;
         let speakers = matches!(self.mix, Mix::Speakers(_));
         let outputs = crate::mix::outputs_for(self.frame.layout.channels.iter().map(|c| c.source), speakers);
         let channels = usize::from(self.input.channels);
         tracing::info!(
-            "LE Audio: broadcast mixer: {channels} ch (mask 0x{:x}), {}",
+            "LE Audio: matrix mixer: {channels} ch (mask 0x{:x}), {}",
             self.mask,
             match outputs {
                 Outputs::Front => "2 outputs",
@@ -713,6 +718,19 @@ impl LeEncoder {
         self
     }
 
+    /// The device's channel settings of `handle` (swapped, what an earbud
+    /// alone plays), followed while the stream runs
+    pub fn with_channels(mut self, handle: crate::channels::ChannelsHandle) -> LeEncoder {
+        let c = handle.get();
+        tracing::info!(
+            "LE Audio: channels {}, an earbud alone plays {}",
+            if c.swap { "swapped" } else { "as they are" },
+            c.alone.key()
+        );
+        self.frame.channels = handle;
+        self
+    }
+
     /// The volume of `handle` applied to the audio (the broadcast's),
     /// followed while the stream runs
     pub fn with_gain(mut self, handle: crate::gain::GainHandle) -> LeEncoder {
@@ -725,10 +743,11 @@ impl LeEncoder {
         &self.frame.layout
     }
 
-    /// Turns every channel to the mono mix (true) or back to the plan's
-    /// channels; [`LePipeline::set_mono`] for a running pipeline
-    pub fn set_mono(&self, on: bool) {
-        self.frame.all_mono.store(on, Ordering::Relaxed);
+    /// An earbud is left alone (true: it plays what the channel settings
+    /// say for that) or not any more; [`LePipeline::set_alone`] for a
+    /// running pipeline
+    pub fn set_alone(&self, on: bool) {
+        self.frame.alone.store(on, Ordering::Relaxed);
     }
 
     /// SDU sets encoded so far
@@ -841,6 +860,9 @@ pub struct LePipelineConfig {
     pub media_eq: Option<crate::eq::EqHandle>,
     /// The broadcast's volume (Auracast); None: the audio as it comes
     pub gain: Option<crate::gain::GainHandle>,
+    /// The device's channel settings (a stream to a device); None: as
+    /// planned, an earbud alone gets the mono mix
+    pub channels: Option<crate::channels::ChannelsHandle>,
 }
 
 /// A running LE encode thread
@@ -848,7 +870,7 @@ pub struct LePipeline {
     control: Arc<Control>,
     thread: Option<JoinHandle<()>>,
     layout: SduLayout,
-    all_mono: Arc<AtomicBool>,
+    alone: Arc<AtomicBool>,
 }
 
 impl LePipeline {
@@ -859,7 +881,7 @@ impl LePipeline {
         sink: impl SduSink,
         stats: Arc<LinkStats>,
     ) -> Result<(LePipeline, CaptureInput), String> {
-        let LePipelineConfig { plan, input, channel_mask, mix, buffer, media_eq, gain } = config;
+        let LePipelineConfig { plan, input, channel_mask, mix, buffer, media_eq, gain, channels } = config;
         let mut encoder = LeEncoder::new(&plan, input)?.with_channel_mask(channel_mask);
         if let Some(h) = mix {
             encoder = encoder.with_mixer(h);
@@ -870,8 +892,11 @@ impl LePipeline {
         if let Some(h) = gain {
             encoder = encoder.with_gain(h);
         }
+        if let Some(h) = channels {
+            encoder = encoder.with_channels(h);
+        }
         let layout = encoder.layout().clone();
-        let all_mono = encoder.frame.all_mono.clone();
+        let alone = encoder.frame.alone.clone();
         let ring = buffer.ring_bytes(&input);
         tracing::debug!(
             "LE pipeline: start, buffer {buffer:?}: capture ring {ring} bytes ({} ms)",
@@ -894,18 +919,22 @@ impl LePipeline {
             control: control.clone(),
             frame_bytes: input.frame_bytes(),
         };
-        Ok((LePipeline { control, thread: Some(thread), layout, all_mono }, capture))
+        Ok((LePipeline { control, thread: Some(thread), layout, alone }, capture))
     }
 
     pub fn layout(&self) -> &SduLayout {
         &self.layout
     }
 
-    /// Every channel gets the mono mix (true: the other earbud of a set went
-    /// away) or the plan's channels again (false), from the next frame on
-    pub fn set_mono(&self, on: bool) {
-        if self.all_mono.swap(on, Ordering::Relaxed) != on {
-            tracing::info!("LE pipeline: {}", if on { "mono on every channel" } else { "the planned channels again" });
+    /// An earbud is left alone (true: the other one of its set went away;
+    /// it plays what the channel settings say for that) or not any more
+    /// (false), from the next frame on
+    pub fn set_alone(&self, on: bool) {
+        if self.alone.swap(on, Ordering::Relaxed) != on {
+            tracing::info!(
+                "LE pipeline: {}",
+                if on { "an earbud alone: its channel as set" } else { "the planned channels again" }
+            );
         }
     }
 
@@ -1169,7 +1198,7 @@ mod tests {
         let input = InputFormat { sample_rate: rate, channels: 2, sample: SampleType::F32 };
         let encode = |mono: bool| {
             let mut enc = LeEncoder::new(&p, input).unwrap();
-            enc.set_mono(mono);
+            enc.set_alone(mono);
             let sink = Collect::default();
             let pcm: Vec<f32> = (0..480).flat_map(|n| [(n as f32 * 0.13).sin() * 0.5, 0.0]).collect();
             enc.push(&f32_bytes(&pcm), &sink);
@@ -1456,6 +1485,7 @@ mod tests {
             buffer: BufferPreset::Standard,
             media_eq: None,
             gain: None,
+            channels: None,
         };
         let (pipeline, mut capture) = LePipeline::start(config, queue.clone(), stats.clone()).unwrap();
         assert_eq!(pipeline.layout().sdu_lens, vec![150]);
@@ -1481,6 +1511,7 @@ mod tests {
             buffer: BufferPreset::Standard,
             media_eq: None,
             gain: None,
+            channels: None,
         };
         assert!(LePipeline::start(config, queue, stats).is_err());
     }

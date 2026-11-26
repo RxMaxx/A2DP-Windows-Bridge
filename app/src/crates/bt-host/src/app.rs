@@ -2833,6 +2833,13 @@ impl App for HostApp {
         if packet_type != HCI_EVENT_PACKET {
             return;
         }
+        // The audio channels of hearing aids (ASHA)
+        if source == Source::L2capCbm {
+            if let Some(le) = self.le.as_mut() {
+                le.on_l2cap_cbm(stack, packet);
+            }
+            return;
+        }
         match source {
             Source::Hci => {
                 self.handle_hci(stack, packet);
@@ -2860,7 +2867,7 @@ impl App for HostApp {
                     self.hid.on_event(stack, packet)
                 }
             }
-            Source::Rfcomm | Source::Sco => {}
+            Source::Rfcomm | Source::Sco | Source::L2capCbm => {}
             Source::Avrcp | Source::AvrcpController | Source::AvrcpTarget => {
                 if event_type(packet) == Some(HCI_EVENT_AVRCP_META) {
                     self.handle_avrcp(stack, packet)

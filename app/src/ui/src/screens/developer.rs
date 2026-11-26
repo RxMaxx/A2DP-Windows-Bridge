@@ -1,5 +1,6 @@
 //! Developer (shown while developer mode is on): the chip tools (ChipTools),
-//! the peer receiver test, an Auracast broadcast (Auracast),
+//! the peer receiver test, an Auracast broadcast (Auracast), the earbuds'
+//! matrix mixer (Tws),
 //! overrides of the codec and the media path for finding out why a sink stays
 //! silent (issue #87; read when the next stream is set up), each saved
 //! device's max media packet size (issue #86), when vendors' own protocols
@@ -36,6 +37,7 @@ use crate::screens::auracast::Auracast;
 use crate::screens::chip_tools::ChipTools;
 use crate::screens::hid_host::HidSection;
 use crate::screens::receiver_test::ReceiverTest;
+use crate::screens::tws::Tws;
 use crate::theme;
 use crate::ui::{self, BannerKind, ButtonKind, Choice, IconName, icon};
 
@@ -45,6 +47,7 @@ enum Tab {
     App,
     Receiver,
     Auracast,
+    Tws,
     Overrides,
     Vendors,
     Logging,
@@ -66,12 +69,13 @@ enum Num {
     LeLatencyPToC,
     LeRtnCToP,
     LeRtnPToC,
+    LeBufferMargin,
     KeepDays,
     DayCap,
 }
 
 impl Num {
-    const ALL: [Num; 12] = [
+    const ALL: [Num; 13] = [
         Num::QueueWait,
         Num::AacBitrate,
         Num::MtkPad,
@@ -82,6 +86,7 @@ impl Num {
         Num::LeLatencyPToC,
         Num::LeRtnCToP,
         Num::LeRtnPToC,
+        Num::LeBufferMargin,
         Num::KeepDays,
         Num::DayCap,
     ];
@@ -100,6 +105,7 @@ impl Num {
             Num::LeLatencyPToC => zero_empty(d.le_latency_p_to_c_ms.into()),
             Num::LeRtnCToP => d.le_rtn_c_to_p.map_or_else(String::new, |n| n.to_string()),
             Num::LeRtnPToC => d.le_rtn_p_to_c.map_or_else(String::new, |n| n.to_string()),
+            Num::LeBufferMargin => d.le_buffer_margin.map_or_else(String::new, |n| n.to_string()),
             Num::KeepDays => l.keep_days.to_string(),
             Num::DayCap => l.day_cap_mb.to_string(),
         }
@@ -122,6 +128,8 @@ impl Num {
             Num::LeLatencyPToC => d.le_latency_p_to_c_ms = le(4000).unwrap_or(0) as u16,
             Num::LeRtnCToP => d.le_rtn_c_to_p = le(15).map(|n| n as u8),
             Num::LeRtnPToC => d.le_rtn_p_to_c = le(15).map(|n| n as u8),
+            // Empty: the core's own margin (3 frames)
+            Num::LeBufferMargin => d.le_buffer_margin = le(7).map(|n| n as u8),
             Num::KeepDays => l.keep_days = commit_keep_days(text, l.keep_days),
             Num::DayCap => l.day_cap_mb = commit_day_cap(text, l.day_cap_mb),
         }
@@ -134,6 +142,7 @@ impl Num {
             Num::MtkPad => Some("342".into()),
             Num::MtkQueue => Some("12".into()),
             Num::LeLatencyCToP | Num::LeLatencyPToC | Num::LeRtnCToP | Num::LeRtnPToC => Some(t("codec.auto")),
+            Num::LeBufferMargin => Some("3".into()),
             Num::MtkCommand | Num::MtkRegister | Num::KeepDays | Num::DayCap => None,
         }
     }
@@ -163,6 +172,7 @@ pub struct Developer {
     hid: Entity<HidSection>,
     receiver: Option<Entity<ReceiverTest>>,
     auracast: Option<Entity<Auracast>>,
+    tws: Option<Entity<Tws>>,
     chip: Option<Entity<ChipTools>>,
     keys_chosen: Option<String>,
     keys_busy: bool,
@@ -222,6 +232,7 @@ impl Developer {
             hid,
             receiver: None,
             auracast: None,
+            tws: None,
             chip: None,
             keys_chosen: None,
             keys_busy: false,
@@ -271,6 +282,7 @@ impl Developer {
         // A tab's part lives while it is shown
         self.receiver = (tab == Tab::Receiver).then(|| cx.new(|cx| ReceiverTest::new(window, cx)));
         self.auracast = (tab == Tab::Auracast).then(|| cx.new(|cx| Auracast::new(window, cx)));
+        self.tws = (tab == Tab::Tws).then(|| cx.new(|cx| Tws::new(window, cx)));
         self.chip = (tab == Tab::Chip).then(|| cx.new(|cx| ChipTools::new(window, cx)));
         cx.notify();
     }
@@ -862,6 +874,22 @@ impl Developer {
                         |s, v| s.dev_debug.le_interleaved = v,
                         cx,
                     ))
+                    .child(self.num_field(
+                        Num::LeBufferMargin,
+                        "ui.dev.le_buffer_margin",
+                        Some("ui.dev.le_buffer_margin_hint"),
+                        false,
+                        cx,
+                    ))
+                    // On unless turned off: saved as le_realign_off
+                    .child(toggle(
+                        "dev-le-realign",
+                        "ui.dev.le_realign",
+                        !d.le_realign_off,
+                        false,
+                        |s, v| s.dev_debug.le_realign_off = !v,
+                        cx,
+                    ))
                     .child(ui::field(
                         t("ui.dev.le_mic_preset"),
                         None,
@@ -1023,6 +1051,7 @@ impl Render for Developer {
             Choice::new(Tab::Logging, t("ui.dev.logging")).icon(IconName::Record),
             Choice::new(Tab::Receiver, t("receiver.title")).icon(IconName::Beaker),
             Choice::new(Tab::Auracast, t("ui.dev.auracast")).icon(IconName::Pulse),
+            Choice::new(Tab::Tws, t("ui.dev.tws")).icon(IconName::Headphones),
             Choice::new(Tab::Chip, t("ui.dev.chip")).icon(IconName::UsbStick),
             Choice::new(Tab::Debug, t("ui.dev.debug")).icon(IconName::Layer),
         ];
@@ -1033,6 +1062,7 @@ impl Render for Developer {
             Tab::Logging => self.logging_tab(&snap, cx).into_any_element(),
             Tab::Receiver => self.receiver.clone().map_or_else(|| div().into_any_element(), |r| r.into_any_element()),
             Tab::Auracast => self.auracast.clone().map_or_else(|| div().into_any_element(), |a| a.into_any_element()),
+            Tab::Tws => self.tws.clone().map_or_else(|| div().into_any_element(), |m| m.into_any_element()),
             Tab::Chip => self.chip.clone().map_or_else(|| div().into_any_element(), |c| c.into_any_element()),
             Tab::Debug => self.debug_tab(&snap, cx).into_any_element(),
         };

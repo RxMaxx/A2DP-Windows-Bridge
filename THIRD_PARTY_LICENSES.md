@@ -34,6 +34,7 @@ repository. The Rust crates are pinned in `Cargo.lock`.
 | aptx-adaptive (AKS-Logic/aptx-adaptive-linux, vendored) | upstream commit `25099004b2d3` (2026-10-22), crate 0.1.0 | MIT | Prateek Mittal (AKS-Logic) | aptX Adaptive encoding (experimental), §19 | `bluecaster-core.exe` |
 | HFreebuds (protocol description, packet cutting and test vectors) | commit `dab1f7e` | MIT | N2K02 | Huawei earbuds' sound quality mode (`app/src/crates/core/src/vendor/huawei.rs`), §20 | `bluecaster-core.exe` |
 | LHDC-Switch (protocol use, packet cutting and test vector) | commit `b33a758` | MIT | LHDC Switch contributors | OPPO earbuds' Hi-Res mode (`app/src/crates/core/src/vendor/oppo.rs`), §21 | `bluecaster-core.exe` |
+| SpanDSP G.722 encoder, ported to Rust | `g722_encode.c` 1.14 (2006) | Public domain | Steve Underwood; CMU (Chengxiang Lu, Alex Hauptmann) | G.722 encoding for ASHA hearing aids (proof of concept, `app/src/crates/codec/src/g722.rs`), §23 | `bluecaster-core.exe` |
 | Rust crates (GPUI, tokio, serde, windows, nusb, wasapi, tray-icon, ...) | `Cargo.lock` | Apache-2.0, MIT and other permissive licenses; MPL-2.0 for one (§9) | their authors | Everything written in Rust that is not BlueCaster's own | all three programs |
 | Fluent UI System Icons | as copied into `app/src/ui/src/ui/icons.rs` | MIT | Microsoft Corporation | Icons of the window | `bluecaster.exe` |
 | Lucide icons (bundled in the `gpui-kit-assets` crate) | Lucide 1.43.0, as in `gpui-kit-assets` 0.11.0 | ISC; the icons derived from Feather also MIT | Lucide Icons and Contributors; Cole Bemis (Feather) | Icons of the window's standard controls (§10) | `bluecaster.exe` |
@@ -984,6 +985,23 @@ and stay under **Apache-2.0** only, not the project's `Apache-2.0 OR MIT`
 Each keeps its copyright and `SPDX-License-Identifier: Apache-2.0` header
 where the original has one, and `src/bt_hci_iso.c` states what was changed
 (Apache-2.0 §4(b)). The Apache-2.0 text is in `LICENSE-APACHE`.
+
+---
+
+## 23. SpanDSP G.722 encoder (ported to Rust)
+
+- **Source**: `g722_encode.c` of SpanDSP (revision 1.14, 2006), ported to Rust in
+  `app/src/crates/codec/src/g722.rs`. `tools/emu/g722.py` is a decoder written
+  after the same code, for the emulator checks only.
+- **License**: Public domain. The file's header says: "I place my own
+  contributions to this code in the public domain for the benefit of all
+  mankind". It is based on a G.722 codec of Carnegie Mellon University
+  (Computer Science, Speech Group; Chengxiang Lu and Alex Hauptmann, 1993).
+- **Authors**: Steve Underwood; Chengxiang Lu and Alex Hauptmann
+- **Usage**: G.722 at 64 kbit/s for ASHA hearing aids (proof of concept,
+  command line only)
+
+No obligations. The authors are named here and in the source file.
 
 ---
 

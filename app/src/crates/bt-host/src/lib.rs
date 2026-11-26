@@ -57,12 +57,18 @@ pub use capture::HciCapture;
 pub use events::{addr_str, parse_addr};
 pub use hid::{HidConfig, HidCounters, HidEvent, Passkey};
 pub use le::api::{LE_NO_ANSWER, LE_NO_LINK};
-pub use le::bap::{CigOverrides, set_cig_overrides};
+pub use le::bap::{CigOverrides, set_buffer_margin, set_cig_overrides, set_realign_off};
 pub use le::gatt_cache as le_gatt_cache;
 pub use le::gatt_client::{GattChar as LeGattChar, GattService as LeGattService};
 pub use le::iso_recv::{
     ISO_STATUS_LOST, ISO_STATUS_POSSIBLY_INVALID, ISO_STATUS_VALID, LeRxHandle, LeRxStats, LeRxStream, MAX_RX_SDU,
     RxSdu,
+};
+pub use le::modules::asha::{
+    AshaSink, SDU_BYTES as ASHA_SDU_BYTES, UUID_AUDIO_CONTROL_POINT as ASHA_AUDIO_CONTROL_POINT,
+    UUID_AUDIO_STATUS as ASHA_AUDIO_STATUS, UUID_LE_PSM_OUT as ASHA_LE_PSM_OUT,
+    UUID_READ_ONLY_PROPERTIES as ASHA_READ_ONLY_PROPERTIES, UUID_SERVICE_ASHA as ASHA_SERVICE,
+    UUID_VOLUME as ASHA_VOLUME,
 };
 pub use le::modules::csip::{forget_stored_file as le_forget_stored_sirk, stored_sets as le_stored_sets};
 pub use le::{

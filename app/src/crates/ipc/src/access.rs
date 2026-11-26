@@ -81,6 +81,10 @@ pub fn access(m: &Method) -> Access {
         | Method::AuracastMixSet { .. }
         | Method::AuracastMixPresetSave { .. }
         | Method::AuracastMixPresetDelete { .. }
+        | Method::TwsMixGet { .. }
+        | Method::TwsMixSet { .. }
+        | Method::TwsMixPresetSave { .. }
+        | Method::TwsMixPresetDelete { .. }
         | Method::AuracastSetSource { .. }
         | Method::AuracastSetFollowVolume { .. }
         | Method::AuracastFollowVolume

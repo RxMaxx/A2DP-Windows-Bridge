@@ -349,6 +349,8 @@ pub fn effective_matrix(channels: usize, mask: u32, outputs: Outputs, s: &MixSet
 struct Shared {
     version: AtomicU64,
     settings: Mutex<MixSettings>,
+    /// For the log: "Auracast mixer", "TWS mixer"
+    name: &'static str,
 }
 
 /// The mixer settings of the broadcast running, shared by the control side
@@ -358,7 +360,7 @@ pub struct MixHandle(Arc<Shared>);
 
 impl Default for MixHandle {
     fn default() -> Self {
-        MixHandle(Arc::new(Shared { version: AtomicU64::new(0), settings: Mutex::new(MixSettings::default()) }))
+        MixHandle::named("Auracast mixer")
     }
 }
 
@@ -369,6 +371,16 @@ impl std::fmt::Debug for MixHandle {
 }
 
 impl MixHandle {
+    /// Default settings, logged as `name`
+    pub fn named(name: &'static str) -> MixHandle {
+        MixHandle(Arc::new(Shared { version: AtomicU64::new(0), settings: Mutex::new(MixSettings::default()), name }))
+    }
+
+    /// The name it is logged with
+    pub fn name(&self) -> &'static str {
+        self.0.name
+    }
+
     /// New settings (held to the ranges): the encode thread takes them from
     /// its next block
     pub fn set(&self, settings: MixSettings) {
@@ -428,7 +440,7 @@ impl Mixer {
         let cap = (f64::from(MAX_DELAY_MS) / 1000.0 * f64::from(rate.max(1))).ceil() as usize + 2;
         let unused = unused_speakers(channels, mask);
         if unused != 0 {
-            tracing::warn!("Auracast mixer: no column for the source's speakers 0x{unused:x}, they are not heard");
+            tracing::warn!("{}: no column for the source's speakers 0x{unused:x}, they are not heard", handle.name());
         }
         let mut m = Mixer {
             handle,
@@ -471,7 +483,8 @@ impl Mixer {
         }
         self.set_crossover(&s);
         tracing::debug!(
-            "Auracast mixer: {} matrix {:?}, delays {:?} ms, inverted {:?}{}",
+            "{}: {} matrix {:?}, delays {:?} ms, inverted {:?}{}",
+            self.handle.name(),
             if s.auto { "auto" } else { "manual" },
             m,
             s.delay_ms,

@@ -29,4 +29,9 @@ dropped: number,
  * The jitter buffer's prefill (frames buffered before sending starts;
  * 3, growing to 7 after underruns)
  */
-prefill: number, };
+prefill: number, 
+/**
+ * The largest transport latency of the stream's CIS (to the device),
+ * us; None while not known, for a broadcast and from an older core
+ */
+transport_latency_us?: number | null, };

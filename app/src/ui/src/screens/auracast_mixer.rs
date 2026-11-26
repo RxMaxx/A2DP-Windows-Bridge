@@ -1,8 +1,10 @@
-//! The Auracast matrix mixer (Developer screen, under the broadcast form):
-//! which source speakers (columns FL FR FC LFE BL BR SL SR) make each output
-//! (rows FL FR RL RR), plus a delay and polarity per output. Automatic from
-//! three levels, or each gain by hand; named presets. Every change is saved
-//! (auracast.mix_set) and, while a broadcast runs, heard at once.
+//! The matrix mixers (Developer screen): which source speakers (columns FL
+//! FR FC LFE BL BR SL SR) make each output, plus a delay and polarity per
+//! output. Automatic from three levels, or each gain by hand; named presets.
+//! Auracast's (under the broadcast form, rows FL FR RL RR, auracast.*) and
+//! the earbuds' of an LE Audio stream to a device (the TWS tab, rows FL FR,
+//! tws.*: used once turned on, from the next connection). Every change is
+//! saved and, while a stream runs with the mixer, heard at once.
 
 use std::time::Duration;
 
@@ -36,7 +38,17 @@ enum MixField {
     Surround,
 }
 
+/// Whose mixer
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MixTarget {
+    /// A broadcast's, four outputs
+    Auracast,
+    /// An LE Audio stream to a device's, two outputs
+    Tws,
+}
+
 pub struct AuracastMixer {
+    target: MixTarget,
     state: Option<AuracastMixState>,
     unit: Unit,
     preset: String,
@@ -58,7 +70,12 @@ fn new_input(window: &mut Window, cx: &mut Context<AuracastMixer>) -> Entity<Inp
 }
 
 impl AuracastMixer {
+    /// Auracast's mixer
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> AuracastMixer {
+        Self::new_for(MixTarget::Auracast, window, cx)
+    }
+
+    pub fn new_for(target: MixTarget, window: &mut Window, cx: &mut Context<Self>) -> AuracastMixer {
         let preset_name = cx.new(|cx| InputState::new(window, cx).placeholder(t("ui.dev.auracast_mix_preset_name")));
         let mut subs = vec![cx.subscribe_in(&preset_name, window, |_, _, ev: &InputEvent, _, cx| {
             if matches!(ev, InputEvent::Change) {
@@ -81,6 +98,7 @@ impl AuracastMixer {
             fields.push((kind, input));
         }
         AuracastMixer {
+            target,
             state: None,
             unit: Unit::Ms,
             preset: String::new(),
@@ -112,15 +130,37 @@ impl AuracastMixer {
     }
 
     /// The broadcast's rear and 2.1
-    fn outputs(&self) -> Option<(bool, AuracastSub)> {
+    fn layout(&self) -> Option<(bool, AuracastSub)> {
         self.props.map(|(rear, sub, _)| (rear, sub))
     }
 
+    fn tws(&self) -> bool {
+        self.target == MixTarget::Tws
+    }
+
+    /// The output rows shown: the earbuds' two, a broadcast's four, named
+    /// after its layout
+    fn output_names(&self, sub: AuracastSub) -> Vec<&'static str> {
+        let all = output_names(sub);
+        if self.tws() { all[..2].to_vec() } else { all.to_vec() }
+    }
+
+    fn get_method(&self, rear: bool, sub: AuracastSub) -> Method {
+        match self.target {
+            MixTarget::Auracast => Method::AuracastMixGet { channels: None, rear: Some(rear), sub: Some(sub) },
+            MixTarget::Tws => Method::TwsMixGet { channels: None },
+        }
+    }
+
+    fn set_method(&self, mix: AuracastMix, (rear, sub): (bool, AuracastSub), enabled: Option<bool>) -> Method {
+        match self.target {
+            MixTarget::Auracast => Method::AuracastMixSet { mix, channels: None, rear: Some(rear), sub: Some(sub) },
+            MixTarget::Tws => Method::TwsMixSet { mix, enabled, channels: None },
+        }
+    }
+
     fn load(&mut self, rear: bool, sub: AuracastSub, window: &mut Window, cx: &mut Context<Self>) {
-        let task = app::request::<AuracastMixState>(
-            Method::AuracastMixGet { channels: None, rear: Some(rear), sub: Some(sub) },
-            cx,
-        );
+        let task = app::request::<AuracastMixState>(self.get_method(rear, sub), cx);
         cx.spawn_in(window, async move |this: WeakEntity<Self>, cx: &mut AsyncWindowContext| {
             let Ok(st) = task.await else { return };
             let _ = this.update_in(cx, |this, window, cx| this.take(st, window, cx));
@@ -225,24 +265,17 @@ impl AuracastMixer {
     }
 
     fn change(&mut self, mix: AuracastMix, window: &mut Window, cx: &mut Context<Self>) {
-        let outputs = self.outputs();
-        let (Some(st), Some((rear, sub))) = (self.state.as_mut(), outputs) else { return };
+        let layout = self.layout();
+        let (Some(st), Some(layout)) = (self.state.as_mut(), layout) else { return };
         st.mix = mix.clone();
         self.edits += 1;
         let n = self.edits;
         self.sync_fields(window, cx);
         cx.notify();
+        let method = self.set_method(mix, layout, None);
         self.timer = Some(cx.spawn_in(window, async move |this: WeakEntity<Self>, cx: &mut AsyncWindowContext| {
             cx.background_executor().timer(Duration::from_millis(MIX_SEND_MS)).await;
-            let Ok(task) = this.update(cx, |_, cx| {
-                app::run(
-                    app::request::<AuracastMixState>(
-                        Method::AuracastMixSet { mix, channels: None, rear: Some(rear), sub: Some(sub) },
-                        cx,
-                    ),
-                    cx,
-                )
-            }) else {
+            let Ok(task) = this.update(cx, |_, cx| app::run(app::request::<AuracastMixState>(method, cx), cx)) else {
                 return;
             };
             let Some(r) = task.await else { return };
@@ -252,6 +285,29 @@ impl AuracastMixer {
                 }
             });
         }));
+    }
+
+    /// TWS: turned on or off, from the next connection (a change on its way
+    /// goes with it)
+    fn set_enabled(&mut self, on: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(mix), Some(layout)) = (self.mix().cloned(), self.layout()) else { return };
+        self.timer = None;
+        self.edits += 1;
+        let n = self.edits;
+        if let Some(st) = self.state.as_mut() {
+            st.enabled = on;
+        }
+        cx.notify();
+        let task = app::run(app::request::<AuracastMixState>(self.set_method(mix, layout, Some(on)), cx), cx);
+        cx.spawn_in(window, async move |this: WeakEntity<Self>, cx: &mut AsyncWindowContext| {
+            let Some(r) = task.await else { return };
+            let _ = this.update_in(cx, |this, window, cx| {
+                if n == this.edits {
+                    this.take(r, window, cx);
+                }
+            });
+        })
+        .detach();
     }
 
     /// By hand, starting from the matrix that plays
@@ -275,13 +331,11 @@ impl AuracastMixer {
     fn save_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(mix) = self.mix().cloned() else { return };
         let name = self.preset_name.read(cx).value().trim().to_owned();
-        let task = app::run(
-            app::request::<AuracastMixState>(
-                Method::AuracastMixPresetSave { name: name.clone(), mix: mix.clone() },
-                cx,
-            ),
-            cx,
-        );
+        let method = match self.target {
+            MixTarget::Auracast => Method::AuracastMixPresetSave { name: name.clone(), mix: mix.clone() },
+            MixTarget::Tws => Method::TwsMixPresetSave { name: name.clone(), mix: mix.clone() },
+        };
+        let task = app::run(app::request::<AuracastMixState>(method, cx), cx);
         cx.spawn_in(window, async move |this: WeakEntity<Self>, cx: &mut AsyncWindowContext| {
             let Some(r) = task.await else { return };
             let _ = this.update_in(cx, |this, window, cx| {
@@ -295,7 +349,11 @@ impl AuracastMixer {
     fn delete_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(mix) = self.mix().cloned() else { return };
         let name = self.preset.clone();
-        let task = app::run(app::request::<AuracastMixState>(Method::AuracastMixPresetDelete { name }, cx), cx);
+        let method = match self.target {
+            MixTarget::Auracast => Method::AuracastMixPresetDelete { name },
+            MixTarget::Tws => Method::TwsMixPresetDelete { name },
+        };
+        let task = app::run(app::request::<AuracastMixState>(method, cx), cx);
         cx.spawn_in(window, async move |this: WeakEntity<Self>, cx: &mut AsyncWindowContext| {
             let Some(r) = task.await else { return };
             let _ = this.update_in(cx, |this, window, cx| {
@@ -416,7 +474,7 @@ impl AuracastMixer {
             d.w(px(64.)).flex_none()
         }
         let head_cell = |text: SharedString| gain_col(div()).text_center().text_color(p.text_2).child(text);
-        let output_names = output_names(st.sub);
+        let output_names = self.output_names(st.sub);
         let grid = div()
             .flex()
             .flex_col()
@@ -531,9 +589,29 @@ impl AuracastMixer {
             }),
             cx,
         );
-        let section = ui::section(t("ui.dev.auracast_mix"), None, cx)
+        let tws = self.tws();
+        let live_hint = match (tws, st.live) {
+            (false, true) => t("ui.dev.auracast_mix_live"),
+            (false, false) => t("ui.dev.auracast_mix_next"),
+            (true, true) => t("ui.dev.tws_mix_live"),
+            (true, false) => t("ui.dev.tws_mix_next"),
+        };
+        let enabled_row = tws.then(|| {
+            ui::toggle(
+                "mix-enabled",
+                t("ui.dev.tws_mix_enabled"),
+                Some(t("ui.dev.tws_mix_enabled_hint").into()),
+                st.enabled,
+                false,
+                cx.listener(|this, v: &bool, window, cx| this.set_enabled(*v, window, cx)),
+                cx,
+            )
+        });
+        let title = if tws { t("ui.dev.tws_mix") } else { t("ui.dev.auracast_mix") };
+        let section = ui::section(title, None, cx)
             .children(children)
-            .child(ui::hint(if st.live { t("ui.dev.auracast_mix_live") } else { t("ui.dev.auracast_mix_next") }, cx))
+            .children(enabled_row)
+            .child(ui::hint(live_hint, cx))
             .child(ui::row().child(div().child(t("ui.dev.auracast_mix_preset"))).child(preset_select))
             .child(
                 ui::row()
@@ -580,7 +658,7 @@ impl AuracastMixer {
             })
             .child(div().id("mix-scroll").overflow_x_scroll().py(theme::S2).child(grid))
             .when(st.sub != AuracastSub::None, |d| d.child(self.crossover_rows(mix, cx)))
-            .when(!st.rear, |d| d.child(ui::hint(t("ui.dev.auracast_mix_no_rear"), cx)))
+            .when(!st.rear && !tws, |d| d.child(ui::hint(t("ui.dev.auracast_mix_no_rear"), cx)))
             .child(
                 ui::row()
                     .child(
