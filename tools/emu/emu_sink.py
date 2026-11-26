@@ -243,6 +243,19 @@ class EmuController(Controller):
             self.inquiry_task = None
         return hci.HCI_StatusReturnParameters(hci.HCI_ErrorCode.SUCCESS)
 
+    def on_hci_le_connection_update_command(self, command):
+        # Taken as asked (Bumble's controller has no such command): the host
+        # gets LE Connection Update Complete with its own values. ASHA asks
+        # for a 20 ms interval before it streams.
+        print(f'le connection update interval={command.connection_interval_max} '
+              f'latency={command.max_latency} timeout={command.supervision_timeout}', flush=True)
+        self._send_hci_command_status(hci.HCI_COMMAND_STATUS_PENDING, command.op_code)
+        self.send_hci_packet(hci.HCI_LE_Connection_Update_Complete_Event(
+            status=hci.HCI_ErrorCode.SUCCESS, connection_handle=command.connection_handle,
+            connection_interval=command.connection_interval_max, peripheral_latency=command.max_latency,
+            supervision_timeout=command.supervision_timeout))
+        return None
+
     # Called for the first Create Connection, which is refused with ACL
     # Connection Already Exists: the peer pages this controller at that
     # moment (--crossed-page)
@@ -661,7 +674,7 @@ def refuse_dual_channel(sink):
 
 async def main(args):
     link = LocalLink()
-    if args.le_link_key:
+    if args.le_link_key or args.asha:
         # LE data from the address the connection uses (BTstack connects with
         # its public one), as for the LE Audio sinks
         from le_audio.controller import LeLocalLink
@@ -680,7 +693,7 @@ async def main(args):
     )
     bluecaster_controller.disconnect_delay = args.disconnect_delay
     bluecaster_controller.silent_remote_version = args.silent_remote_version
-    if args.dual_mode:
+    if args.dual_mode or args.asha:
         bluecaster_controller.lmp_features = DUAL_MODE_FEATURES
     sink_controller = controller_class('SINK', link=link, public_address=SINK_ADDRESS)
     if args.hfp:
@@ -963,6 +976,11 @@ async def main(args):
             await device.connect(BLUECASTER_ADDRESS, transport=BT_BR_EDR_TRANSPORT)
             print('paged the PC', flush=True)
         bluecaster_controller.crossed_page = lambda: asyncio.ensure_future(page_the_pc())
+    if args.asha:
+        # A hearing aid beside the A2DP sink (bimodal): its lines start
+        # with 'asha:' (emu_asha.py)
+        import emu_asha
+        await emu_asha.start_aids(link, [args.asha], args.asha_out)
     print(f'READY 127.0.0.1:{args.port} sink={SINK_ADDRESS}', flush=True)
     await asyncio.get_running_loop().create_future()
 
@@ -972,6 +990,10 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=9001, help='TCP port for BlueCaster (H4)')
     parser.add_argument('--capture', help='PacketLogger capture of the sink HCI traffic')
     parser.add_argument('--log-level', default='WARNING')
+    parser.add_argument('--asha', choices=['left', 'right'],
+                        help='an ASHA hearing aid of this side on the same link (emu_asha.py), for bimodal '
+                             "streaming; BlueCaster's controller is dual mode then")
+    parser.add_argument('--asha-out', metavar='BASE', help='with --asha: the received G.722 to BASE-<side>.g722')
     parser.add_argument('--turn-off-after', type=float, metavar='S',
                         help='S seconds after the first connection, end the link as when turned off, then page BlueCaster')
     parser.add_argument('--opens-a2dp', action='store_true', help='with --turn-off-after, open A2DP after paging')

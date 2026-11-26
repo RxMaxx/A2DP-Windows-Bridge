@@ -2826,6 +2826,13 @@ impl LeCore {
         }
     }
 
+    /// Events of the LE credit based channels (ASHA)
+    pub(crate) fn on_l2cap_cbm(&mut self, stack: &Stack, packet: &[u8]) {
+        if self.initialized {
+            self.run(stack, |ctx| super::modules::asha::AshaModule::on_packet(ctx, packet));
+        }
+    }
+
     pub(crate) fn on_sm(&mut self, stack: &Stack, packet: &[u8]) {
         if self.initialized {
             self.run(stack, |ctx| ctx.on_sm(packet));

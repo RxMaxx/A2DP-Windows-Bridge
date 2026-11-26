@@ -522,16 +522,19 @@ pub enum StreamState {
 struct SharedInput(Arc<Mutex<CaptureInput>>);
 
 impl Sink for SharedInput {
-    fn audio(&mut self, data: &[u8], _frames: usize, _format: Format) {
+    fn audio(&mut self, data: &[u8], _frames: usize, format: Format) {
         if let Ok(mut input) = self.0.try_lock() {
             input.push(data);
         }
+        // Hearing aids beside this stream (bimodal, a proof of concept)
+        crate::asha::tap_audio(data, format);
     }
 
-    fn silence(&mut self, frames: usize, _format: Format) {
+    fn silence(&mut self, frames: usize, format: Format) {
         if let Ok(mut input) = self.0.try_lock() {
             input.push_silence(frames);
         }
+        crate::asha::tap_silence(frames, format);
     }
 
     fn discontinuity(&mut self, lost_frames: Option<u64>) {
