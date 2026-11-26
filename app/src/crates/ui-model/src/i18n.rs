@@ -62,6 +62,25 @@ pub fn lang() -> &'static str {
     CURRENT.read().unwrap_or_else(|e| e.into_inner()).code
 }
 
+/// A label with the colon its language puts after it: a full-width one in
+/// Chinese, a space before it in French
+pub fn with_colon(label: &str) -> String {
+    match lang() {
+        "zh-CN" | "zh-TW" => format!("{label}\u{ff1a}"),
+        "fr" => format!("{label} :"),
+        _ => format!("{label}:"),
+    }
+}
+
+/// "<label>: <value>" as the language writes it ([`with_colon`]; no space
+/// after a full-width colon)
+pub fn labelled(label: &str, value: &str) -> String {
+    match lang() {
+        "zh-CN" | "zh-TW" => format!("{label}\u{ff1a}{value}"),
+        _ => format!("{} {value}", with_colon(label)),
+    }
+}
+
 /// The language of `code` (unknown codes: English)
 fn resolve(code: &str) -> Current {
     let known = LANGUAGES.iter().find(|(c, _)| *c == code).map(|(c, _)| *c);

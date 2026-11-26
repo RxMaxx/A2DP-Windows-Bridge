@@ -210,8 +210,7 @@ impl MicProcessingControls {
         let pal = *cx.palette();
         let dim = |on: gpui_kit::Hsla| if disabled { pal.disabled_text } else { on };
         let label = which.label();
-        ui::row()
-            .py(theme::S2)
+        ui::setting_row(cx)
             .child(
                 div()
                     .flex()

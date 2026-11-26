@@ -161,3 +161,26 @@ fn add_saves_the_typed_address_and_empties_the_field(cx: &mut TestAppContext) {
     assert_eq!(saved["device_address"], "AA:BB:CC:DD:EE:01");
     assert_eq!(cx.read(|cx| picker.read(cx).manual.read(cx).value().to_string()), "");
 }
+
+#[gpui_kit::test]
+fn adding_an_le_audio_device_saves_it(cx: &mut TestAppContext) {
+    // Add on an LE Audio device skips Windows' pairings and went on while
+    // the picker was still being updated: the app stopped (a picker updated
+    // twice)
+    let mut s = snapshot();
+    s["devices"] =
+        json!([{"address": "0A:00:00:00:00:04", "name": "Buds", "saved": false, "audio": true, "le_audio": true}]);
+    s["settings"]["le_audio_experimental"] = json!(true);
+    s["settings"]["developer_mode"] = json!(true);
+    s["adapter"]["le_audio"] = json!(true);
+    let mut h = Harness::start(cx, s);
+    h.answer("audio.devices", Answer::Ok(json!([])));
+    h.answer("device.rename", Answer::Ok(serde_json::Value::Null));
+    h.answer("stream.start", Answer::Ok(serde_json::Value::Null));
+    let props = DevicePickerProps { manage: true, ..Default::default() };
+    let (w, _) = h.open_sized(cx, (1000., 1200.), |window, cx| cx.new(|cx| DevicePicker::new(props, window, cx)));
+    h.on(cx, w, |window, cx| window.click("add", cx));
+    h.settle(cx);
+    assert_eq!(h.calls("device.rename")[0]["address"], "0A:00:00:00:00:04");
+    assert!(h.calls("device.windows_paired").is_empty());
+}

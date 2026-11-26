@@ -360,6 +360,8 @@ impl Diagnostics {
         .on_click(cx.listener(|this, _, _, cx| this.toggle_capture(cx)));
         div()
             .flex()
+            // Actions too long for the title's line (German) go below it
+            .flex_wrap()
             .items_center()
             .gap(theme::S3)
             .min_h(px(36.))
@@ -396,7 +398,7 @@ impl Diagnostics {
         let verbose = self.core.read(cx).snap().and_then(|s| s.verbose);
         let choice = verbose_choice(verbose.as_ref());
         let saved = shared(cx).saved_bundle.clone();
-        let select = div().min_w(px(200.)).flex().justify_end().child(ui::select_labelled(
+        let select = div().flex_none().flex().justify_end().child(ui::select_labelled(
             "verbose",
             t("ui.diag.verbose"),
             &choice,
