@@ -49,12 +49,23 @@ pub const UUID_LE_PSM_OUT: [u8; 16] = uuid128(0x2d410339_82b6_42aa_b34e_e2e01df8
 pub const SDU_BYTES: usize = 161;
 /// SDUs waiting for one hearing aid (80 ms); the oldest goes when full
 const MAX_QUEUED: usize = 4;
-/// The connection interval ASHA streams with: 20 ms, in 1.25 ms units
-const INTERVAL_20_MS: u16 = 16;
-/// Connection events a hearing aid may skip while nothing is sent
+/// The connection interval ASHA streams G.722 at 16 kHz with: 20 ms, in
+/// 1.25 ms units
+pub const INTERVAL_20_MS: u16 = 16;
+/// The rest of the connection update as Android sends it: the connection
+/// events a hearing aid may skip while nothing is sent, a supervision
+/// timeout of 1 s (10 ms units) and a connection event length of 7.5 ms
+/// (0.625 ms units; the specification wants it non-zero)
 const LATENCY: u16 = 10;
-/// Supervision timeout: 2 s, in 10 ms units
-const SUPERVISION_TIMEOUT: u16 = 200;
+const SUPERVISION_TIMEOUT: u16 = 100;
+const CE_LENGTH: u16 = 12;
+/// Link layer PDUs that hold a whole audio SDU: 160 bytes of G.722, the
+/// sequence counter, the SDU length (2) and the L2CAP header (4)
+const DATA_LENGTH: u8 = 167;
+/// The connection update is asked for again this often while BTstack is
+/// busy with another command, this many times
+const UPDATE_RETRY_MS: u32 = 20;
+const UPDATE_TRIES: u32 = 50;
 
 const fn uuid128(v: u128) -> [u8; 16] {
     v.to_be_bytes()
@@ -223,6 +234,22 @@ impl LeModule for AshaModule {
     }
 }
 
+/// Asks for the connection parameters ASHA streams with, again a little
+/// later while BTstack is busy with another command
+fn update_connection(ctx: &mut LeCtx<'_>, device: LeDeviceId, con: u16, tries: u32) {
+    if ctx.device_on(device, con).is_none() {
+        return;
+    }
+    let status = ctx.stack().le_update_connection(con, INTERVAL_20_MS, LATENCY, SUPERVISION_TIMEOUT, CE_LENGTH);
+    match status {
+        0 => debug!("ASHA: device {device}: 20 ms connection interval asked for"),
+        btstack_sys::consts::BTSTACK_ACL_BUFFERS_FULL if tries > 1 => {
+            ctx.run_after(UPDATE_RETRY_MS, Box::new(move |ctx| update_connection(ctx, device, con, tries - 1)));
+        }
+        _ => warn!("ASHA: device {device}: the connection update was not sent (0x{status:02x})"),
+    }
+}
+
 pub fn create(setup: &mut LeModuleSetup) -> LeModuleEntry {
     LeModuleEntry {
         module: Box::new(AshaModule { poster: setup.poster.clone(), channels: BTreeMap::new() }),
@@ -231,9 +258,38 @@ pub fn create(setup: &mut LeModuleSetup) -> LeModuleEntry {
 }
 
 impl BtHost {
+    /// Sets the link of a connected hearing aid up as Android does once it
+    /// is connected: the 20 ms connection interval, the 2M PHY and link
+    /// layer PDUs long enough for an audio SDU. The link changes in the
+    /// background ([`BtHost::asha_link_interval`] tells when the interval
+    /// is there). False: not connected.
+    pub fn asha_prepare_link(&self, device: LeDeviceId) -> bool {
+        self.le_run(Duration::from_secs(3), move |ctx| {
+            let Some(con) = ctx.device(device).filter(|d| d.connected()).map(|d| d.acl) else { return false };
+            update_connection(ctx, device, con, UPDATE_TRIES);
+            // A controller without the 2M PHY refuses the command: the
+            // stream then runs on 1M, which carries it too
+            let phy = ctx.stack().le_prefer_2m_phy(con);
+            let length = ctx.stack().le_set_data_length(con, DATA_LENGTH);
+            debug!("ASHA: device {device}: 2M PHY asked for (0x{phy:02x}), data length {DATA_LENGTH} (0x{length:02x})");
+            true
+        })
+        .unwrap_or(false)
+    }
+
+    /// The connection interval of a connected hearing aid's link, in 1.25 ms
+    /// units ([`INTERVAL_20_MS`] once the update of
+    /// [`BtHost::asha_prepare_link`] took place)
+    pub fn asha_link_interval(&self, device: LeDeviceId) -> Option<u16> {
+        self.le_run(Duration::from_secs(3), move |ctx| {
+            let con = ctx.device(device).filter(|d| d.connected()).map(|d| d.acl)?;
+            ctx.stack().le_connection_interval(con)
+        })
+        .flatten()
+    }
+
     /// Opens the audio channel of a connected hearing aid on `psm` (its
-    /// LE_PSM_OUT) and asks for the 20 ms connection interval ASHA streams
-    /// with. Err: why, for the log.
+    /// LE_PSM_OUT). Err: why, for the log.
     pub fn asha_open(&self, device: LeDeviceId, psm: u16, timeout: Duration) -> Result<AshaSink, String> {
         let out = Arc::new(Mutex::new(None::<Result<AshaSink, String>>));
         let o = out.clone();
@@ -243,10 +299,6 @@ impl BtHost {
                 set(Err("not connected".into()));
                 return done(false);
             };
-            let status = ctx.stack().le_update_connection(con, INTERVAL_20_MS, LATENCY, SUPERVISION_TIMEOUT);
-            if status != 0 {
-                debug!("ASHA: device {device}: no connection update (0x{status:02x})");
-            }
             let cid = match ctx.stack().cbm_connect(con, psm) {
                 Ok(cid) => cid,
                 Err(status) => {

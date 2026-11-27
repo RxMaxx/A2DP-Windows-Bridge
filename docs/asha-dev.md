@@ -72,17 +72,30 @@ that is paired with a phone may need to be put in pairing mode.
 | Connecting, starting, stopping; the bimodal tap | `app/src/crates/core/src/asha.rs` |
 | `--asha` options | `app/src/core/src/cli.rs` |
 
-A stream is set up in this order:
+The steps follow Android's
+[ASHA specification](https://source.android.com/docs/core/connect/bluetooth/asha)
+and, where the specification leaves a choice, what Android itself sends:
 
 1. Connect and pair the hearing aid, then read its GATT services.
-2. Read ReadOnlyProperties (side, pair, HiSyncId, render delay, codecs) and
-   LE_PSM_OUT.
-3. Ask for a 20 ms connection interval and open the audio channel on that
-   PSM.
-4. Write Start to AudioControlPoint and wait for AudioStatus. Then tell each
-   side of a pair that the other side is connected.
-5. Send one SDU per hearing aid every 20 ms: a sequence counter byte and 160
-   bytes of G.722. Both sides of a pair use the same counter.
+2. Request the link parameters ASHA streams on: a 20 ms connection interval
+   (latency 10, supervision timeout 1 s, connection event length 7.5 ms),
+   the 2M PHY and 167-byte link layer packets. The changes take effect in
+   the background.
+3. Read ReadOnlyProperties (side, pair, HiSyncId, render delay, codecs) and
+   LE_PSM_OUT, and open the audio channel on that PSM.
+4. Wait for the 20 ms interval, then tell each hearing aid about the new
+   interval (status 2).
+5. Write Start to AudioControlPoint, one hearing aid after the other, and
+   wait for AudioStatus each time. Start carries the codec, audio type 0,
+   the volume, and whether the other side is already streaming. Then tell
+   the side that started first that the other side is connected (status 1).
+6. Send one SDU per hearing aid every 20 ms: a sequence counter byte and 160
+   bytes of G.722. Both sides of a pair use the same counter, which starts
+   at 0.
+
+A controller without the 2M PHY rejects the PHY request, and the stream runs
+on 1M. If the interval does not reach 20 ms within 3 seconds, BlueCaster
+logs a warning and starts anyway.
 
 Each hearing aid has a queue of four SDUs (80 ms). When a hearing aid cannot
 keep up, BlueCaster drops the oldest SDU, so the sound never falls behind.
@@ -107,8 +120,8 @@ each hearing aid received.
 
 - Real hearing aids. Expect differences in pairing, private addresses and
   connection parameters.
-- BlueCaster does not request the 2M PHY or the data length that ASHA
-  recommends. The stream uses the link's current settings.
+- Telling one side when the other side disconnects (status 0). The run ends
+  instead.
 - Reconnecting after a hearing aid disconnects. The run ends (hearing aids
   only) or the A2DP stream continues without the hearing aid (bimodal).
 - Volume changes while streaming.
