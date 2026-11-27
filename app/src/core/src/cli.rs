@@ -177,8 +177,8 @@ Keyboards and mice (experimental):
                         aid then plays its own side)
   --asha-delay <ms>     with --asha: delay the hearing aids by 0 to 500 ms,
                         to sync them with the A2DP device
-  --asha-volume <n>     with --asha: the hearing aids' volume, -128 (muted)
-                        to 0 (default -20)
+  --asha-volume <n>     with --asha and without -d: the hearing aids' volume,
+                        -128 (muted) to 0 (default -20)
   --hid-test <seconds>  start Bluetooth with keyboards and mice on and nothing
                         streamed, print their counts once a second for this
                         time and exit
@@ -333,12 +333,9 @@ struct AshaArgs {
     aids: Vec<String>,
     /// --asha-delay: how much later the hearing aids get the audio, ms
     delay_ms: u32,
-    /// --asha-volume: -128 (muted) to 0; None: [`ASHA_VOLUME`]
+    /// --asha-volume: -128 (muted) to 0; None: as the session starts them
     volume: Option<i8>,
 }
-
-/// The hearing aids' volume without --asha-volume
-const ASHA_VOLUME: i8 = -20;
 
 /// Keyboards and mice (experimental, issue #413) options
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -753,6 +750,9 @@ fn parse(args: &[String]) -> Result<Args, String> {
     if a.asha.aids.is_empty() && (a.asha.delay_ms != 0 || a.asha.volume.is_some()) {
         return Err("--asha-delay and --asha-volume need --asha".into());
     }
+    if a.asha.volume.is_some() && a.device.is_some() {
+        return Err("--asha-volume is for hearing aids alone (without -d)".into());
+    }
     if a.asha.aids.len() > 2 {
         return Err("--asha takes one hearing aid or both of a pair".into());
     }
@@ -922,14 +922,6 @@ pub fn run(args: &[String]) -> i32 {
         return code;
     }
 
-    if !a.asha.aids.is_empty() && a.device.is_none() {
-        // Hearing aids only (ASHA, a proof of concept)
-        let code = asha_run(&a, &service, &running);
-        service.shutdown();
-        capture.stop();
-        return code;
-    }
-
     if a.le.on {
         // LE Audio (experimental): its own flow (v1 le_audio_cli.cpp)
         let code = le_run(&a, &service, &running);
@@ -1019,6 +1011,12 @@ pub fn run(args: &[String]) -> i32 {
     // Bluetooth address as the device to stream to
     let receiver = bluecaster_core::receiver::ReceiverClient::new();
     let mut device_arg = a.device.clone();
+    // Hearing aids alone (ASHA, a proof of concept): the first one is the
+    // device; the session finds the other side of its pair itself
+    let aids_alone = device_arg.is_none() && !a.asha.aids.is_empty();
+    if aids_alone {
+        device_arg = a.asha.aids.first().cloned();
+    }
     if let Some(target) = &a.remote_sink {
         use bluecaster_core::receiver;
         let Some((host, port)) = receiver::split_target(target) else {
@@ -1133,6 +1131,11 @@ pub fn run(args: &[String]) -> i32 {
         mute_output: false,
         max_media_payload: a.max_packet,
         le: None,
+        asha: match a.asha.aids.first().and_then(|aid| parse_device_address(aid)) {
+            Some(_) if aids_alone => Some(bluecaster_core::stream::AshaRequest::Device),
+            Some(aid) => Some(bluecaster_core::stream::AshaRequest::Beside { aid, delay_ms: a.asha.delay_ms }),
+            None => None,
+        },
         headset_mic: if a.headset_mic_toggle.is_none() { a.headset_mic } else { HeadsetMic::Off },
         mic_output: a.mic_output.clone(),
         voice_codec: a.voice_codec,
@@ -1173,8 +1176,7 @@ pub fn run(args: &[String]) -> i32 {
             outln!("Connecting again (session {session} of {})", a.sessions);
         }
         if !a.asha.aids.is_empty() {
-            // Bimodal: the stack needs LE for the hearing aids beside the
-            // A2DP stream
+            // The stack needs Bluetooth LE for hearing aids
             service.set_le_audio_cli(bluecaster_core::LeCliOptions { mcp_dry_run: true, ..Default::default() });
         }
         service.start_streaming(request.clone());
@@ -1224,30 +1226,6 @@ fn stream_session(
     receiver: &bluecaster_core::receiver::ReceiverClient,
     code: &mut i32,
 ) -> bool {
-    if a.asha.aids.is_empty() {
-        return stream_session_events(a, service, rx, running, receiver, code, None);
-    }
-    // Bimodal: the hearing aids join once the A2DP stream runs, and leave
-    // before it is stopped
-    let (streaming, over) = (AtomicBool::new(false), AtomicBool::new(false));
-    std::thread::scope(|s| {
-        s.spawn(|| asha_beside_a2dp(a, service, &streaming, &over));
-        let reached = stream_session_events(a, service, rx, running, receiver, code, Some(&streaming));
-        over.store(true, Ordering::Release);
-        reached
-    })
-}
-
-/// [`stream_session`]'s event loop; `streaming` is set once the stream runs
-fn stream_session_events(
-    a: &Args,
-    service: &Service,
-    rx: &mpsc::Receiver<ServiceEvent>,
-    running: &AtomicBool,
-    receiver: &bluecaster_core::receiver::ReceiverClient,
-    code: &mut i32,
-    streaming: Option<&AtomicBool>,
-) -> bool {
     let mut streaming_since: Option<Instant> = None;
     let mut last_summary = Instant::now();
     // --headset-mic-toggle: the steps still to take
@@ -1285,8 +1263,11 @@ fn stream_session_events(
                 match state {
                     StreamState::Streaming if streaming_since.is_none() => {
                         streaming_since = Some(Instant::now());
-                        if let Some(s) = streaming {
-                            s.store(true, Ordering::Release);
+                        // --asha-volume: the hearing aids' volume, as the
+                        // slider sets it
+                        if let (Some(v), Some(host)) = (a.asha.volume, service.host()) {
+                            let set = host.le_request_volume(bt_host::asha_level_of_volume(v));
+                            outln!("Hearing aid volume {v}{}", if set { "" } else { " (not taken)" });
                         }
                         if a.services {
                             print_services(service, a.device.as_deref());
@@ -1343,181 +1324,6 @@ fn stream_session_events(
             Err(mpsc::RecvTimeoutError::Disconnected) => return false,
         }
     }
-}
-
-// ---- Hearing aids (ASHA, a proof of concept) ----
-
-/// How often the hearing aids' counts are printed
-const ASHA_STATS_EVERY: Duration = Duration::from_secs(5);
-
-/// Connects the hearing aids of --asha and starts them; None after printing
-/// why not. `own_side`: a single hearing aid plays its side only (bimodal).
-fn asha_start(
-    a: &Args,
-    host: &bt_host::BtHost,
-    own_side: bool,
-    keep_going: &dyn Fn() -> bool,
-) -> Option<bluecaster_core::asha::AshaStream> {
-    let until = Instant::now() + LE_READY_WAIT;
-    while !host.le_ready() && Instant::now() < until && keep_going() {
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    if !host.le_ready() {
-        eoutln!("ASHA: Bluetooth LE did not start (does the adapter support LE?)");
-        return None;
-    }
-    let mut aids = Vec::new();
-    for d in &a.asha.aids {
-        let address = parse_device_address(d)?;
-        match bluecaster_core::asha::connect(host, address) {
-            Ok(aid) => {
-                outln!(
-                    "ASHA: {d} connected: {} hearing aid{}, render delay {} ms",
-                    aid.side(),
-                    if aid.binaural { " of a pair" } else { "" },
-                    aid.render_delay_ms
-                );
-                aids.push(aid);
-            }
-            Err(e) => {
-                eoutln!("ASHA: cannot connect to {d}: {e}");
-                return None;
-            }
-        }
-    }
-    if let [first, second] = aids.as_slice()
-        && (first.hi_sync_id != second.hi_sync_id || first.right == second.right)
-    {
-        eoutln!("ASHA: the two hearing aids are not the left and right of the same pair");
-        return None;
-    }
-    let volume = a.asha.volume.unwrap_or(ASHA_VOLUME);
-    match bluecaster_core::asha::AshaStream::start(host, aids, volume, own_side, a.asha.delay_ms) {
-        Ok(stream) => {
-            outln!(
-                "ASHA: streaming to {} hearing aid(s): G.722 at 16 kHz, volume {volume}{}",
-                stream.aids().count(),
-                if stream.delay_ms > 0 { format!(", delayed {} ms", stream.delay_ms) } else { String::new() }
-            );
-            Some(stream)
-        }
-        Err(e) => {
-            eoutln!("ASHA: cannot stream: {e}");
-            None
-        }
-    }
-}
-
-/// --asha without -d: the hearing aids alone, until --duration or Ctrl+C;
-/// the process exit code
-fn asha_run(a: &Args, service: &Service, running: &Arc<AtomicBool>) -> i32 {
-    service.set_le_audio_cli(bluecaster_core::LeCliOptions { mcp_dry_run: true, ..Default::default() });
-    let is_running = || running.load(Ordering::Acquire);
-    outln!(
-        "\n[Hearing aids (ASHA), proof of concept] Initializing BTstack ({} transport)...",
-        if a.hci_tcp.is_none() { "WinUSB" } else { "H4 over TCP" }
-    );
-    let host = match service.ensure_host() {
-        Ok(h) => h,
-        Err(m) => {
-            tracing::error!("{m}");
-            eoutln!("Failed to initialize BTstack.");
-            return 1;
-        }
-    };
-    // Ctrl+C ends the blocking LE calls (find, connect)
-    {
-        let canceller = host.canceller();
-        let running = running.clone();
-        std::thread::Builder::new()
-            .name("asha-cancel".into())
-            .spawn(move || {
-                while running.load(Ordering::Acquire) {
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-                canceller.cancel();
-            })
-            .ok();
-    }
-    let Some(stream) = asha_start(a, &host, false, &is_running) else {
-        host.le_disconnect_all();
-        return 1;
-    };
-    let mut rc = 0;
-    let audio = match bluecaster_core::asha::AshaAudioPath::start(&le_source(a), &stream, host.stats().clone()) {
-        Ok(path) => {
-            let f = path.format();
-            outln!(
-                "Audio: {} {} Hz {} ch",
-                if a.test_tone { "test tone" } else { "WASAPI capture" },
-                f.sample_rate,
-                f.channels
-            );
-            Some(path)
-        }
-        Err(e) => {
-            tracing::error!("ASHA: audio: {e}");
-            eoutln!("Failed to start audio capture");
-            rc = 1;
-            None
-        }
-    };
-    let start = Instant::now();
-    let mut last_print = start;
-    while rc == 0 && is_running() {
-        std::thread::sleep(Duration::from_millis(100));
-        if let Some(d) = a.duration
-            && start.elapsed() >= Duration::from_secs(d)
-        {
-            outln!("\n--duration {d} s reached");
-            break;
-        }
-        if stream.lost() {
-            eoutln!("\nASHA: a hearing aid disconnected");
-            rc = 1;
-        }
-        if last_print.elapsed() >= ASHA_STATS_EVERY {
-            last_print = Instant::now();
-            outln!("ASHA: {}", stream.stats_line());
-        }
-    }
-    outln!("\nShutting down...");
-    if let Some(p) = audio {
-        p.stop();
-    }
-    std::thread::sleep(Duration::from_millis(100));
-    outln!("ASHA: {}", stream.stats_line());
-    stream.stop(&host);
-    host.le_disconnect_all();
-    outln!("Done.");
-    rc
-}
-
-/// Bimodal (--asha with -d): once the A2DP stream runs, the hearing aids
-/// are connected and hear its capture too, until `over`
-fn asha_beside_a2dp(a: &Args, service: &Service, streaming: &AtomicBool, over: &AtomicBool) {
-    let going = || !over.load(Ordering::Acquire);
-    while going() && !streaming.load(Ordering::Acquire) {
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    let Some(host) = service.host().filter(|_| going()) else { return };
-    outln!("ASHA: connecting {} hearing aid(s) alongside the A2DP stream...", a.asha.aids.len());
-    let Some(stream) = asha_start(a, &host, a.asha.aids.len() == 1, &going) else { return };
-    bluecaster_core::asha::set_tap(&stream);
-    let mut last_print = Instant::now();
-    while going() && !stream.lost() {
-        std::thread::sleep(Duration::from_millis(100));
-        if last_print.elapsed() >= ASHA_STATS_EVERY {
-            last_print = Instant::now();
-            outln!("ASHA: {}", stream.stats_line());
-        }
-    }
-    if stream.lost() {
-        eoutln!("ASHA: a hearing aid disconnected; the A2DP stream continues");
-    }
-    bluecaster_core::asha::clear_tap();
-    outln!("ASHA: {}", stream.stats_line());
-    stream.stop(&host);
 }
 
 /// The state --ipc serves ([`serve_ipc`])
@@ -2595,9 +2401,8 @@ mod tests {
         assert_eq!(a.asha.aids, ["00:A2:D0:00:00:22", "00:A2:D0:00:00:23"]);
         assert_eq!((a.asha.delay_ms, a.asha.volume, a.le.on), (0, None, false));
         assert!(a.device.is_none());
-        let a = parse(&args("--cli -d 00:A2:D0:00:00:02 --asha 00:A2:D0:00:00:23 --asha-delay 40 --asha-volume -128"))
-            .unwrap();
-        assert_eq!((a.asha.aids.len(), a.asha.delay_ms, a.asha.volume), (1, 40, Some(-128)));
+        let a = parse(&args("--cli -d 00:A2:D0:00:00:02 --asha 00:A2:D0:00:00:23 --asha-delay 40")).unwrap();
+        assert_eq!((a.asha.aids.len(), a.asha.delay_ms, a.asha.volume), (1, 40, None));
         assert!(a.device.is_some());
         // Repeated: the two of a pair
         let a = parse(&args("--cli --asha 00:A2:D0:00:00:22 --asha 00:A2:D0:00:00:23")).unwrap();
@@ -2605,6 +2410,7 @@ mod tests {
         for bad in [
             "--cli --asha-delay 40",
             "--cli --asha-volume -10",
+            "--cli -d 00:A2:D0:00:00:02 --asha 00:A2:D0:00:00:23 --asha-volume -10",
             "--cli --asha 00:A2:D0:00:00:22 --asha-delay 501",
             "--cli --asha 00:A2:D0:00:00:22 --asha-volume 1",
             "--cli --asha nonsense",

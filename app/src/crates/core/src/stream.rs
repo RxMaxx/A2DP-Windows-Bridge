@@ -74,6 +74,10 @@ pub struct StreamRequest {
     /// LE Audio (experimental) instead of A2DP: the le_stream session
     /// streams to `device` and these extra devices. None: A2DP.
     pub le: Option<bt_host::LeRequest>,
+    /// Hearing aids (ASHA, a proof of concept): `device` is one (the
+    /// asha_stream session), or one plays beside the A2DP stream to
+    /// `device`. None: no hearing aid.
+    pub asha: Option<AshaRequest>,
     /// Headset mode (developer mode, docs/headset-mic-dev.md): the
     /// headphones' microphone goes to `mic_output`. Classic devices switch
     /// to the HFP voice link once streaming ([`crate::voice`]); Auto: only
@@ -92,6 +96,16 @@ pub struct StreamRequest {
     /// What is done to the microphone (the profile's `mic_processing`);
     /// [`crate::Service::set_mic_processing`] changes it while streaming
     pub mic_processing: ipc::MicProcessing,
+}
+
+/// What a stream does with hearing aids ([`StreamRequest::asha`])
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AshaRequest {
+    /// The stream's device is a hearing aid, or one of a pair: both play
+    Device,
+    /// This hearing aid plays its own side beside the A2DP stream (bimodal),
+    /// this many milliseconds later
+    Beside { aid: [u8; 6], delay_ms: u32 },
 }
 
 /// The bitpools of a request ([`crate::profiles::Profile::bitpools`]; 0 = Auto)
@@ -2117,6 +2131,18 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
             })
         });
     headset.offer_codecs(&host);
+    // A hearing aid for the other ear (bimodal, a proof of concept): it
+    // joins on its own thread and hears this stream's capture
+    let beside = match req.asha {
+        Some(AshaRequest::Beside { aid, delay_ms }) if inner.le_wanted() => {
+            Some(crate::asha::Beside::start(host.clone(), aid, delay_ms))
+        }
+        Some(AshaRequest::Beside { .. }) => {
+            tracing::warn!("ASHA: Bluetooth LE is off, the hearing aid beside this stream is not used");
+            None
+        }
+        _ => None,
+    };
     while !stopped() {
         inner.wait_tick(Duration::from_millis(200));
         if stopped() {
@@ -2658,6 +2684,9 @@ pub(crate) fn run(inner: &Arc<Inner>, req: StreamRequest) {
         session_start.elapsed().as_secs(),
         stopped()
     );
+    if let Some(b) = beside {
+        b.stop();
+    }
     headset.end(inner, &host);
     health.finish(active.health());
     active.stop();
