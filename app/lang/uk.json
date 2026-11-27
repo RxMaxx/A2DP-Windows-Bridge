@@ -660,7 +660,7 @@
   "ui.dev.auracast_rx_stereo_two_mono": "1 стерео + 2 моно",
   "ui.dev.auracast_rx_two_stereo": "2 стерео",
   "ui.dev.auracast_rx_three_mono": "3 моно",
-  "ui.dev.auracast_rx_stereo_center": "Стерео + центр",
+  "ui.dev.auracast_rx_stereo_center": "1 стерео + 1 центр",
   "ui.dev.auracast_slot_front": "Фронт (стерео)",
   "ui.dev.auracast_slot_rear": "Тил (стерео)",
   "ui.dev.auracast_slot_stereo": "Стерео",

@@ -660,7 +660,7 @@
   "ui.dev.auracast_rx_stereo_two_mono": "1 個立體聲 + 2 個單聲道",
   "ui.dev.auracast_rx_two_stereo": "2 個立體聲",
   "ui.dev.auracast_rx_three_mono": "3 個單聲道",
-  "ui.dev.auracast_rx_stereo_center": "立體聲 + 中置",
+  "ui.dev.auracast_rx_stereo_center": "1 個立體聲 + 1 個中置",
   "ui.dev.auracast_slot_front": "前置 (立體聲)",
   "ui.dev.auracast_slot_rear": "後置 (立體聲)",
   "ui.dev.auracast_slot_stereo": "立體聲",

@@ -50,6 +50,8 @@ pub const CROSSOVER_MAX_HZ: f32 = 500.0;
 pub const CROSSOVER_DEFAULT_HZ: f32 = 80.0;
 /// The centre into both fronts (dB) unless set
 pub const CENTER_DEFAULT_DB: f32 = -3.0;
+/// The LFE into both fronts (dB) unless set
+pub const LFE_DEFAULT_DB: f32 = -6.0;
 
 /// What the four outputs (lanes) of a broadcast feed
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,7 +129,7 @@ pub struct MixSettings {
     pub auto: bool,
     /// Auto: the centre into both fronts (dB)
     pub center_db: f32,
-    /// Auto: the LFE into both fronts (dB)
+    /// Auto: the LFE into both fronts (dB); with a subwoofer, into it alone
     pub lfe_db: f32,
     /// Auto: the back and side speakers (dB): into the rear outputs, or
     /// (a stream without rear outputs) into the fronts at a further -3 dB
@@ -153,7 +155,7 @@ impl Default for MixSettings {
         let mut s = MixSettings {
             auto: true,
             center_db: CENTER_DEFAULT_DB,
-            lfe_db: -6.0,
+            lfe_db: LFE_DEFAULT_DB,
             surround_db: 0.0,
             normalize: false,
             matrix: [[0.0; INPUTS]; LANES],
@@ -173,7 +175,7 @@ impl MixSettings {
     pub fn held(mut self) -> MixSettings {
         let fin = |x: f32, lo: f32, hi: f32, nan: f32| if x.is_finite() { x.clamp(lo, hi) } else { nan };
         self.center_db = fin(self.center_db, -60.0, 12.0, CENTER_DEFAULT_DB);
-        self.lfe_db = fin(self.lfe_db, -60.0, 12.0, -6.0);
+        self.lfe_db = fin(self.lfe_db, -60.0, 12.0, LFE_DEFAULT_DB);
         self.surround_db = fin(self.surround_db, -60.0, 12.0, 0.0);
         for row in &mut self.matrix {
             for g in row.iter_mut() {
@@ -247,13 +249,31 @@ pub fn present_columns(channels: usize, mask: u32) -> [bool; INPUTS] {
 /// source has both), a source without them plays its front on the rear
 /// too. No rear outputs: back and side folded into the fronts at -3 dB
 /// (ITU-R BS.775, as the stereo downmix). 2.1: the subwoofer outputs get
-/// what the fronts get (the crossover keeps their low end).
+/// what the fronts get (the crossover keeps their low end), and the LFE
+/// goes to the subwoofer alone.
 pub fn auto_matrix(present: &[bool; INPUTS], mono: bool, outputs: Outputs, s: &MixSettings) -> Matrix {
     let half = |a: &[f32; INPUTS], b: &[f32; INPUTS]| -> [f32; INPUTS] { std::array::from_fn(|c| 0.5 * (a[c] + b[c])) };
+    // With a subwoofer the LFE is its alone, not the other speakers': as
+    // loud as the source has it at the default LFE level, louder or quieter
+    // with that level. The rows changed are normalized again.
+    let lfe_to_sub = |m: &mut Matrix, subs: &[usize]| {
+        if mono || !present[3] {
+            return;
+        }
+        for (l, row) in m.iter_mut().enumerate() {
+            let sub = subs.contains(&l);
+            row[3] = if sub { db_to_lin(s.lfe_db - LFE_DEFAULT_DB).min(MAX_GAIN) } else { 0.0 };
+            let sum: f32 = row.iter().map(|g| g.abs()).sum();
+            if sub && s.normalize && sum > 1.0 {
+                row.iter_mut().for_each(|g| *g /= sum);
+            }
+        }
+    };
     match outputs {
         Outputs::Sub => {
             let mut m = auto_matrix(present, mono, Outputs::Front, s);
             (m[2], m[3]) = (m[0], m[1]);
+            lfe_to_sub(&mut m, &[2, 3]);
             return m;
         }
         // The subwoofer: half of each front (a sound on both at once as
@@ -262,6 +282,7 @@ pub fn auto_matrix(present: &[bool; INPUTS], mono: bool, outputs: Outputs, s: &M
             let mut m = auto_matrix(present, mono, Outputs::Front, s);
             m[2] = [0.0; INPUTS];
             m[3] = half(&m[0], &m[1]);
+            lfe_to_sub(&mut m, &[3]);
             return m;
         }
         // The centre speaker on its own output (not in the fronts), as
@@ -280,6 +301,7 @@ pub fn auto_matrix(present: &[bool; INPUTS], mono: bool, outputs: Outputs, s: &M
                 m[2] = half(&m[0], &m[1]);
             }
             m[3] = sub;
+            lfe_to_sub(&mut m, &[3]);
             return m;
         }
         Outputs::Front | Outputs::Rear => {}
@@ -764,6 +786,19 @@ mod tests {
         let five = Mixer::new(quiet, 6, 0x3f, Outputs::Center, rate);
         let lanes = five.apply(&[0.0, 0.0, 0.5, 0.0, 0.0, 0.0]);
         assert!(lanes[0] == 0.0 && (lanes[2] - 0.25).abs() < 0.001, "{lanes:?}");
+        // The LFE is the subwoofer's alone, as loud as the source has it;
+        // its level follows the LFE level
+        for (outputs, subs) in [(Outputs::Sub, &[2, 3][..]), (Outputs::SubMono, &[3]), (Outputs::Center, &[3])] {
+            let mx = Mixer::new(MixHandle::default(), 6, 0x3f, outputs, rate);
+            let lanes = mx.apply(&[0.0, 0.0, 0.0, 0.5, 0.0, 0.0]);
+            for (l, x) in lanes.iter().enumerate() {
+                assert_eq!(*x, if subs.contains(&l) { 0.5 } else { 0.0 }, "{outputs:?} {lanes:?}");
+            }
+            let quiet = MixHandle::default();
+            quiet.set(MixSettings { lfe_db: LFE_DEFAULT_DB - 6.0, ..quiet.get() });
+            let lanes = Mixer::new(quiet, 6, 0x3f, outputs, rate).apply(&[0.0, 0.0, 0.0, 0.5, 0.0, 0.0]);
+            assert!((lanes[3] - 0.25).abs() < 0.001 && lanes[0] == 0.0, "{outputs:?} {lanes:?}");
+        }
         // Without a subwoofer no lane is filtered
         let mut rear = Mixer::new(MixHandle::default(), 4, 0x33, Outputs::Rear, rate);
         let low = tone_peaks(&mut rear, 30.0, rate);

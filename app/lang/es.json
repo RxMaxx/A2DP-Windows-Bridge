@@ -660,7 +660,7 @@
   "ui.dev.auracast_rx_stereo_two_mono": "1 estéreo + 2 mono",
   "ui.dev.auracast_rx_two_stereo": "2 estéreo",
   "ui.dev.auracast_rx_three_mono": "3 mono",
-  "ui.dev.auracast_rx_stereo_center": "Estéreo + central",
+  "ui.dev.auracast_rx_stereo_center": "1 estéreo + 1 central",
   "ui.dev.auracast_slot_front": "Frontal (estéreo)",
   "ui.dev.auracast_slot_rear": "Trasero (estéreo)",
   "ui.dev.auracast_slot_stereo": "Estéreo",

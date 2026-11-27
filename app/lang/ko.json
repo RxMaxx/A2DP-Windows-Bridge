@@ -660,7 +660,7 @@
   "ui.dev.auracast_rx_stereo_two_mono": "스테레오 1대 + 모노 2대",
   "ui.dev.auracast_rx_two_stereo": "스테레오 2대",
   "ui.dev.auracast_rx_three_mono": "모노 3대",
-  "ui.dev.auracast_rx_stereo_center": "스테레오 + 센터",
+  "ui.dev.auracast_rx_stereo_center": "스테레오 1대 + 센터 1대",
   "ui.dev.auracast_slot_front": "전면 (스테레오)",
   "ui.dev.auracast_slot_rear": "후면 (스테레오)",
   "ui.dev.auracast_slot_stereo": "스테레오",

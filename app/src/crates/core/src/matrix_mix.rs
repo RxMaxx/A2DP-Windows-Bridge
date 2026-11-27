@@ -366,9 +366,14 @@ mod tests {
         assert_eq!(st.present, [true, true, true, true, true, true, false, false]);
         assert!(!st.rear);
         // 2.1: four outputs, the rear two the subwoofer's, fed as the fronts
+        // but for the LFE, which is the subwoofer's alone
         let st = state(A, &dir, Some(6), Some(false), Some(AuracastSub::Stereo));
         assert!(st.rear && st.sub == AuracastSub::Stereo);
-        assert_eq!((&st.effective[2], &st.effective[3]), (&st.effective[0], &st.effective[1]));
+        for (sub, front) in [(2, 0), (3, 1)] {
+            let (sub, front) = (&st.effective[sub], &st.effective[front]);
+            assert_eq!((&sub[..3], &sub[4..]), (&front[..3], &front[4..]));
+            assert_eq!((sub[3], front[3]), (1.0, 0.0));
+        }
         // 3.1: the centre on the third output
         let st = state(A, &dir, Some(6), Some(false), Some(AuracastSub::Center));
         assert_eq!((st.effective[2][2], st.effective[0][2]), (1.0, 0.0));
