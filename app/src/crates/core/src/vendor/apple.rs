@@ -174,7 +174,13 @@ fn parse(p: &[u8]) -> Option<Packet> {
 /// 1); an entry cut short ends the list
 fn battery_cells(payload: &[u8]) -> Vec<Cell> {
     let Some((&count, entries)) = payload.split_first() else { return Vec::new() };
-    entries.as_chunks::<5>().0.iter().take(usize::from(count)).map(|e| Cell { part: e[0], level: e[2], state: e[3] }).collect()
+    entries
+        .as_chunks::<5>()
+        .0
+        .iter()
+        .take(usize::from(count))
+        .map(|e| Cell { part: e[0], level: e[2], state: e[3] })
+        .collect()
 }
 
 /// After 5 bytes of unknown meaning, NUL-terminated strings: the name, then
