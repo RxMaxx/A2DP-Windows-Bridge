@@ -502,6 +502,10 @@ pub enum ServiceEvent {
     /// The headphones refused to report their battery level (HFP refused,
     /// another device may hold it)
     BatteryRefused,
+    /// Earbuds with a control channel of their own (AirPods) report each
+    /// bud and the case (None: the channel closed); StreamStatus.buds,
+    /// whose lowest bud replaces the HFP battery meanwhile
+    Buds(Option<ipc::BudsStatus>),
     /// The voice codecs the headphones listed on their HFP connection
     /// ("cvsd", "msbc", "lc3_swb"; StreamStatus.voice_codecs)
     VoiceCodecs(Vec<String>),
@@ -713,6 +717,8 @@ pub(crate) struct Inner {
     scanning: AtomicBool,
     /// The LE Audio stream being sent (le_stream)
     le_stream: Mutex<Option<crate::le_stream::LeStreamDetails>>,
+    /// The AirPods control channel of the stream, while it runs
+    apple: Mutex<Option<crate::vendor::apple::Session>>,
     /// An A2DP stream ran on the running stack (issue #84)
     streamed: AtomicBool,
     /// The running adapter has LE Audio's isochronous channels: known once
@@ -1531,6 +1537,18 @@ impl Inner {
         }
     }
 
+    /// Opens the AirPods control channel of the stream to `device` (a
+    /// running one ends first)
+    pub fn start_apple(&self, host: Arc<BtHost>, device: [u8; 6], name: &str) {
+        let session = crate::vendor::apple::Session::start(host, device, name, self.event_sender());
+        *self.apple.lock().unwrap_or_else(|e| e.into_inner()) = session;
+    }
+
+    /// Ends the AirPods control channel, if one runs
+    pub fn stop_apple(&self) {
+        self.apple.lock().unwrap_or_else(|e| e.into_inner()).take();
+    }
+
     /// The LE Audio stream now (set before its StreamInfo is sent)
     pub fn set_le_stream(&self, details: Option<crate::le_stream::LeStreamDetails>) {
         *self.le_stream.lock().unwrap_or_else(|e| e.into_inner()) = details;
@@ -1702,6 +1720,7 @@ impl Service {
             broadcast_adapter: Mutex::new(String::new()),
             scanning: AtomicBool::new(false),
             le_stream: Mutex::new(None),
+            apple: Mutex::new(None),
             le_support: Mutex::new(None),
             streamed: AtomicBool::new(false),
             waiting: AtomicBool::new(false),
@@ -1871,6 +1890,12 @@ impl Service {
 
     /// What the LE Audio (experimental) stream was set up with, while one
     /// runs (with its [`ServiceEvent::StreamInfo`]; codec "LC3 (LE Audio)")
+    /// Asks the connected earbuds for a listening mode; false: none
+    /// connected, or not a mode they offer
+    pub fn set_noise_control(&self, mode: ipc::NoiseMode) -> bool {
+        self.inner.apple.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|s| s.set_noise(mode))
+    }
+
     pub fn le_stream(&self) -> Option<crate::le_stream::LeStreamDetails> {
         self.inner.le_stream.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }

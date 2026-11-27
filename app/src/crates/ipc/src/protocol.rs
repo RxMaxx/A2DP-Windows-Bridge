@@ -586,6 +586,69 @@ pub struct StreamStatus {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub broadcast: Option<String>,
+    /// Earbuds that report each bud and the case over their own control
+    /// channel (AirPods): Some while that channel is open. Its lowest bud
+    /// is also `battery` then.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub buds: Option<BudsStatus>,
+}
+
+/// What earbuds report over their own control channel (StreamStatus.buds)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+pub struct BudsStatus {
+    /// None while unknown or not there (not in the case, say)
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub left: Option<BudBattery>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub right: Option<BudBattery>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub case: Option<BudBattery>,
+    /// The listening mode in force, None while unknown
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub noise: Option<NoiseMode>,
+    /// The listening modes the earbuds offer, in this order; empty: no
+    /// noise control
+    #[serde(default)]
+    pub noise_modes: Vec<NoiseMode>,
+    /// Where the buds are, the one that holds the link first; empty while
+    /// unknown
+    #[serde(default)]
+    pub ear: Vec<EarState>,
+}
+
+/// The lowest bud's battery (the one the app shows as the device's)
+pub fn buds_level(b: &BudsStatus) -> Option<u8> {
+    [b.left, b.right].iter().flatten().map(|b| b.percent).min()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct BudBattery {
+    /// 0..=100
+    pub percent: u8,
+    pub charging: bool,
+}
+
+/// A listening mode of earbuds with noise control
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum NoiseMode {
+    Off,
+    NoiseCancellation,
+    Transparency,
+    Adaptive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum EarState {
+    InEar,
+    OutOfEar,
+    InCase,
 }
 
 /// Why the stream stopped over its codec (StreamStatus.codec_stop)
@@ -2178,6 +2241,12 @@ pub enum Method {
     /// stream.bad_volume_step (`delta` out of range). 0: nothing is sent.
     #[serde(rename = "stream.volume_step")]
     StreamVolumeStep { delta: i16 },
+    /// Sets the earbuds' listening mode, one of StreamStatus.buds.noise_modes.
+    /// The earbuds confirm it as StreamStatus.buds.noise. Errors
+    /// stream.no_noise_control (no earbuds with noise control connected, or
+    /// not that mode).
+    #[serde(rename = "stream.set_noise_control")]
+    StreamSetNoiseControl { mode: NoiseMode },
     /// -> Device[] (also as an event). `seconds` from 3 to
     /// [`MAX_SCAN_SECONDS`] (the setup looks until a device is added)
     #[serde(rename = "device.scan")]
