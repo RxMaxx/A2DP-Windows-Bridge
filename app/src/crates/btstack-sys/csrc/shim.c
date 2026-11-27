@@ -350,6 +350,7 @@ enum {
     SOURCE_SCO = 14,
     SOURCE_HID = 15,
     SOURCE_L2CAP_CBM = 16,
+    SOURCE_L2CAP_CLASSIC = 17,
 };
 
 /* A keyboard being added that may ask for a passkey (bluecaster_hid_pairing_target) */
@@ -1820,6 +1821,31 @@ uint8_t bluecaster_cbm_send(uint16_t cid, const uint8_t *sdu, uint16_t len) {
 /* All slots free (the stack was shut down: its channels are gone) */
 void bluecaster_cbm_reset(void) {
     memset(cbm_slots, 0, sizeof(cbm_slots));
+}
+
+/* ======================================================================== */
+/* Classic L2CAP channels in basic mode (vendor control protocols)          */
+/* ======================================================================== */
+
+/* Their events (L2CAP_EVENT_INCOMING_CONNECTION, _CHANNEL_OPENED,
+ * _CHANNEL_CLOSED, _CAN_SEND_NOW) and data (L2CAP_DATA_PACKET, channel =
+ * local cid): SOURCE_L2CAP_CLASSIC */
+static void handler_l2cap_classic(uint8_t t, uint16_t c, uint8_t *p, uint16_t s) {
+    bluecaster_rs_on_packet(SOURCE_L2CAP_CLASSIC, t, c, p, s);
+}
+
+/* Opens a channel to `psm` of the device, over its ACL link; basic mode
+ * (BTstack's default for classic channels) */
+uint8_t bluecaster_l2cap_create_channel(const uint8_t *addr, uint16_t psm, uint16_t mtu, uint16_t *out_cid) {
+    bd_addr_t a;
+    memcpy(a, addr, 6);
+    return l2cap_create_channel(&handler_l2cap_classic, a, psm, mtu, out_cid);
+}
+
+/* Channels a device opens to `psm` come as L2CAP_EVENT_INCOMING_CONNECTION,
+ * to accept or decline. Encryption needed (the device is paired). */
+uint8_t bluecaster_l2cap_register_service(uint16_t psm, uint16_t mtu) {
+    return l2cap_register_service(&handler_l2cap_classic, psm, mtu, LEVEL_2);
 }
 
 /* LE Connection Update with one interval (1.25 ms units), the latency in

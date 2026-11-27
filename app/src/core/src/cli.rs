@@ -236,6 +236,9 @@ Development / testing:
   --headset-mic-toggle <on_s>,<off_s>
                         headset mode on <on_s> seconds after streaming starts
                         and off at <off_s> (the voice link and back to A2DP)
+  --noise-control <off|anc|transparency|adaptive>
+                        AirPods: ask for this listening mode once the earbuds
+                        offer it
   --restart-on-link     start the session again as soon as its link is up, as
                         a setting changed while connecting does
   --restart             with --sessions: between sessions restart Bluetooth
@@ -300,6 +303,8 @@ struct Args {
     mic_processing: ipc::MicProcessing,
     /// --headset-mic-toggle: headset mode on and off at these seconds
     headset_mic_toggle: Option<(u64, u64)>,
+    /// --noise-control: the listening mode asked for once offered
+    noise_control: Option<ipc::NoiseMode>,
     script: Option<PathBuf>,
     allow_writes: bool,
     hci_tcp: Option<String>,
@@ -451,6 +456,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
         mic_rate: None,
         mic_processing: ipc::MicProcessing::default(),
         headset_mic_toggle: None,
+        noise_control: None,
         script: None,
         allow_writes: false,
         hci_tcp: None,
@@ -600,6 +606,15 @@ fn parse(args: &[String]) -> Result<Args, String> {
                     .filter(|(on, off)| on < off)
                     .ok_or("--headset-mic-toggle takes <on_s>,<off_s> with on before off")?;
                 a.headset_mic_toggle = Some((on, off));
+            }
+            "--noise-control" => {
+                a.noise_control = Some(match value(&mut it, "--noise-control")?.as_str() {
+                    "off" => ipc::NoiseMode::Off,
+                    "anc" => ipc::NoiseMode::NoiseCancellation,
+                    "transparency" => ipc::NoiseMode::Transparency,
+                    "adaptive" => ipc::NoiseMode::Adaptive,
+                    _ => return Err("--noise-control takes off, anc, transparency or adaptive".into()),
+                })
             }
             "--script" => a.script = Some(value(&mut it, "--script")?.into()),
             "--allow-writes" => a.allow_writes = true,
@@ -1228,6 +1243,7 @@ fn stream_session(
 ) -> bool {
     let mut streaming_since: Option<Instant> = None;
     let mut last_summary = Instant::now();
+    let mut noise_asked = false;
     // --headset-mic-toggle: the steps still to take
     let mut toggles: Vec<(u64, HeadsetMic)> =
         a.headset_mic_toggle.map_or(Vec::new(), |(on, off)| vec![(on, HeadsetMic::On), (off, HeadsetMic::Off)]);
@@ -1292,6 +1308,15 @@ fn stream_session(
             Ok(ServiceEvent::Volume(v)) => outln!("Headphone volume: {v} ({}%)", v as u32 * 100 / 127),
             Ok(ServiceEvent::Battery(v)) => outln!("Headphone battery: {v}%"),
             Ok(ServiceEvent::BatteryRefused) => outln!("Headphone battery: unknown (HFP refused)"),
+            Ok(ServiceEvent::Buds(Some(b))) => {
+                outln!("{}", buds_line(&b));
+                if let Some(mode) = a.noise_control.filter(|m| !noise_asked && b.noise_modes.contains(m)) {
+                    noise_asked = true;
+                    let taken = service.set_noise_control(mode);
+                    outln!("Noise control {mode:?} asked for{}", if taken { "" } else { " (not taken)" });
+                }
+            }
+            Ok(ServiceEvent::Buds(None)) => outln!("Buds: control channel closed"),
             Ok(ServiceEvent::VoiceCodecs(c)) => outln!("Headphone voice codecs: {}", c.join(", ")),
             // LE Audio runs in le_run, not here
             Ok(ServiceEvent::MicRates(_)) => {}
@@ -2319,6 +2344,25 @@ fn le_run(a: &Args, service: &Service, running: &Arc<AtomicBool>) -> i32 {
 
 /// v1's listing of the Windows-paired devices (BtDeviceDiscovery::
 /// scan_paired_devices)
+/// "Buds: left 80%, right 75% (charging), case 30%, noise control Transparency of Off, ..."
+fn buds_line(b: &ipc::BudsStatus) -> String {
+    let part = |name: &str, p: Option<ipc::BudBattery>| match p {
+        Some(p) => format!("{name} {}%{}", p.percent, if p.charging { " (charging)" } else { "" }),
+        None => format!("{name} -"),
+    };
+    let mut line = format!("Buds: {}, {}, {}", part("left", b.left), part("right", b.right), part("case", b.case));
+    if !b.noise_modes.is_empty() {
+        let modes: Vec<String> = b.noise_modes.iter().map(|m| format!("{m:?}")).collect();
+        let now = b.noise.map_or("unknown".to_owned(), |m| format!("{m:?}"));
+        line += &format!(", noise control {now} of {}", modes.join("/"));
+    }
+    if !b.ear.is_empty() {
+        let ear: Vec<String> = b.ear.iter().map(|e| format!("{e:?}")).collect();
+        line += &format!(", ear {}", ear.join("/"));
+    }
+    line
+}
+
 fn print_paired(devices: &[PairedDevice]) {
     if devices.is_empty() {
         outln!("No paired Bluetooth devices found");
