@@ -5,7 +5,10 @@
 //! levels (centre, LFE, surround; optionally normalized so no row sums
 //! above 1), else it is set cell by cell. Each output also has a delay (0
 //! to [`MAX_DELAY_MS`], fractional: linear interpolation between samples)
-//! and can be inverted.
+//! and can be inverted. Auto sends the LFE to the outputs marked full range
+//! (the fronts unless set). Solo and mute, per input and per output, are
+//! for listening tests: the matrix stays as set, only what is heard
+//! changes ([`heard_matrix`]).
 //!
 //! A 2.1 broadcast ([`Outputs::Sub`]) sends the third and fourth outputs
 //! to a subwoofer: auto gives them what the fronts get, and a crossover
@@ -52,6 +55,8 @@ pub const CROSSOVER_DEFAULT_HZ: f32 = 80.0;
 pub const CENTER_DEFAULT_DB: f32 = -3.0;
 /// The LFE into both fronts (dB) unless set
 pub const LFE_DEFAULT_DB: f32 = -6.0;
+/// The outputs auto sends the LFE to unless set: the fronts
+pub const FULL_RANGE_DEFAULT: [bool; LANES] = [true, true, false, false];
 
 /// What the four outputs (lanes) of a broadcast feed
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,6 +153,15 @@ pub struct MixSettings {
     /// 2.1: the fronts play the full range (no high pass), for speakers
     /// with a low end of their own
     pub mains_full_range: bool,
+    /// Auto without a subwoofer: per output, the LFE goes to it (at
+    /// `lfe_db`)
+    pub full_range: [bool; LANES],
+    /// Listening tests: only the soloed inputs (columns) and outputs (rows)
+    /// are heard when any is, the muted ones never
+    pub solo_in: [bool; INPUTS],
+    pub mute_in: [bool; INPUTS],
+    pub solo_out: [bool; LANES],
+    pub mute_out: [bool; LANES],
 }
 
 impl Default for MixSettings {
@@ -163,6 +177,11 @@ impl Default for MixSettings {
             invert: [false; LANES],
             crossover_hz: CROSSOVER_DEFAULT_HZ,
             mains_full_range: false,
+            full_range: FULL_RANGE_DEFAULT,
+            solo_in: [false; INPUTS],
+            mute_in: [false; INPUTS],
+            solo_out: [false; LANES],
+            mute_out: [false; LANES],
         };
         s.matrix = auto_matrix(&[true; INPUTS], false, Outputs::Rear, &s);
         s
@@ -188,6 +207,43 @@ impl MixSettings {
         self.crossover_hz = fin(self.crossover_hz, CROSSOVER_MIN_HZ, CROSSOVER_MAX_HZ, CROSSOVER_DEFAULT_HZ);
         self
     }
+
+    /// Any input or output soloed or muted
+    pub fn monitoring(&self) -> bool {
+        [&self.solo_in[..], &self.mute_in, &self.solo_out, &self.mute_out].iter().any(|v| v.contains(&true))
+    }
+
+    /// Without solo and mute (as saved)
+    pub fn unmonitored(self) -> MixSettings {
+        MixSettings {
+            solo_in: [false; INPUTS],
+            mute_in: [false; INPUTS],
+            solo_out: [false; LANES],
+            mute_out: [false; LANES],
+            ..self
+        }
+    }
+
+    /// Input column `c` is heard (not muted, soloed if any is)
+    pub fn input_heard(&self, c: usize) -> bool {
+        heard(&self.solo_in, &self.mute_in, c)
+    }
+
+    /// Output `l` is heard (not muted, soloed if any is)
+    pub fn output_heard(&self, l: usize) -> bool {
+        heard(&self.solo_out, &self.mute_out, l)
+    }
+}
+
+fn heard(solo: &[bool], mute: &[bool], i: usize) -> bool {
+    let soloed = !solo.contains(&true) || solo.get(i).copied().unwrap_or(false);
+    soloed && !mute.get(i).copied().unwrap_or(false)
+}
+
+/// The matrix as heard: the cells of inputs and outputs not heard (solo,
+/// mute) at 0
+pub fn heard_matrix(m: &Matrix, s: &MixSettings) -> Matrix {
+    std::array::from_fn(|l| std::array::from_fn(|c| if s.output_heard(l) && s.input_heard(c) { m[l][c] } else { 0.0 }))
 }
 
 fn db_to_lin(db: f32) -> f32 {
@@ -248,9 +304,10 @@ pub fn present_columns(channels: usize, mask: u32) -> [bool; INPUTS] {
 /// both. Rear outputs: back and side make the rear (-3 dB each when a
 /// source has both), a source without them plays its front on the rear
 /// too. No rear outputs: back and side folded into the fronts at -3 dB
-/// (ITU-R BS.775, as the stereo downmix). 2.1: the subwoofer outputs get
-/// what the fronts get (the crossover keeps their low end), and the LFE
-/// goes to the subwoofer alone.
+/// (ITU-R BS.775, as the stereo downmix). The LFE goes to the outputs
+/// marked full range. 2.1: the subwoofer outputs get what the fronts get
+/// (the crossover keeps their low end), and the LFE goes to the subwoofer
+/// alone.
 pub fn auto_matrix(present: &[bool; INPUTS], mono: bool, outputs: Outputs, s: &MixSettings) -> Matrix {
     let half = |a: &[f32; INPUTS], b: &[f32; INPUTS]| -> [f32; INPUTS] { std::array::from_fn(|c| 0.5 * (a[c] + b[c])) };
     // With a subwoofer the LFE is its alone, not the other speakers': as
@@ -336,6 +393,11 @@ pub fn auto_matrix(present: &[bool; INPUTS], mono: bool, outputs: Outputs, s: &M
         let k = MINUS_3DB * sur;
         (m[0][4], m[0][6]) = (k, k);
         (m[1][5], m[1][7]) = (k, k);
+    }
+    // The LFE to the outputs marked full range (the rear ones only when
+    // sent)
+    for (l, row) in m.iter_mut().enumerate() {
+        row[3] = if s.full_range[l] && (l < 2 || rear_out) { lfe } else { 0.0 };
     }
     for row in &mut m {
         for (g, p) in row.iter_mut().zip(present) {
@@ -496,7 +558,7 @@ impl Mixer {
         }
         let Some(s) = self.handle.try_get() else { return };
         self.seen = version;
-        let m = effective_matrix(self.channels, self.mask, self.outputs, &s);
+        let m = heard_matrix(&effective_matrix(self.channels, self.mask, self.outputs, &s), &s);
         for (lane, row) in self.gains.iter_mut().zip(&m) {
             for ((g, col), back_center) in lane.iter_mut().zip(&self.columns).zip(self.back_center) {
                 *g = if back_center { MINUS_3DB * (row[4] + row[5]) } else { col.map_or(0.0, |c| row[c]) };
@@ -508,10 +570,15 @@ impl Mixer {
         }
         self.set_crossover(&s);
         tracing::debug!(
-            "{}: {} matrix {:?}, delays {:?} ms, inverted {:?}{}",
+            "{}: {} matrix {:?}{}, delays {:?} ms, inverted {:?}{}",
             self.handle.name(),
             if s.auto { "auto" } else { "manual" },
             m,
+            if s.monitoring() {
+                format!(" (solo in {:?} out {:?}, mute in {:?} out {:?})", s.solo_in, s.solo_out, s.mute_in, s.mute_out)
+            } else {
+                String::new()
+            },
             s.delay_ms,
             s.invert,
             if !self.outputs.has_sub() {
@@ -632,6 +699,58 @@ mod tests {
         // Mono: everywhere
         let m = effective_matrix(1, 0x4, Outputs::Rear, &s);
         assert!(m.iter().all(|row| row[2] == 1.0));
+    }
+
+    #[test]
+    fn the_lfe_goes_to_the_outputs_marked_full_range() {
+        // 5.1 on four outputs: the fronts by default
+        let s = MixSettings::default();
+        let m = effective_matrix(6, 0x3F, Outputs::Rear, &s);
+        let lfe = db_to_lin(LFE_DEFAULT_DB);
+        assert_eq!([m[0][3], m[1][3], m[2][3], m[3][3]], [lfe, lfe, 0.0, 0.0]);
+        // The rears only
+        let s = MixSettings { full_range: [false, false, true, true], ..s };
+        let m = effective_matrix(6, 0x3F, Outputs::Rear, &s);
+        assert_eq!([m[0][3], m[1][3], m[2][3], m[3][3]], [0.0, 0.0, lfe, lfe]);
+        // Normalized: a rear row with the LFE sums to 1 at most
+        let n = effective_matrix(6, 0x3F, Outputs::Rear, &MixSettings { normalize: true, ..s });
+        assert!(n[2].iter().map(|g| g.abs()).sum::<f32>() <= 1.0 + 1e-6);
+        assert!(n[2][3] > 0.0);
+        // No rear outputs: the rear flags count for nothing
+        let m = effective_matrix(6, 0x3F, Outputs::Front, &s);
+        assert!(m.iter().all(|row| row[3] == 0.0));
+        // A subwoofer takes the LFE whatever the flags
+        let m = effective_matrix(6, 0x3F, Outputs::Sub, &s);
+        assert_eq!((m[0][3], m[2][3]), (0.0, 1.0));
+    }
+
+    #[test]
+    fn solo_and_mute_change_what_is_heard_only() {
+        let s = MixSettings::default();
+        let m = effective_matrix(6, 0x3F, Outputs::Rear, &s);
+        assert_eq!(heard_matrix(&m, &s), m);
+        assert!(!s.monitoring());
+        // The centre soloed: only its column; the rear right muted
+        let mut t = s;
+        t.solo_in[2] = true;
+        t.mute_out[3] = true;
+        assert!(t.monitoring());
+        let h = heard_matrix(&m, &t);
+        for (l, row) in h.iter().enumerate() {
+            for (c, g) in row.iter().enumerate() {
+                let want = if c == 2 && l != 3 { m[l][c] } else { 0.0 };
+                assert_eq!(*g, want, "lane {l} column {c}");
+            }
+        }
+        // A soloed output, a muted one wins over its solo
+        let mut u = s;
+        u.solo_out = [true, true, false, false];
+        u.mute_out[1] = true;
+        let h = heard_matrix(&m, &u);
+        assert_eq!((h[0], h[1], h[2]), (m[0], [0.0; INPUTS], [0.0; INPUTS]));
+        // As saved: without them
+        assert!(!t.unmonitored().monitoring());
+        assert_eq!(t.unmonitored().matrix, t.matrix);
     }
 
     #[test]

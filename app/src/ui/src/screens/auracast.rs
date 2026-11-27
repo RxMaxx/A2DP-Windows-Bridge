@@ -12,8 +12,8 @@ use gpui_kit::component::Disableable as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, AsyncApp, Context, Entity, EntityId, Global, IntoElement, ParentElement as _,
-    Render, SharedString, Styled as _, Subscription, Task, WeakEntity, Window, div, px,
+    AnyElement, App, AppContext as _, AsyncApp, AsyncWindowContext, Context, Entity, EntityId, Global, IntoElement,
+    ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, WeakEntity, Window, div, px,
 };
 use ipc::{AudioDevice, AuracastReceiverCandidate, AuracastReceiverStatus, AuracastReceivers, Method, StreamStatus};
 use ui_model::i18n::t;
@@ -38,6 +38,8 @@ pub struct AuracastSession {
     s: Session,
     /// The names of the devices listed so far, for a chosen one that is gone
     names: DeviceNames,
+    /// The last broadcast started was asked for (auracast.last_start)
+    restored: bool,
     _follow: Subscription,
 }
 
@@ -69,6 +71,7 @@ fn session(core: &Entity<Core>, cx: &mut App) -> Entity<AuracastSession> {
             choices: Choices::default(),
             s: Session::default(),
             names: DeviceNames::new(),
+            restored: false,
             _follow: follow,
         }
     });
@@ -179,7 +182,50 @@ impl Auracast {
         this.sync_mixer(window, cx);
         this.read_devices(cx);
         this.read_follow(cx);
+        this.restore(window, cx);
         this
+    }
+
+    /// The form as the last broadcast started had it (kept by the core
+    /// across restarts), once per core connection and unless changed here
+    /// already; "follow" stays as the core keeps it
+    fn restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.session.read(cx).restored {
+            return;
+        }
+        self.session.update(cx, |s, _| s.restored = true);
+        let task = app::request::<Option<Method>>(Method::AuracastLastStart, cx);
+        cx.spawn_in(window, async move |this: WeakEntity<Self>, cx: &mut AsyncWindowContext| {
+            let Ok(Some(last)) = task.await else { return };
+            let Some(mut c) = Choices::from_start(&last) else { return };
+            let name = match &last {
+                Method::StreamStartBroadcast { source_id: Some(id), source_name: Some(n), .. } => {
+                    Some((id.clone(), n.clone()))
+                }
+                _ => None,
+            };
+            let _ = this.update_in(cx, |this, window, cx| {
+                let untouched = {
+                    let now = &this.session.read(cx).choices;
+                    *now == Choices { follow: now.follow, ..Choices::default() }
+                };
+                if !untouched {
+                    return;
+                }
+                this.session.update(cx, |s, cx| {
+                    c.follow = s.choices.follow;
+                    if let Some((id, n)) = name {
+                        s.names.entry(id).or_insert(n);
+                    }
+                    s.choices = c.clone();
+                    cx.notify();
+                });
+                this.name.update(cx, |i, cx| i.set_value(c.name.clone(), window, cx));
+                this.code.update(cx, |i, cx| i.set_value(c.code.clone(), window, cx));
+                this.sync_mixer(window, cx);
+            });
+        })
+        .detach();
     }
 
     fn stream(&self, cx: &App) -> StreamStatus {

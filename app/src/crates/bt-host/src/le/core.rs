@@ -135,10 +135,13 @@ fn pick_connect_address(
 }
 
 /// A device's identity address (upper case) and type, once SM learned it
-/// (bonded): what its kept services are filed under
+/// (bonded) or a public one: what its kept services are filed under
 fn d_identity(ctx: &LeCtx<'_>, id: LeDeviceId) -> Option<(String, u8)> {
     let d = ctx.device(id)?;
-    d.identity_known.then(|| (crate::events::addr_str(&d.addr.addr).to_uppercase(), d.addr.addr_type))
+    // A public address is the identity itself: a device connected without
+    // pairing (an Auracast assistant's receiver) has its services kept too
+    (d.identity_known || d.addr.addr_type == 0)
+        .then(|| (crate::events::addr_str(&d.addr.addr).to_uppercase(), d.addr.addr_type))
 }
 
 /// One LE Audio peer (e.g. a headset, or one earbud of a pair), owned by
@@ -2880,6 +2883,11 @@ impl LeCore {
         if packet_type == HCI_EVENT_PACKET {
             self.iso.on_bis_can_send_now(stack, packet);
             self.after_last_round(stack);
+            // The controller takes only some of the rounds: the BIGs are
+            // set up again
+            if let Some(why) = self.iso.take_slow() {
+                self.run(stack, |ctx| ctx.on_slow_broadcast(&why));
+            }
         }
     }
 

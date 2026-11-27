@@ -130,6 +130,9 @@ pub struct CoreState {
     starting_profile: Mutex<Option<String>>,
     /// The broadcast's name of the session starting (StreamStatus.broadcast)
     starting_broadcast: Mutex<Option<String>>,
+    /// The last stream.start_broadcast that started (auracast.last_start),
+    /// read from auracast_last.json once (the outer None: not read yet)
+    last_broadcast: Mutex<Option<Option<Method>>>,
     /// auracast.receivers' devices as read last, and when
     receiver_candidates: Mutex<Option<(Instant, Vec<ipc::AuracastReceiverCandidate>)>>,
     /// The Auracast assistants of the broadcast running (its receivers)
@@ -1491,6 +1494,7 @@ fn auracast_receivers(candidates: Vec<ipc::AuracastReceiverCandidate>) -> ipc::A
                 phase: r.phase.as_str().to_string(),
                 bis: r.bis,
                 detail: r.detail,
+                battery: r.battery,
             })
             .collect(),
     }
@@ -2413,6 +2417,7 @@ impl CoreState {
             rates: Mutex::new(None),
             starting_profile: Mutex::new(None),
             starting_broadcast: Mutex::new(None),
+            last_broadcast: Mutex::new(None),
             receiver_candidates: Mutex::new(None),
             assistants: Mutex::new(None),
             mic_note_over: Mutex::new(None),
@@ -2433,6 +2438,29 @@ impl CoreState {
 
     pub fn config_dir(&self) -> PathBuf {
         self.service.config_dir().to_path_buf()
+    }
+
+    /// The last broadcast started (read from its file the first time),
+    /// changed by `f`; saved again when it changed
+    fn remember_broadcast(&self, f: impl FnOnce(&mut Option<Method>)) {
+        let path = bluecaster_core::paths::auracast_last_file(&self.config_dir());
+        let mut slot = self.last_broadcast.lock().unwrap_or_else(|e| e.into_inner());
+        let last = slot.get_or_insert_with(|| {
+            let text = std::fs::read_to_string(&path).ok()?;
+            serde_json::from_str::<Method>(&text)
+                .inspect_err(|e| tracing::warn!("Auracast: last broadcast not read ({e})"))
+                .ok()
+                .filter(|m| matches!(m, Method::StreamStartBroadcast { .. }))
+        });
+        let before = last.clone();
+        f(last);
+        if *last != before
+            && let Some(m) = last.as_ref()
+            && let Err(e) =
+                serde_json::to_string_pretty(m).map_err(std::io::Error::other).and_then(|t| std::fs::write(&path, t))
+        {
+            tracing::warn!("Auracast: last broadcast not saved ({e})");
+        }
     }
 
     pub fn snapshot(&self) -> (u64, Snapshot) {
@@ -4139,7 +4167,25 @@ impl CoreState {
                     receivers: receivers.unwrap_or_default(),
                     leave_receivers: leave_receivers.unwrap_or(false),
                 };
-                self.start_broadcast(&b).map(|()| Value::Null)
+                let asked = Method::StreamStartBroadcast {
+                    name: b.name.clone(),
+                    code: b.code.clone(),
+                    quality: b.quality.clone(),
+                    rear_quality: b.rear_quality.clone(),
+                    mono: b.mono,
+                    split: b.split,
+                    layout: b.layout.clone(),
+                    source: b.source.clone(),
+                    source_id: b.source_id.clone(),
+                    source_name: b.source_name.clone(),
+                    volume: b.volume,
+                    follow_volume: b.follow_volume,
+                    receivers: Some(b.receivers.clone()).filter(|r| !r.is_empty()),
+                    leave_receivers: b.leave_receivers.then_some(true),
+                };
+                self.start_broadcast(&b)?;
+                self.remember_broadcast(|last| *last = Some(asked));
+                Ok(Value::Null)
             }
             Method::StreamStop => {
                 self.stop();
@@ -4275,6 +4321,7 @@ impl CoreState {
             Method::AuracastSetSource { source, source_id, source_name } => {
                 self.developer_only()?;
                 const METHOD: &str = "auracast.set_source";
+                let source_kind = source.clone();
                 let source = broadcast_source(&source, source_id.as_deref(), source_name.as_deref(), METHOD)?
                     .ok_or_else(|| {
                         bad_request(
@@ -4283,7 +4330,17 @@ impl CoreState {
                             "application capture is not supported with LE Audio".into(),
                         )
                     })?;
-                Ok(Value::Bool(self.service.change_source(source)))
+                let taken = self.service.change_source(source);
+                if taken {
+                    self.remember_broadcast(|last| {
+                        if let Some(Method::StreamStartBroadcast { source: s, source_id: id, source_name: n, .. }) =
+                            last
+                        {
+                            (*s, *id, *n) = (source_kind, source_id, source_name);
+                        }
+                    });
+                }
+                Ok(Value::Bool(taken))
             }
             Method::AuracastSetFollowVolume { follow } => {
                 self.developer_only()?;
@@ -4293,6 +4350,12 @@ impl CoreState {
             Method::AuracastFollowVolume => {
                 self.developer_only()?;
                 Ok(Value::Bool(bluecaster_core::broadcast_volume::follows()))
+            }
+            Method::AuracastLastStart => {
+                self.developer_only()?;
+                let mut last = None;
+                self.remember_broadcast(|l| last = l.clone());
+                Ok(json(&last))
             }
             Method::AuracastReceivers => {
                 self.developer_only()?;

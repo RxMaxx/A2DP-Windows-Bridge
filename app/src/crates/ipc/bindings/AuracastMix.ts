@@ -29,4 +29,14 @@ crossover_hz: number,
 /**
  * 2.1 broadcast: the fronts play the full range (no high pass)
  */
-mains_full_range: boolean, };
+mains_full_range: boolean, 
+/**
+ * Auto without a subwoofer: per output, the LFE goes to it (missing:
+ * the fronts)
+ */
+full_range: Array<boolean>, 
+/**
+ * Listening tests, per input (8) and per output (4): only the soloed
+ * ones are heard when any is, the muted ones never. Not saved.
+ */
+solo_in: Array<boolean>, mute_in: Array<boolean>, solo_out: Array<boolean>, mute_out: Array<boolean>, };

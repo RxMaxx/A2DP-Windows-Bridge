@@ -1,6 +1,8 @@
 //! The matrix mixers (Developer screen): which source speakers (columns FL
 //! FR FC LFE BL BR SL SR) make each output, plus a delay and polarity per
-//! output. Automatic from three levels, or each gain by hand; named presets.
+//! output. Automatic from three levels (the LFE to the outputs marked full
+//! range), or each gain by hand; named presets. Solo and mute per row and
+//! column for listening tests (heard at once, not saved).
 //! Auracast's (under the broadcast form, rows FL FR RL RR, auracast.*) and
 //! the earbuds' of an LE Audio stream to a device (the TWS tab, rows FL FR,
 //! tws.*: used once turned on, from the next connection). Every change is
@@ -8,6 +10,7 @@
 
 use std::time::Duration;
 
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{Disableable as _, Sizable as _};
@@ -20,8 +23,8 @@ use gpui_kit::{
 use ipc::{AuracastMix, AuracastMixState, AuracastSub, Method};
 use ui_model::i18n::t;
 use ui_model::view::auracast::{
-    CROSSOVER_CHOICES, INPUT_NAMES, MAX_GAIN, MIX_SEND_MS, Unit, can_save_preset, crossover_choice, delay_from,
-    delay_in, gain_text, num, output_names, preset_label,
+    CROSSOVER_CHOICES, FULL_RANGE_DEFAULT, INPUT_NAMES, MAX_GAIN, MIX_SEND_MS, Unit, can_save_preset, crossover_choice,
+    delay_from, delay_in, flag, full_range, gain_text, heard, num, output_names, preset_label, set_flag,
 };
 
 use crate::app;
@@ -36,6 +39,49 @@ enum MixField {
     Center,
     Lfe,
     Surround,
+}
+
+/// A switch of the mixer per input or output
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MixFlag {
+    SoloIn,
+    MuteIn,
+    SoloOut,
+    MuteOut,
+    FullRange,
+}
+
+impl MixFlag {
+    /// Its list in `mix`, the list's length and what a missing entry is
+    fn of(self, mix: &mut AuracastMix) -> (&mut Vec<bool>, usize, &'static [bool]) {
+        match self {
+            MixFlag::SoloIn => (&mut mix.solo_in, INPUT_NAMES.len(), &[]),
+            MixFlag::MuteIn => (&mut mix.mute_in, INPUT_NAMES.len(), &[]),
+            MixFlag::SoloOut => (&mut mix.solo_out, 4, &[]),
+            MixFlag::MuteOut => (&mut mix.mute_out, 4, &[]),
+            MixFlag::FullRange => (&mut mix.full_range, 4, &FULL_RANGE_DEFAULT),
+        }
+    }
+
+    fn get(self, mix: &AuracastMix, i: usize) -> bool {
+        match self {
+            MixFlag::SoloIn => flag(&mix.solo_in, i),
+            MixFlag::MuteIn => flag(&mix.mute_in, i),
+            MixFlag::SoloOut => flag(&mix.solo_out, i),
+            MixFlag::MuteOut => flag(&mix.mute_out, i),
+            MixFlag::FullRange => full_range(&mix.full_range, i),
+        }
+    }
+
+    fn id(self) -> &'static str {
+        match self {
+            MixFlag::SoloIn => "mix-solo-in",
+            MixFlag::MuteIn => "mix-mute-in",
+            MixFlag::SoloOut => "mix-solo-out",
+            MixFlag::MuteOut => "mix-mute-out",
+            MixFlag::FullRange => "mix-full-range",
+        }
+    }
 }
 
 /// Whose mixer
@@ -325,7 +371,49 @@ impl AuracastMixer {
         if !p.builtin {
             self.preset_name.update(cx, |s, cx| s.set_value(p.name.clone(), window, cx));
         }
-        self.change(p.mix, window, cx);
+        // Solo and mute stay as they are (a preset has none)
+        let mix = match self.mix().cloned() {
+            Some(cur) => AuracastMix {
+                solo_in: cur.solo_in,
+                mute_in: cur.mute_in,
+                solo_out: cur.solo_out,
+                mute_out: cur.mute_out,
+                ..p.mix
+            },
+            None => p.mix,
+        };
+        self.change(mix, window, cx);
+    }
+
+    /// Solo, mute or full range of input or output `i` turned on or off
+    fn set_mix_flag(&mut self, f: MixFlag, i: usize, on: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(mut mix) = self.mix().cloned() else { return };
+        let (list, len, fill) = f.of(&mut mix);
+        set_flag(list, len, fill, i, on);
+        self.change(mix, window, cx);
+    }
+
+    /// The S and M buttons of input or output `i` (`name`)
+    fn solo_mute(&self, (solo, mute): (MixFlag, MixFlag), i: usize, name: &str, cx: &mut Context<Self>) -> Div {
+        let mut d = div().flex().justify_center().gap(px(2.));
+        for (f, label, key) in [(solo, "S", "ui.dev.auracast_mix_solo"), (mute, "M", "ui.dev.auracast_mix_mute")] {
+            let on = self.mix().is_some_and(|m| f.get(m, i));
+            let what = SharedString::from(format!("{} {name}", t(key)));
+            let b = Button::new((f.id(), i))
+                .label(label)
+                .xsmall()
+                .compact()
+                .toggled(on)
+                .accessibility_label(what.clone())
+                .tooltip(what);
+            let b = match (on, f == solo) {
+                (false, _) => b.outline(),
+                (true, true) => b.primary(),
+                (true, false) => b.danger(),
+            };
+            d = d.child(b.on_click(cx.listener(move |this, _, window, cx| this.set_mix_flag(f, i, !on, window, cx))));
+        }
+        d
     }
 
     fn save_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -473,12 +561,32 @@ impl AuracastMixer {
         fn invert_col<E: Styled>(d: E) -> E {
             d.w(px(64.)).flex_none()
         }
+        fn full_col<E: Styled>(d: E) -> E {
+            d.w(px(80.)).flex_none()
+        }
+        fn sm_col<E: Styled>(d: E) -> E {
+            d.w(px(48.)).flex_none()
+        }
+        let in_heard = |c: usize| heard(&mix.solo_in, &mix.mute_in, c);
+        let out_heard = |r: usize| heard(&mix.solo_out, &mix.mute_out, r);
+        // The LFE's outputs: auto without a subwoofer (one takes it then)
+        let show_full = mix.auto && st.sub == AuracastSub::None;
         let head_cell = |text: SharedString| gain_col(div()).text_center().text_color(p.text_2).child(text);
         let output_names = self.output_names(st.sub);
+        let column_sm: Vec<Div> = INPUT_NAMES
+            .iter()
+            .enumerate()
+            .map(|(c, name)| {
+                absent(
+                    st.present.get(c).copied().unwrap_or(false),
+                    gain_col(self.solo_mute((MixFlag::SoloIn, MixFlag::MuteIn), c, name, cx)),
+                )
+            })
+            .collect();
         let grid = div()
             .flex()
             .flex_col()
-            .min_w(px(40. + 8. * 48. + 64. + 64. + 10. * 4.))
+            .min_w(px(40. + 8. * 48. + 64. + 64. + 48. + if show_full { 84. } else { 0. } + 11. * 4.))
             .gap(px(2.))
             .text_size(theme::FS_SMALL)
             .child(
@@ -488,7 +596,7 @@ impl AuracastMixer {
                     .gap(px(4.))
                     .child(name_col(div()).truncate().text_color(p.text_2).child(t("ui.dev.auracast_mix_output")))
                     .children(INPUT_NAMES.iter().enumerate().map(|(c, name)| {
-                        absent(st.present.get(c).copied().unwrap_or(false), head_cell((*name).into()))
+                        absent(st.present.get(c).copied().unwrap_or(false) && in_heard(c), head_cell((*name).into()))
                     }))
                     .child(
                         delay_col(div())
@@ -503,11 +611,34 @@ impl AuracastMixer {
                             .text_center()
                             .text_color(p.text_2)
                             .child(t("ui.dev.auracast_mix_invert")),
-                    ),
+                    )
+                    .when(show_full, |d| {
+                        d.child(
+                            full_col(div())
+                                .truncate()
+                                .text_center()
+                                .text_color(p.text_2)
+                                .child(t("ui.dev.auracast_mix_full_range")),
+                        )
+                    })
+                    .child(sm_col(div())),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .child(name_col(div()))
+                    .children(column_sm)
+                    .child(delay_col(div()))
+                    .child(invert_col(div()))
+                    .when(show_full, |d| d.child(full_col(div())))
+                    .child(sm_col(div())),
             )
             .children(output_names.iter().enumerate().map(|(r, out)| {
                 // A mono subwoofer leaves the third output unused
                 let row_on = (r < 2 || st.rear) && !(r == 2 && st.sub == AuracastSub::Mono);
+                let sm = self.solo_mute((MixFlag::SoloOut, MixFlag::MuteOut), r, out, cx);
                 let cells = INPUT_NAMES.iter().enumerate().map(|(c, inp)| {
                     let on = self.cell(r, c) != 0.;
                     let input = Input::new(&self.input(MixField::Cell(r, c)))
@@ -517,7 +648,7 @@ impl AuracastMixer {
                         .when(on, |i| i.border_color(p.accent_fill))
                         .when(mix.auto, |i| i.bg(p.surface_2));
                     absent(
-                        st.present.get(c).copied().unwrap_or(false),
+                        st.present.get(c).copied().unwrap_or(false) && in_heard(c) && out_heard(r),
                         gain_col(div())
                             .id(("mix-cell", r * 8 + c))
                             .on_click(cx.listener(|this, ev: &gpui_kit::ClickEvent, window, cx| {
@@ -529,13 +660,14 @@ impl AuracastMixer {
                     )
                 });
                 let invert = mix.invert.get(r).copied().unwrap_or(false);
+                let lfe_here = full_range(&mix.full_range, r);
                 absent(
                     row_on,
                     div()
                         .flex()
                         .items_center()
                         .gap(px(4.))
-                        .child(name_col(div()).text_center().child(*out))
+                        .child(absent(out_heard(r), name_col(div()).text_center().child(*out)))
                         .children(cells)
                         .child(
                             delay_col(div()).child(
@@ -561,7 +693,24 @@ impl AuracastMixer {
                                         this.change(mix, window, cx);
                                     })),
                             ),
-                        ),
+                        )
+                        .when(show_full, |d| {
+                            d.child(
+                                full_col(div()).flex().justify_center().child(
+                                    Switch::new(("mix-full-range", r))
+                                        .small()
+                                        .checked(lfe_here)
+                                        .accessibility_label(SharedString::from(format!(
+                                            "{} {out}",
+                                            t("ui.dev.auracast_mix_full_range")
+                                        )))
+                                        .on_change(cx.listener(move |this, v: &bool, window, cx| {
+                                            this.set_mix_flag(MixFlag::FullRange, r, *v, window, cx)
+                                        })),
+                                ),
+                            )
+                        })
+                        .child(sm_col(sm)),
                 )
             }));
 
@@ -658,6 +807,8 @@ impl AuracastMixer {
                 )
             })
             .child(div().id("mix-scroll").overflow_x_scroll().py(theme::S2).child(grid))
+            .child(ui::hint(t("ui.dev.auracast_mix_solo_hint"), cx))
+            .when(show_full, |d| d.child(ui::hint(t("ui.dev.auracast_mix_full_range_hint"), cx)))
             .when(st.sub != AuracastSub::None, |d| d.child(self.crossover_rows(mix, cx)))
             .when(!st.rear && !tws, |d| d.child(ui::hint(t("ui.dev.auracast_mix_no_rear"), cx)))
             .child(

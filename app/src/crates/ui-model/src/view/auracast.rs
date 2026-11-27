@@ -182,6 +182,11 @@ pub enum Quality {
 }
 
 impl Quality {
+    /// From [`Quality::as_str`]; None for another
+    pub fn parse(s: &str) -> Option<Quality> {
+        [Quality::Hq, Quality::Mq, Quality::Sq].into_iter().find(|q| q.as_str() == s)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Quality::Hq => "hq",
@@ -363,7 +368,8 @@ pub fn receiver_status_text(r: &AuracastReceiverStatus) -> String {
     };
     let asked = if r.asked.is_empty() { String::new() } else { t!("ui.dev.auracast_rx_asked", bis(&r.asked)) };
     let detail = if r.detail.is_empty() { String::new() } else { format!(" ({})", r.detail) };
-    format!("{who}: {phase}{detail}{asked}")
+    let battery = r.battery.map_or(String::new(), |b| t!("ui.dev.auracast_rx_battery", b));
+    format!("{who}: {phase}{detail}{asked}{battery}")
 }
 
 /// How a pair of matrix outputs is sent (le_audio::broadcast::PairMode)
@@ -376,6 +382,11 @@ pub enum PairMode {
 }
 
 impl PairMode {
+    /// From [`PairMode::as_str`]; None for another
+    pub fn parse(s: &str) -> Option<PairMode> {
+        [PairMode::Stereo, PairMode::Separate, PairMode::Subgroups, PairMode::Off].into_iter().find(|m| m.as_str() == s)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             PairMode::Stereo => "stereo",
@@ -612,6 +623,74 @@ impl Choices {
                 || self.code_error().is_some()
                 || self.receiver_error().is_some()
                 || (self.matrix() && self.bigs() == 0))
+    }
+
+    /// The choices a stream.start_broadcast was made from (auracast.last_start:
+    /// a window opened while it runs shows them); None for another method.
+    /// Who plays what is the first arrangement with a slot for each receiver.
+    pub fn from_start(m: &Method) -> Option<Choices> {
+        let Method::StreamStartBroadcast {
+            name,
+            code,
+            quality,
+            rear_quality,
+            mono,
+            split,
+            layout,
+            source,
+            source_id,
+            follow_volume,
+            receivers,
+            leave_receivers,
+            ..
+        } = m
+        else {
+            return None;
+        };
+        let mut c = Choices { name: name.clone(), code: code.clone().unwrap_or_default(), ..Choices::default() };
+        let quality = Quality::parse(quality).unwrap_or(Quality::Hq);
+        c.quality = quality;
+        let layout = layout.as_deref().unwrap_or(if *split == Some(true) { "split" } else { "stereo" });
+        if *mono == Some(true) {
+            c.channels = Channels::Mono;
+        } else if layout == "split" {
+            c.channels = Channels::Split;
+        } else if let Some(pairs) = layout.strip_prefix("matrix_") {
+            let mut it = pairs.splitn(2, '_');
+            c.channels = Channels::Matrix;
+            c.front = it.next().and_then(PairMode::parse).unwrap_or(PairMode::Stereo);
+            c.rear = it.next().and_then(PairMode::parse).unwrap_or(PairMode::Stereo);
+            c.front_quality = quality;
+            c.rear_quality = rear_quality.as_deref().and_then(Quality::parse).unwrap_or(quality);
+        } else if let Some(single) = SingleLayout::ALL.into_iter().find(|s| s.layout() == layout) {
+            c.channels = Channels::Single;
+            c.single = single;
+        }
+        c.source = match (source.as_str(), source_id) {
+            ("tone", _) => Source::Tone,
+            ("output" | "virtual", Some(id)) => Source::Output(id.clone()),
+            ("input", Some(id)) => Source::Input(id.clone()),
+            _ => Source::Loopback,
+        };
+        c.follow = follow_volume.unwrap_or(false);
+        c.leave_receivers = leave_receivers.unwrap_or(false);
+        let receivers = receivers.as_deref().unwrap_or_default();
+        let key = |r: &BroadcastReceiver| r.channels.join("+");
+        for &a in arrangements(c.channels, c.single) {
+            c.arrangement = a;
+            let keys: Vec<&str> = c.slots().iter().map(|s| s.key).collect();
+            if receivers.iter().all(|r| keys.contains(&key(r).as_str())) {
+                break;
+            }
+        }
+        if receivers.is_empty() {
+            c.arrangement = arrangements(c.channels, c.single)[0];
+        }
+        for r in receivers {
+            let pick = ReceiverPick { address: r.address.clone(), name: r.name.clone() };
+            c.receivers.entry(key(r)).or_default().push(pick);
+        }
+        Some(c)
     }
 
     /// stream.start_broadcast with the source as `source` names it (see
@@ -856,8 +935,112 @@ pub fn can_save_preset(name: &str, builtin_names: &[&str]) -> bool {
     !name.is_empty() && !builtin_names.contains(&name)
 }
 
+/// The outputs the automatic matrix sends the LFE to unless set
+pub const FULL_RANGE_DEFAULT: [bool; 4] = [true, true, false, false];
+
+/// Whether output `i` gets the LFE (missing: [`FULL_RANGE_DEFAULT`])
+pub fn full_range(flags: &[bool], i: usize) -> bool {
+    if flags.is_empty() { FULL_RANGE_DEFAULT.get(i).copied().unwrap_or(false) } else { flag(flags, i) }
+}
+
+/// A per-output or per-input flag (missing: off)
+pub fn flag(flags: &[bool], i: usize) -> bool {
+    flags.get(i).copied().unwrap_or(false)
+}
+
+/// Sets flag `i` of `len`, filling the missing ones with `fill`
+pub fn set_flag(flags: &mut Vec<bool>, len: usize, fill: &[bool], i: usize, on: bool) {
+    while flags.len() < len {
+        flags.push(fill.get(flags.len()).copied().unwrap_or(false));
+    }
+    if let Some(f) = flags.get_mut(i) {
+        *f = on;
+    }
+}
+
+/// Row or column `i` is heard: not muted, and soloed when any is
+pub fn heard(solo: &[bool], mute: &[bool], i: usize) -> bool {
+    (!solo.contains(&true) || flag(solo, i)) && !flag(mute, i)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_choices_come_back_from_their_start_request() {
+        use super::*;
+        let pick = |a: &str| ReceiverPick { address: a.into(), name: format!("R {a}") };
+        let mut cases = Vec::new();
+        let mut c =
+            Choices { name: "Room".into(), code: "secret12".into(), quality: Quality::Mq, ..Choices::default() };
+        c.source = Source::Output("{0.0.0.0}.{abc}".into());
+        cases.push(c.clone());
+        c.set_channels(Channels::Mono);
+        c.source = Source::Tone;
+        cases.push(c.clone());
+        c.set_channels(Channels::Split);
+        c.arrangement = Arrangement::LeftRight;
+        c.set_receiver("FL", Some(pick("A")));
+        cases.push(c.clone());
+        let mut m = Choices { channels: Channels::Matrix, front: PairMode::Subgroups, rear: PairMode::Separate, ..c };
+        m.receivers.clear();
+        m.front_quality = Quality::Hq;
+        m.rear_quality = Quality::Sq;
+        m.arrangement = Arrangement::TwoStereo;
+        m.set_receiver("FL+FR", Some(pick("B")));
+        m.set_receiver("RR", Some(pick("C")));
+        m.follow = true;
+        cases.push(m);
+        for single in SingleLayout::ALL {
+            let mut s = Choices { channels: Channels::Single, single, quality: Quality::Mq, ..Choices::default() };
+            s.source = Source::Input("mic".into());
+            s.arrangement = arrangements(Channels::Single, single)[0];
+            s.leave_receivers = true;
+            for (i, slot) in s.slots().into_iter().enumerate() {
+                s.set_receiver(slot.key, Some(pick(&i.to_string())));
+            }
+            cases.push(s);
+        }
+        for c in cases {
+            let sent = source_params(&c.source, &[], &[], &DeviceNames::new());
+            let back = Choices::from_start(&c.start_request(sent.clone())).unwrap();
+            // The request each makes is the same
+            assert_eq!(back.start_request(sent.clone()), c.start_request(sent), "{c:?}");
+            assert_eq!((back.channels, back.single, back.source.clone()), (c.channels, c.single, c.source.clone()));
+            assert_eq!(back.slots(), c.slots(), "{c:?}");
+        }
+        assert!(Choices::from_start(&Method::StreamStop).is_none());
+    }
+
+    #[test]
+    fn solo_and_mute_choose_what_is_heard() {
+        use super::{heard, set_flag};
+        let (mut solo, mut mute) = (Vec::new(), Vec::new());
+        assert!((0..8).all(|i| heard(&solo, &mute, i)));
+        set_flag(&mut solo, 8, &[], 2, true);
+        assert_eq!(solo.len(), 8);
+        assert!(heard(&solo, &mute, 2) && !heard(&solo, &mute, 0));
+        set_flag(&mut solo, 8, &[], 3, true);
+        assert!(heard(&solo, &mute, 3));
+        // A muted one stays silent, soloed or not
+        set_flag(&mut mute, 8, &[], 3, true);
+        assert!(!heard(&solo, &mute, 3) && heard(&solo, &mute, 2));
+        set_flag(&mut solo, 8, &[], 2, false);
+        set_flag(&mut solo, 8, &[], 3, false);
+        assert!(heard(&solo, &mute, 0) && !heard(&solo, &mute, 3));
+    }
+
+    #[test]
+    fn full_range_defaults_to_the_fronts() {
+        use super::{FULL_RANGE_DEFAULT, full_range, set_flag};
+        assert!(full_range(&[], 0) && full_range(&[], 1) && !full_range(&[], 2));
+        // Set on a missing list: the others keep their defaults
+        let mut v = Vec::new();
+        set_flag(&mut v, 4, &FULL_RANGE_DEFAULT, 2, true);
+        assert_eq!(v, [true, true, true, false]);
+        set_flag(&mut v, 4, &FULL_RANGE_DEFAULT, 0, false);
+        assert!(!full_range(&v, 0) && full_range(&v, 2));
+    }
+
     use ipc::Msg;
 
     use super::*;

@@ -778,6 +778,15 @@ pub struct AuracastMix {
     pub crossover_hz: f32,
     /// 2.1 broadcast: the fronts play the full range (no high pass)
     pub mains_full_range: bool,
+    /// Auto without a subwoofer: per output, the LFE goes to it (missing:
+    /// the fronts)
+    pub full_range: Vec<bool>,
+    /// Listening tests, per input (8) and per output (4): only the soloed
+    /// ones are heard when any is, the muted ones never. Not saved.
+    pub solo_in: Vec<bool>,
+    pub mute_in: Vec<bool>,
+    pub solo_out: Vec<bool>,
+    pub mute_out: Vec<bool>,
 }
 
 /// The subwoofer of a broadcast, as the mixer feeds it
@@ -843,6 +852,9 @@ pub struct AuracastReceiverStatus {
     pub bis: Vec<u8>,
     /// Why it failed, or what else it reports
     pub detail: String,
+    /// Its battery level (%), when it has a Battery Service
+    #[serde(default)]
+    pub battery: Option<u8>,
 }
 
 /// auracast.receivers
@@ -2453,6 +2465,11 @@ pub enum Method {
     /// `follow_volume`), as kept for the next broadcast
     #[serde(rename = "auracast.follow_volume")]
     AuracastFollowVolume,
+    /// -> Method | null: the last stream.start_broadcast that started (its
+    /// source as auracast.set_source last changed it), kept across restarts:
+    /// the form shows it again
+    #[serde(rename = "auracast.last_start")]
+    AuracastLastStart,
     /// -> AuracastReceivers: the saved LE Audio devices an assistant can
     /// tell (`bass` as their GATT services were kept at the last
     /// connection), and what the receivers of the broadcast running (or of

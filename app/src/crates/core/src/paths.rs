@@ -300,6 +300,12 @@ pub fn auracast_mix_file(config: &Path) -> PathBuf {
     config.join("auracast_mix.json")
 }
 
+/// The last broadcast started (stream.start_broadcast's parameters): the
+/// Auracast form shows it again
+pub fn auracast_last_file(config: &Path) -> PathBuf {
+    config.join("auracast_last.json")
+}
+
 /// The TWS matrix mixer (LE Audio to a device), whether it is on, and its
 /// presets (developer mode)
 pub fn tws_mix_file(config: &Path) -> PathBuf {

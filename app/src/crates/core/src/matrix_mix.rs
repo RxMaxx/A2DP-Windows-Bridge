@@ -12,7 +12,8 @@ use std::sync::{LazyLock, Mutex};
 
 use ipc::{AuracastMix, AuracastMixPreset, AuracastMixState, AuracastSub};
 use pipeline::mix::{
-    CROSSOVER_DEFAULT_HZ, INPUTS, MixHandle, MixSettings, Outputs, auto_matrix, effective_matrix, present_columns,
+    CROSSOVER_DEFAULT_HZ, FULL_RANGE_DEFAULT, INPUTS, MixHandle, MixSettings, Outputs, auto_matrix, effective_matrix,
+    present_columns,
 };
 use serde::{Deserialize, Serialize};
 
@@ -171,10 +172,8 @@ pub fn settings(m: &AuracastMix) -> MixSettings {
     for (d, x) in delay_ms.iter_mut().zip(&m.delay_ms) {
         *d = *x;
     }
-    let mut invert = [false; OUTPUTS];
-    for (i, x) in invert.iter_mut().zip(&m.invert) {
-        *i = *x;
-    }
+    let flags = |v: &[bool]| -> [bool; OUTPUTS] { std::array::from_fn(|i| v.get(i).copied().unwrap_or(false)) };
+    let inputs = |v: &[bool]| -> [bool; INPUTS] { std::array::from_fn(|i| v.get(i).copied().unwrap_or(false)) };
     MixSettings {
         auto: m.auto,
         center_db: m.center_db,
@@ -183,9 +182,14 @@ pub fn settings(m: &AuracastMix) -> MixSettings {
         normalize: m.normalize,
         matrix,
         delay_ms,
-        invert,
+        invert: flags(&m.invert),
         crossover_hz: if m.crossover_hz > 0.0 { m.crossover_hz } else { CROSSOVER_DEFAULT_HZ },
         mains_full_range: m.mains_full_range,
+        full_range: if m.full_range.is_empty() { FULL_RANGE_DEFAULT } else { flags(&m.full_range) },
+        solo_in: inputs(&m.solo_in),
+        mute_in: inputs(&m.mute_in),
+        solo_out: flags(&m.solo_out),
+        mute_out: flags(&m.mute_out),
     }
     .held()
 }
@@ -203,6 +207,11 @@ pub fn to_ipc(s: &MixSettings) -> AuracastMix {
         invert: s.invert.to_vec(),
         crossover_hz: s.crossover_hz,
         mains_full_range: s.mains_full_range,
+        full_range: s.full_range.to_vec(),
+        solo_in: s.solo_in.to_vec(),
+        mute_in: s.mute_in.to_vec(),
+        solo_out: s.solo_out.to_vec(),
+        mute_out: s.mute_out.to_vec(),
     }
 }
 
@@ -281,12 +290,12 @@ pub fn state(
 }
 
 /// New settings: heard at once while the stream runs with the mixer, and
-/// saved
+/// saved (but for solo and mute, which last until the program ends)
 pub fn set(target: Target, dir: &Path, m: &AuracastMix) -> std::io::Result<()> {
     let s = settings(m);
     handle(target).set(s);
     let mut file = load(target, dir);
-    file.current = Some(to_ipc(&s));
+    file.current = Some(to_ipc(&s.unmonitored()));
     save(target, dir, &file)
 }
 
@@ -312,7 +321,7 @@ pub fn save_preset(target: Target, dir: &Path, name: &str, m: &AuracastMix) -> s
         return Err(std::io::Error::other("the name of a built-in preset"));
     }
     let mut file = load(target, dir);
-    let mix = to_ipc(&settings(m));
+    let mix = to_ipc(&settings(m).unmonitored());
     match file.presets.iter_mut().find(|p| p.name == name) {
         Some(p) => p.mix = mix,
         None => file.presets.push(AuracastMixPreset { name: name.into(), mix, builtin: false }),
