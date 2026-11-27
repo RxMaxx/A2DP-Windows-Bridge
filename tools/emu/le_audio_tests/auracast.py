@@ -232,6 +232,12 @@ def check(case, sink_log, bluecaster_log, duration):
         other = digests.get((hz, octets, 'R')) if side == 'L' else None
         if other and seen & other:
             fail.append(f'{hz} Hz: a left and a right BIS carry the same audio')
+        # A subwoofer or centre BIS is not a copy of a front one: the
+        # crossover and the centre mix change the audio
+        if side in ('SL', 'SR', 'S', 'C'):
+            for front in ('L', 'R'):
+                if seen & digests.get((hz, octets, front), set()):
+                    fail.append(f'{hz} Hz: the {side} BIS carries the same audio as a front ({front}) BIS')
 
     # In BIG handle order: the order of the layout's broadcasts
     bigs = sorted(CREATE_BIG.findall(sink_log), key=lambda big: int(big[0]))

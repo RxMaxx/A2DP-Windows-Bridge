@@ -48,6 +48,8 @@ pub const MAX_GAIN: f32 = 4.0;
 pub const CROSSOVER_MIN_HZ: f32 = 40.0;
 pub const CROSSOVER_MAX_HZ: f32 = 500.0;
 pub const CROSSOVER_DEFAULT_HZ: f32 = 80.0;
+/// The centre into both fronts (dB) unless set
+pub const CENTER_DEFAULT_DB: f32 = -3.0;
 
 /// What the four outputs (lanes) of a broadcast feed
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,7 +152,7 @@ impl Default for MixSettings {
     fn default() -> Self {
         let mut s = MixSettings {
             auto: true,
-            center_db: -3.0,
+            center_db: CENTER_DEFAULT_DB,
             lfe_db: -6.0,
             surround_db: 0.0,
             normalize: false,
@@ -170,7 +172,7 @@ impl MixSettings {
     /// [`MAX_DELAY_MS`], levels within -60 to +12 dB, NaN as 0
     pub fn held(mut self) -> MixSettings {
         let fin = |x: f32, lo: f32, hi: f32, nan: f32| if x.is_finite() { x.clamp(lo, hi) } else { nan };
-        self.center_db = fin(self.center_db, -60.0, 12.0, -3.0);
+        self.center_db = fin(self.center_db, -60.0, 12.0, CENTER_DEFAULT_DB);
         self.lfe_db = fin(self.lfe_db, -60.0, 12.0, -6.0);
         self.surround_db = fin(self.surround_db, -60.0, 12.0, 0.0);
         for row in &mut self.matrix {
@@ -262,17 +264,18 @@ pub fn auto_matrix(present: &[bool; INPUTS], mono: bool, outputs: Outputs, s: &M
             m[3] = half(&m[0], &m[1]);
             return m;
         }
-        // The centre speaker on its own output (not in the fronts); a
-        // source without one: half of each front. The subwoofer gets
-        // everything the fronts and the centre get.
+        // The centre speaker on its own output (not in the fronts), as
+        // loud as the source has it at the default centre level and
+        // louder or quieter with that level; a source without one: half
+        // of each front. The subwoofer gets everything the fronts and the
+        // centre get.
         Outputs::Center => {
             let mut m = auto_matrix(present, mono, Outputs::Front, s);
             let sub = half(&m[0], &m[1]);
             if !mono && present[2] {
-                let c = m[0][2];
                 (m[0][2], m[1][2]) = (0.0, 0.0);
                 m[2] = [0.0; INPUTS];
-                m[2][2] = if c > 0.0 { 1.0 } else { 0.0 };
+                m[2][2] = db_to_lin(s.center_db - CENTER_DEFAULT_DB).min(MAX_GAIN);
             } else {
                 m[2] = half(&m[0], &m[1]);
             }
@@ -755,6 +758,12 @@ mod tests {
         let lanes = five.apply(&[0.0, 0.0, 0.5, 0.0, 0.0, 0.0]);
         assert_eq!(lanes[..3], [0.0, 0.0, 0.5]);
         assert!(lanes[3] > 0.0);
+        // Its level follows the centre level: 6 dB down, half as loud
+        let quiet = MixHandle::default();
+        quiet.set(MixSettings { center_db: CENTER_DEFAULT_DB - 6.0, ..quiet.get() });
+        let five = Mixer::new(quiet, 6, 0x3f, Outputs::Center, rate);
+        let lanes = five.apply(&[0.0, 0.0, 0.5, 0.0, 0.0, 0.0]);
+        assert!(lanes[0] == 0.0 && (lanes[2] - 0.25).abs() < 0.001, "{lanes:?}");
         // Without a subwoofer no lane is filtered
         let mut rear = Mixer::new(MixHandle::default(), 4, 0x33, Outputs::Rear, rate);
         let low = tone_peaks(&mut rear, 30.0, rate);

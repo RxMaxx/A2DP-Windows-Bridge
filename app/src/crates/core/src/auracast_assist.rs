@@ -55,8 +55,13 @@ pub struct Job {
     pub leave: bool,
 }
 
-/// With [`Job::leave`]: how long a receiver plays before its link closes
+/// With [`Job::leave`]: how long a receiver plays all the BIS it was asked
+/// before its link closes
 const LEAVE_AFTER: Duration = Duration::from_secs(3);
+/// With [`Job::leave`]: how long a receiver that reports other BIS than
+/// those asked (some report BIS 1, 2 whatever is asked) plays before its
+/// link closes
+const LEAVE_AFTER_OTHER_BIS: Duration = Duration::from_secs(10);
 
 /// An output of a layout by the name the API gives it: "FL" (also "L"),
 /// "FR" ("R"), "RL", "RR", "SUBL" / "SUBR" (a 2.1 broadcast's subwoofer),
@@ -527,6 +532,12 @@ fn synced_bis(s: &bass::ReceiveState) -> Vec<u8> {
     v
 }
 
+/// The receiver reports every BIS it was asked (`asked` empty: it picks,
+/// so any)
+fn plays_all_asked(asked: &[u8], synced: &[u8]) -> bool {
+    !synced.is_empty() && asked.iter().all(|b| synced.contains(b))
+}
+
 /// One receiver from connection to stop (see the module's description)
 fn assist(
     host: &BtHost,
@@ -575,6 +586,10 @@ fn assist(
     let mut code_sent = false;
     let mut seen_groups = false;
     let mut playing_since: Option<Instant> = None;
+    // Playing every BIS asked (not only the first of a stereo pair)
+    let mut all_asked = false;
+    // [`Job::leave`]: the link is closed, the receiver plays on
+    let mut left = false;
     while !stopped() {
         let mut idle = true;
         for (h, rx) in &link.watches {
@@ -602,6 +617,7 @@ fn assist(
                 } else if playing_since.is_none() {
                     playing_since = Some(Instant::now());
                 }
+                all_asked = plays_all_asked(&job.bis, &bis);
                 set_bis(i, bis);
                 set_phase(i, phase, detail);
                 if s.big_encryption == 1 && !code_sent {
@@ -620,11 +636,12 @@ fn assist(
                 }
             }
         }
-        if job.leave && playing_since.is_some_and(|t| t.elapsed() >= LEAVE_AFTER) {
+        let wait = if all_asked { LEAVE_AFTER } else { LEAVE_AFTER_OTHER_BIS };
+        if job.leave && !left && playing_since.is_some_and(|t| t.elapsed() >= wait) {
             out(&format!("Assistant {who}: it plays; closing the link (the receiver keeps the broadcast)"));
             set_phase(i, Phase::Playing, "link closed");
             host.le_disconnect(id);
-            return;
+            left = true;
         }
         // The broadcast gone (stopped elsewhere): nothing left to play
         let up = !host.le_broadcast_groups().is_empty();
@@ -636,6 +653,13 @@ fn assist(
         if idle {
             std::thread::sleep(Duration::from_millis(100));
         }
+    }
+    if left {
+        // No link to take the source off through: the receiver drops the
+        // broadcast by itself once it is gone
+        set_bis(i, Vec::new());
+        set_phase(i, Phase::Done, "link closed");
+        return;
     }
     if let Some(sid) = source_id {
         out(&format!("Assistant {who}: taking the source off the receiver"));
@@ -674,6 +698,18 @@ mod tests {
         assert!(job_for(BroadcastLayout::Stereo, "A", "", &ch(&["RL"]), None).is_err());
         assert!(job_for(BroadcastLayout::Stereo, "A", "", &ch(&["X"]), None).is_err());
         assert_eq!(job_for(BroadcastLayout::Mono, "A", "", &ch(&["M"]), None).unwrap().bis, [1]);
+    }
+
+    #[test]
+    fn a_receiver_plays_all_it_was_asked_once_each_bis_is_reported() {
+        // A stereo receiver that has only its first BIS yet
+        assert!(!plays_all_asked(&[3, 4], &[3]));
+        assert!(plays_all_asked(&[3, 4], &[3, 4]));
+        // One that reports BIS 1, 2 whatever is asked
+        assert!(!plays_all_asked(&[3, 4], &[1, 2]));
+        // Left to pick: any BIS, but one
+        assert!(plays_all_asked(&[], &[1]));
+        assert!(!plays_all_asked(&[], &[]));
     }
 
     #[test]

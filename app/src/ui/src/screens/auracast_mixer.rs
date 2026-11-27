@@ -506,7 +506,8 @@ impl AuracastMixer {
                     ),
             )
             .children(output_names.iter().enumerate().map(|(r, out)| {
-                let row_on = r < 2 || st.rear;
+                // A mono subwoofer leaves the third output unused
+                let row_on = (r < 2 || st.rear) && !(r == 2 && st.sub == AuracastSub::Mono);
                 let cells = INPUT_NAMES.iter().enumerate().map(|(c, inp)| {
                     let on = self.cell(r, c) != 0.;
                     let input = Input::new(&self.input(MixField::Cell(r, c)))
