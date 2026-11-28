@@ -131,9 +131,8 @@ pub struct CoreState {
     /// The broadcast's name of the session starting (StreamStatus.broadcast)
     starting_broadcast: Mutex<Option<String>>,
     /// The last stream.start_broadcast that started (auracast.last_start),
-    /// read from auracast_last.json once (the outer None: not read yet).
-    /// The file has no Broadcast_Code: that is kept here only, until the
-    /// core ends
+    /// read from its files once (the outer None: not read yet; see
+    /// bluecaster_core::auracast_last)
     last_broadcast: Mutex<Option<Option<Method>>>,
     /// auracast.receivers' devices as read last, and when
     receiver_candidates: Mutex<Option<(Instant, Vec<ipc::AuracastReceiverCandidate>)>>,
@@ -2442,29 +2441,18 @@ impl CoreState {
         self.service.config_dir().to_path_buf()
     }
 
-    /// The last broadcast started (read from its file the first time),
-    /// changed by `f`; saved again when it changed, without its
-    /// Broadcast_Code (a password is not written to a file as it is)
+    /// The last broadcast started (read from its files the first time),
+    /// changed by `f`; saved again when it changed (its Broadcast_Code
+    /// encrypted, in a file of its own)
     fn remember_broadcast(&self, f: impl FnOnce(&mut Option<Method>)) {
-        let path = bluecaster_core::paths::auracast_last_file(&self.config_dir());
+        let config = self.config_dir();
         let mut slot = self.last_broadcast.lock().unwrap_or_else(|e| e.into_inner());
-        let last = slot.get_or_insert_with(|| {
-            let text = std::fs::read_to_string(&path).ok()?;
-            serde_json::from_str::<Method>(&text)
-                .inspect_err(|e| tracing::warn!("Auracast: last broadcast not read ({e})"))
-                .ok()
-                .filter(|m| matches!(m, Method::StreamStartBroadcast { .. }))
-        });
+        let last = slot.get_or_insert_with(|| bluecaster_core::auracast_last::load(&config));
         let before = last.clone();
         f(last);
         if *last != before
-            && let Some(mut m) = last.clone()
-            && let Err(e) = {
-                if let Method::StreamStartBroadcast { code, .. } = &mut m {
-                    *code = None;
-                }
-                serde_json::to_string_pretty(&m).map_err(std::io::Error::other).and_then(|t| std::fs::write(&path, t))
-            }
+            && let Some(m) = last.as_ref()
+            && let Err(e) = bluecaster_core::auracast_last::save(&config, m)
         {
             tracing::warn!("Auracast: last broadcast not saved ({e})");
         }
