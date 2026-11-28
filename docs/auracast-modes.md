@@ -296,8 +296,9 @@ Any mode can be encrypted. Nothing about it depends on the layout.
 - With **Disconnect once playing** the code is sent before the link
   closes. A receiver that loses the broadcast later cannot be given the
   code again.
-- The code is stored in plain text in `auracast_last.json` (the restored
-  Auracast form) in the configuration folder.
+- The code is not written to `auracast_last.json` (the restored Auracast
+  form): after BlueCaster restarts, the form comes back without the
+  password, and it has to be typed again.
 
 ## Test knobs
 

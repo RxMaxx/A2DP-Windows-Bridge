@@ -742,6 +742,8 @@ fn assist(
                     if let Err(e) = host.le_write(id, cp, bass::add_source(&source)) {
                         out(&format!("Assistant {who}: Add Source refused (0x{e:02X})"));
                     }
+                    // A new source: it asks for the Broadcast_Code again
+                    code_sent = false;
                 }
             }
         }

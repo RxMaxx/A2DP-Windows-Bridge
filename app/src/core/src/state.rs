@@ -131,7 +131,9 @@ pub struct CoreState {
     /// The broadcast's name of the session starting (StreamStatus.broadcast)
     starting_broadcast: Mutex<Option<String>>,
     /// The last stream.start_broadcast that started (auracast.last_start),
-    /// read from auracast_last.json once (the outer None: not read yet)
+    /// read from auracast_last.json once (the outer None: not read yet).
+    /// The file has no Broadcast_Code: that is kept here only, until the
+    /// core ends
     last_broadcast: Mutex<Option<Option<Method>>>,
     /// auracast.receivers' devices as read last, and when
     receiver_candidates: Mutex<Option<(Instant, Vec<ipc::AuracastReceiverCandidate>)>>,
@@ -2441,7 +2443,8 @@ impl CoreState {
     }
 
     /// The last broadcast started (read from its file the first time),
-    /// changed by `f`; saved again when it changed
+    /// changed by `f`; saved again when it changed, without its
+    /// Broadcast_Code (a password is not written to a file as it is)
     fn remember_broadcast(&self, f: impl FnOnce(&mut Option<Method>)) {
         let path = bluecaster_core::paths::auracast_last_file(&self.config_dir());
         let mut slot = self.last_broadcast.lock().unwrap_or_else(|e| e.into_inner());
@@ -2455,9 +2458,13 @@ impl CoreState {
         let before = last.clone();
         f(last);
         if *last != before
-            && let Some(m) = last.as_ref()
-            && let Err(e) =
-                serde_json::to_string_pretty(m).map_err(std::io::Error::other).and_then(|t| std::fs::write(&path, t))
+            && let Some(mut m) = last.clone()
+            && let Err(e) = {
+                if let Method::StreamStartBroadcast { code, .. } = &mut m {
+                    *code = None;
+                }
+                serde_json::to_string_pretty(&m).map_err(std::io::Error::other).and_then(|t| std::fs::write(&path, t))
+            }
         {
             tracing::warn!("Auracast: last broadcast not saved ({e})");
         }

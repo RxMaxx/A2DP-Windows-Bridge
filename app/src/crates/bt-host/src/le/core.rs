@@ -1625,10 +1625,15 @@ impl<'a> LeCtx<'a> {
         // still its services (crate::le::gatt_cache); not of a keyboard or
         // mouse, whose address would be in that file
         let cache_file = self.core.gatt_cache_file.clone().filter(|_| !hid);
+        // Service Changed alone tells a bonded device of changes made
+        // while it was away; one filed under its public address only (SM
+        // learned no identity) may not be bonded, so its kept services
+        // count only with a Database Hash to check them against
+        let bonded = self.device(id).is_some_and(|d| d.identity_known);
         let cached = cache_file.clone().zip(d_identity(self, id)).and_then(|(file, (addr, kind))| {
             let db = super::gatt_cache::load(&file, &addr)?;
             (db.address_type == kind
-                && (db.hash.is_some() || super::gatt_cache::service_changed(&db.services).is_some()))
+                && (db.hash.is_some() || (bonded && super::gatt_cache::service_changed(&db.services).is_some())))
             .then_some((file, db))
         });
         let hash_handle = cached.as_ref().and_then(|(_, db)| super::gatt_cache::hash_handle(&db.services));

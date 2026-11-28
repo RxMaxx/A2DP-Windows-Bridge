@@ -45,6 +45,9 @@ pub(crate) const MAX_RECREATES: u32 = 3;
 /// holds the one just terminated: asked again this often, this many times
 const CREATE_RETRY_MS: u32 = 20;
 const CREATE_TRIES: u32 = 50;
+/// BIGs created again that are not all up after this long: the stream is
+/// lost (nothing waits for them as a start does)
+const RECREATE_TIMEOUT_MS: u32 = 5000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum State {
@@ -86,7 +89,8 @@ pub(crate) struct Broadcast {
     /// Stops waiting for the BIGs to end
     stopped: Vec<LeDone>,
     terminate_timer: Option<LeTimerId>,
-    /// LE Create BIG asked again after a refusal (BIGs set up again)
+    /// BIGs set up again: LE Create BIG asked again after a refusal, then
+    /// the wait for them to come up
     retry_timer: Option<LeTimerId>,
 }
 
@@ -393,6 +397,22 @@ impl LeCtx<'_> {
         if !refused {
             if tries > 0 {
                 tracing::debug!("Auracast: LE Create BIG taken after {tries} refusal(s)");
+            }
+            // All asked: up within RECREATE_TIMEOUT_MS, or the stream is lost
+            let Some(n) = self.core.broadcast.as_ref().map(|b| b.recreates) else { return };
+            let timer = self.run_after(
+                RECREATE_TIMEOUT_MS,
+                Box::new(move |ctx| {
+                    let Some(b) = ctx.core.broadcast.as_mut() else { return };
+                    if b.recreates != n || b.state != State::Creating {
+                        return;
+                    }
+                    b.retry_timer = None;
+                    ctx.fail_start("no answer to LE Create BIG");
+                }),
+            );
+            if let Some(b) = self.core.broadcast.as_mut() {
+                b.retry_timer = Some(timer);
             }
             return;
         }

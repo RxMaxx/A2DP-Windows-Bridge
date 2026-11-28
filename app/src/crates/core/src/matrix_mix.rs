@@ -120,9 +120,17 @@ fn live_slot(target: Target) -> &'static Mutex<Option<Live>> {
     }
 }
 
-/// The stream running with the mixer (None: it ended)
+/// The stream running with the mixer (None: it ended, and solo and mute
+/// with it: a listening test does not silence the next stream)
 pub fn set_live(target: Target, live: Option<Live>) {
     *live_slot(target).lock().unwrap_or_else(|e| e.into_inner()) = live;
+    if live.is_none() {
+        let h = handle(target);
+        let s = h.get();
+        if s.monitoring() {
+            h.set(s.unmonitored());
+        }
+    }
 }
 
 fn live(target: Target) -> Option<Live> {
@@ -290,7 +298,7 @@ pub fn state(
 }
 
 /// New settings: heard at once while the stream runs with the mixer, and
-/// saved (but for solo and mute, which last until the program ends)
+/// saved (but for solo and mute, which last until the stream ends)
 pub fn set(target: Target, dir: &Path, m: &AuracastMix) -> std::io::Result<()> {
     let s = settings(m);
     handle(target).set(s);
